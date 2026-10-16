@@ -443,7 +443,8 @@ function groupByAthlete(acts) {
       if (sum >= 0.05) p.total = `${sum.toFixed(1)} ${[...units][0]}`;
     }
   }
-  people.sort((a, b) => b.latest - a.latest);
+  // People still waiting for your kudos first, then newest activity first within each group.
+  people.sort((a, b) => (a.kudoed - b.kudoed) || (b.latest - a.latest));
   return people;
 }
 
@@ -970,8 +971,11 @@ function renderDigest({ dayStart, daysBack, scan, people, count }) {
   const df = new DateFormatter(); df.dateFormat = 'EEEE, d MMMM';
   const summary = summaryText(people, count);
   const open = people.filter(p => !p.kudoed && p.primary.canKudo).length;
+  const waiting = people.filter(p => !p.kudoed), given = people.filter(p => p.kudoed);
+  const section = (title, list, cls) => list.length
+    ? `<h2 class="sec ${cls}">${title}<span>${list.length}</span></h2>${list.map(personHtml).join('')}` : '';
   const body = people.length
-    ? people.map(personHtml).join('')
+    ? section('Waiting for your kudos', waiting, 'todo') + section('Kudos given', given, 'given')
     : `<div class="center">Nobody you follow has posted ${daysBack ? 'on that day' : 'yet today'}.<br><br><button class="ghost" data-act="refresh">Check again</button>${scanNote(scan)}</div>`;
   return page(`
     <div class="top">
@@ -1000,7 +1004,7 @@ function personHtml(p) {
   const btn = p.primary.canKudo
     ? `<button class="kudo person-k${p.kudoed ? ' done' : ''}" data-kudo="${esc(p.primary.id)}" data-pid="${pid}"${p.kudoed ? ' disabled' : ''}>${p.kudoed ? '✓ Kudos given' : '👍 Kudos'}</button>`
     : '';
-  return `<section class="person" data-pid="${pid}">
+  return `<section class="person" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
     <header>${avatar}<div class="pn"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span>${sub}</span></div>${btn}</header>
     ${p.acts.map(a => actHtml(a, p)).join('')}
   </section>`;
@@ -1099,6 +1103,10 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .day{flex:none;background:var(--card);color:var(--fg);padding:7px 14px;font-weight:600}
 .day.on{background:var(--fg);color:var(--bg)}
 .scan{margin:28px auto 0;max-width:34em;font-size:12px;line-height:1.5;color:var(--mut);word-break:break-word}
+.sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--mut);margin:18px 6px 10px}
+.sec:first-of-type{margin-top:4px}
+.sec span{background:var(--soft);color:var(--fg);border-radius:999px;padding:1px 9px;font-size:12px;font-variant-numeric:tabular-nums}
+.sec.todo span{background:var(--accent);color:#fff}
 .loadst{display:none;color:var(--mut);font-size:13px;margin:-6px 4px 12px}
 body.loading .loadst{display:block}
 .clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
@@ -1192,6 +1200,10 @@ function markKudo(id,pid){
   document.querySelectorAll('[data-kudo="'+CSS.escape(id)+'"]').forEach(function(b){ b.classList.add('done'); b.disabled=true; b.textContent=b.classList.contains('small')?'✓':'✓ Kudos given'; });
   var kc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .kc'); if(kc) kc.textContent=(+kc.textContent||0)+1;
   var pb=document.querySelector('.person-k[data-pid="'+CSS.escape(pid)+'"]'); if(pb){ pb.classList.add('done'); pb.disabled=true; pb.textContent='✓ Kudos given'; }
+  var sec=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]');
+  if(sec&&!sec.dataset.counted){ sec.dataset.counted='1';
+    var t=document.querySelector('.sec.todo span'); if(t) t.textContent=Math.max(0,(+t.textContent||0)-1);
+    var g=document.querySelector('.sec.given span'); if(g) g.textContent=(+g.textContent||0)+1; }
 }
 function kudo(btn){
   if(btn.disabled) return;
