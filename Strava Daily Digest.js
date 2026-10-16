@@ -1,0 +1,1312 @@
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: deep-orange; icon-glyph: running;
+
+/*
+ * Strava Daily Digest (Scriptable)
+ * ---------------------------------
+ * Today's activities from the people you follow, grouped by athlete:
+ * distance, pace, HR, PRs/achievements, photos, plus one-tap kudos and comments.
+ *
+ * How it works: the official Strava API does NOT expose the "following" feed and
+ * does not allow giving kudos or posting comments. So this script uses your own
+ * logged-in strava.com web session inside a hidden WebView (the same requests the
+ * Strava website makes). Unofficial = it can break when Strava changes its site.
+ *
+ * First run: you'll be asked to log in to Strava once (email + password or email code).
+ * Run with ?days=1 (URL scheme / Shortcuts) to see yesterday.
+ */
+
+const CONFIG = {
+  DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ...
+  DAYS_IN_PICKER: 7,       // how many days the date bar offers (today + 6 earlier)
+  ATHLETE_ID: null,        // your id from strava.com/athletes/<ID>; set only if auto-detect fails
+  INCLUDE_ME: false,       // include your own activities
+  MAX_PAGES: 15,           // feed pages to scan for today (≈20 entries each)
+  EXTRA_PAGES_PER_DAY: 10, // added for every day further back
+  ENRICH_DETAILS: true,    // open each activity page to find HR / PRs / photos the feed omits
+  ENRICH_CONCURRENCY: 4,
+  OPEN_IN: 'ask',          // ↗ on an activity: 'ask' (choose each time), 'here' (Strava page inside the digest), 'app'
+  AI: {                    // ✨ comment suggestions via the OpenAI API (your own key, stored in the iOS Keychain)
+    MODEL: 'gpt-5.4-mini',
+    REASONING: 'low',      // 'low' keeps it quick; raise for cleverer jokes
+    LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
+    SUGGESTIONS: 3,
+  },
+  DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
+};
+
+const STRAVA = 'https://www.strava.com';
+const SCHEME = 'strava-digest://';
+
+const qp = (args && args.queryParameters) || {};
+if (qp.days) CONFIG.DAYS_BACK = parseInt(qp.days, 10) || 0;
+
+
+// ───────────────────────────── main flow ─────────────────────────────
+
+const KC_ATHLETE = 'strava-digest-athlete-id';
+const KC_AI_KEY = 'strava-digest-openai-key';
+const KC_AI_LANG = 'strava-digest-ai-lang';
+const STATE = { aiLang: CONFIG.AI.LANGUAGES[0][1] };
+const MARGIN = 3 * 3600 * 1000;      // read a bit past midnight: uploads and edits arrive late
+const sleep = ms => new Promise(r => Timer.schedule(ms, false, r));
+
+function dayBounds(daysBack) {
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  dayStart.setDate(dayStart.getDate() - daysBack);
+  const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+  return { dayStart, dayEnd };
+}
+
+async function main() {
+  const sv = new WebView();          // hidden: feed, kudos (sits on a tiny strava.com page)
+  const sx = makeSx(sv);
+  let ev = null, ex = null;          // hidden: activity details, so kudos never wait behind them
+  let cv = null, cx = null;          // hidden: posting comments through Strava's own page
+  const ui = new WebView();          // the digest you see
+
+  if (Keychain.contains(KC_AI_LANG)) STATE.aiLang = Keychain.get(KC_AI_LANG);
+  let feed = null, daysBack = Math.max(0, CONFIG.DAYS_BACK), viewToken = 0, closed = false;
+  const details = new Map();         // activity id -> details found on its page (kept for the session)
+
+  let viewing = false, savedScroll = 0;   // true while a Strava activity page is shown inside the digest
+  ui.shouldAllowRequest = (req) => {
+    const url = (req && req.url) || '';
+    if (url.startsWith(SCHEME)) { handleAction(url).catch(e => console.error(e)); return false; }
+    if (/^strava:/i.test(url)) return false;          // the Strava page trying to bounce to the app
+    if (viewing && /strava\.com/.test(url)) [1500, 4000].forEach(ms => Timer.schedule(ms, false, addBackButton));
+    return true;
+  };
+
+  // Floating "Back to digest" button on Strava's own page (sized for its desktop layout).
+  function addBackButton() {
+    if (!viewing) return;
+    ui.evaluateJavaScript(`(function(){
+      if (document.getElementById('sd-back') || !document.body) return;
+      var k = Math.max(1, window.innerWidth / (screen.width || 390));
+      var b = document.createElement('button');
+      b.id = 'sd-back'; b.textContent = '‹ Back to digest';
+      b.style.cssText = 'position:fixed;z-index:2147483647;left:50%;transform:translateX(-50%);border:0;border-radius:999px;background:#fc4c02;color:#fff;font-family:-apple-system,system-ui,sans-serif;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.35)';
+      b.style.bottom = (20 * k) + 'px'; b.style.fontSize = (17 * k) + 'px'; b.style.padding = (13 * k) + 'px ' + (24 * k) + 'px';
+      b.onclick = function () { location.href = '${SCHEME}back'; };
+      document.body.appendChild(b);
+    })(); 'ok'`).catch(() => {});
+  }
+
+  async function viewHere(id) {
+    viewing = true;
+    await openStrava(ui, `/activities/${encodeURIComponent(id)}`);
+    addBackButton();
+  }
+  const js = (code) => ui.evaluateJavaScript(`${code}; 'ok'`).catch(() => {});
+  const status = (t) => js(`window.setStatus && window.setStatus(${JSON.stringify(t)})`);
+
+  // Show the window straight away; everything else loads behind it.
+  await ui.loadHTML(shell('Opening your feed'));
+  const shown = ui.present(true);
+  shown.then(() => { closed = true; });
+
+  async function startSession() {
+    await sv.loadURL(`${STRAVA}/robots.txt`);
+    // Fast path: remembered athlete id + one feed request (also proves we're logged in).
+    let me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
+    let first = me ? await firstPage(me) : null;
+    if (first) return { me, first };
+
+    status('Checking your Strava login');
+    if (!(await authInfo(sx)).loggedIn) {
+      await ui.loadHTML(page(`<div class="center"><h1>Log in to Strava</h1><p>Use email and password or the emailed code. Google sign-in usually doesn't work here.<br>The digest opens by itself once you're logged in.</p><br><button data-act="login">Log in to Strava</button></div>`));
+      while (!closed && !(await authInfo(sx)).loggedIn) await sleep(2500);
+      if (closed) return null;
+      await ui.loadHTML(shell('Logged in. Loading your feed'));
+    }
+    me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : await sx('__SD.athleteId()');
+    if (!me) throw new Error('Could not detect your athlete ID. Open your Strava profile, copy the number from strava.com/athletes/<ID>, and set CONFIG.ATHLETE_ID at the top of the script.');
+    first = await firstPage(me);
+    if (!first) throw new Error("You're logged in, but Strava's feed didn't answer. Tap Try again.");
+    if (!CONFIG.ATHLETE_ID) Keychain.set(KC_ATHLETE, me);
+    return { me, first };
+  }
+
+  async function firstPage(me) {
+    try { return await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000); }
+    catch (e) { console.log('Feed request failed: ' + e.message); return null; }
+  }
+
+  // Load only what the chosen day needs, render it, then fill in details card by card.
+  async function showDay(force) {
+    const token = ++viewToken;
+    const { dayStart, dayEnd } = dayBounds(daysBack);
+    try {
+      if (force) await feed.restart(status);
+      if (!feed.covers(+dayStart)) await feed.readBackTo(+dayStart, status, () => token !== viewToken);
+      if (token !== viewToken || closed) return;
+      const acts = feed.day(+dayStart, +dayEnd);
+      acts.forEach(a => { if (details.has(a.id)) mergeDetails(a, details.get(a.id)); derive(a); });
+      viewing = false;
+      await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length }));
+      enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
+    } catch (e) {
+      if (token !== viewToken) return;
+      await ui.loadHTML(page(`${daysNav(daysBack)}<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="refresh">Try again</button></div>`));
+    }
+  }
+
+  async function enrich(acts, token, dayStart, dayEnd) {
+    if (!CONFIG.ENRICH_DETAILS) return;
+    const todo = acts.filter(a => !details.has(a.id)).map(a => a.id);
+    if (!todo.length) return;
+    if (!ev) { ev = new WebView(); await ev.loadURL(`${STRAVA}/robots.txt`); ex = makeSx(ev); }
+    for (let i = 0; i < todo.length; i += CONFIG.ENRICH_CONCURRENCY) {
+      if (token !== viewToken || closed) return;
+      const chunk = todo.slice(i, i + CONFIG.ENRICH_CONCURRENCY);
+      let det = {};
+      try { det = await ex(`__SD.enrich(${JSON.stringify(chunk)}, ${chunk.length})`, 30000); } catch (e) { console.warn(e.message); }
+      chunk.forEach(id => details.set(id, det[id] || {}));
+      if (token !== viewToken || closed) return;
+      const touched = new Set();
+      chunk.forEach(id => { const a = feed.get(id); if (a) { mergeDetails(a, details.get(id)); derive(a); touched.add(personKey(a)); } });
+      const dayActs = feed.day(dayStart, dayEnd), people = groupByAthlete(dayActs);
+      for (const p of people) if (touched.has(p.id)) await js(`window.__patchPerson(${JSON.stringify(p.id)}, ${JSON.stringify(personHtml(p))})`);
+      await js(`window.__patchSummary(${JSON.stringify(summaryText(people, dayActs.length))})`);
+    }
+  }
+
+  async function handleAction(url) {
+    const [rawHead, qs = ''] = url.slice(SCHEME.length).split('?');
+    const head = rawHead.replace(/\/$/, '');
+    const p = {};
+    qs.split('&').forEach(kv => {
+      if (!kv) return;
+      const i = kv.indexOf('=');
+      if (i < 0) p[kv] = ''; else p[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
+    });
+    if (head === 'login') { await openStrava(ui, '/login'); return; }
+    if (head === 'view') { savedScroll = +p.y || 0; await viewHere(p.id); return; }
+    if (head === 'back') {
+      if (!feed) return;
+      await showDay(false);
+      await js(`window.scrollTo(0, ${savedScroll})`);
+      return;
+    }
+    if (head === 'setlang') { STATE.aiLang = p.lang; Keychain.set(KC_AI_LANG, p.lang); return; }
+    if (head === 'retry') { await boot(); return; }
+    if (!feed) return;
+    if (head === 'refresh') { await showDay(true); return; }
+    if (head === 'day') { daysBack = Math.max(0, parseInt(p.back, 10) || 0); await showDay(false); return; }
+    let ok = false, msg = '';
+    try {
+      if (head === 'kudo') {
+        const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, 20000); ok = !!r.ok; msg = r.error || '';
+        if (ok) feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; });
+      } else if (head === 'comment') {
+        if (!cv) { cv = new WebView(); cx = makeSx(cv); }
+        await openStrava(cv, `/activities/${encodeURIComponent(p.id)}`);
+        const r = await cx(`__SD.commentViaUI(${JSON.stringify(p.text || '')})`, 30000);
+        ok = !!r.ok; msg = r.error || '';
+        if (r.via) console.log('Comment sent via ' + r.via);
+        if (ok) feed.update(p.id, a => { a.comments++; });
+      } else if (head === 'setkey') {
+        const key = String(p.key || '').trim();
+        if (!/^sk-/.test(key)) msg = 'That does not look like an OpenAI key (it starts with sk-).';
+        else { Keychain.set(KC_AI_KEY, key); ok = true; }
+      } else if (head === 'suggest') {
+        const a = feed.get(p.id);
+        if (!a) msg = 'Activity not found.';
+        else {
+          const r = await aiSuggest(a, p.lang || STATE.aiLang, p.hint || '');
+          if (r.needKey) msg = 'NEED_KEY';
+          else { ok = true; msg = JSON.stringify(r.comments); }
+        }
+      } else if (head === 'activity') {
+        Safari.open(`strava://activities/${p.id}`);
+        ok = true;
+      } else if (head === 'athlete') {
+        Safari.open(`strava://athletes/${p.id}`);
+        ok = true;
+      } else if (head === 'open') {
+        Safari.open(p.url); ok = true;
+      }
+    } catch (e) { msg = String(e.message || e); }
+    await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+  }
+
+  async function boot() {
+    try {
+      const session = await startSession();
+      if (!session) return;
+      feed = makeFeed(sx, session.me, session.first);
+      await showDay(false);
+    } catch (e) {
+      await ui.loadHTML(page(`<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="retry">Try again</button></div>`));
+    }
+  }
+
+  await boot();
+  await shown;
+}
+
+// ─────────────── ✨ comment suggestions (OpenAI Responses API) ───────────────
+
+function activityFacts(a) {
+  const first = String(a.athleteName || '').split(/\s+/)[0];
+  return {
+    friend_first_name: first,
+    activity_title: a.name,
+    sport: a.type,
+    date: a.ts ? new Date(a.ts).toISOString().slice(0, 10) : null,
+    start_time_local: a.clock ? fmtClock(a.clock) : null,
+    early_start_club: early(a) ? early(a).label : null,
+    location: a.location || null,
+    stats: Object.fromEntries(a.stats.map(s => [s.label, s.value])),
+    heart_rate: a.hr || null,
+    personal_records: a.ach.prs || 0,
+    achievements: a.ach.total || 0,
+    achievement_details: a.ach.list.filter(x => x.name).slice(0, 5).map(x => [x.type, x.name].filter(Boolean).join(': ')),
+    description: a.description ? a.description.slice(0, 400) : null,
+    photos: a.photos.length,
+    kudos_so_far: a.kudos,
+  };
+}
+
+async function aiSuggest(a, language, hint) {
+  if (!Keychain.contains(KC_AI_KEY)) return { needKey: true };
+  const n = CONFIG.AI.SUGGESTIONS;
+  const instructions = [
+    `You write Strava comments for a friend's workout. Write ${n} different options in ${language}.`,
+    'Each one: a single short sentence (max ~18 words), funny and warm, like a teammate teasing with affection.',
+    'Build the joke on the real details: distance, pace, time, elevation, heart rate, PRs, early start, title, weather in the description.',
+    'Vary the angle between options (one about a number, one about the title or time of day, one hype).',
+    'At most one emoji each. No hashtags. Never mock body, weight, age, or looks. Never invent stats that are not given.',
+    `Address the friend by first name in at most one option.${hint ? ` The user's own draft idea, keep its spirit: "${hint}".` : ''}`,
+  ].join(' ');
+  const req = new Request('https://api.openai.com/v1/responses');
+  req.method = 'POST';
+  req.timeoutInterval = 45;
+  req.headers = { 'Authorization': `Bearer ${Keychain.get(KC_AI_KEY)}`, 'Content-Type': 'application/json' };
+  req.body = JSON.stringify({
+    model: CONFIG.AI.MODEL,
+    instructions,
+    input: JSON.stringify(activityFacts(a)),
+    reasoning: { effort: CONFIG.AI.REASONING },
+    text: { format: { type: 'json_schema', name: 'strava_comments', strict: true, schema: {
+      type: 'object', additionalProperties: false, required: ['comments'],
+      properties: { comments: { type: 'array', items: { type: 'string' } } },
+    } } },
+  });
+  const res = await req.loadJSON();
+  const code = req.response && req.response.statusCode;
+  if (code === 401) { Keychain.remove(KC_AI_KEY); return { needKey: true }; }
+  if (code >= 400 || !res) throw new Error((res && res.error && res.error.message) || `OpenAI answered HTTP ${code}`);
+  let text = res.output_text || '';
+  if (!text && Array.isArray(res.output)) {
+    text = res.output.flatMap(o => o.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('');
+  }
+  let comments = [];
+  try { comments = JSON.parse(text).comments || []; }
+  catch (e) { comments = text.split(/\n+/).map(l => l.replace(/^[-*\d.)\s"]+|"$/g, '').trim()).filter(Boolean); }
+  comments = comments.map(c => String(c).trim()).filter(Boolean).slice(0, n);
+  if (!comments.length) throw new Error('No suggestions came back. Try again.');
+  return { comments };
+}
+
+// Everything read from the feed so far, newest first. Older days continue from where the last read stopped.
+function makeFeed(sx, me, first) {
+  let st;
+  const reset = () => { st = { items: new Map(), next: null, position: null, oldest: null, done: false, stop: '', pages: 0, entries: 0, seenFirst: new Set(), raws: [] }; };
+  const absorb = (r) => {
+    st.pages++; st.entries += r.entryCount || 0;
+    if (r.raw) st.raws.push(r.raw);
+    if (r.firstId != null && st.seenFirst.has(r.firstId)) { st.done = true; st.stop = 'Strava returned the same page again'; return; }
+    if (r.firstId != null) st.seenFirst.add(r.firstId);
+    for (const a of r.items) {
+      if (!a.id || a.id === 'undefined') continue;
+      if (!CONFIG.INCLUDE_ME && a.athleteId === me) continue;
+      derive(a);
+      st.items.set(a.id, a);
+      if (a.ts && (st.oldest == null || a.ts < st.oldest)) st.oldest = a.ts;
+    }
+    if (r.next && !isNaN(+r.next.before)) { const b = +r.next.before; st.position = b > 1e12 ? b : b * 1000; }
+    st.next = r.next || null;
+    if (!st.next) { st.done = true; st.stop = 'Strava has no older pages'; }
+  };
+  reset(); absorb(first);
+
+  return {
+    covers: (dayStart) => st.done || (st.position != null && st.position < dayStart - MARGIN),
+    async readBackTo(dayStart, status, cancelled) {
+      const limit = st.pages + CONFIG.MAX_PAGES + CONFIG.EXTRA_PAGES_PER_DAY * 3;
+      while (!this.covers(dayStart) && st.pages < limit) {
+        if (cancelled()) return;
+        await status(`Reading feed${st.position ? `, back to ${dayLabel(st.position)}` : ''}`);
+        const r = await sx(`__SD.page(${JSON.stringify(me)}, ${JSON.stringify(st.next.before)}, ${JSON.stringify(st.next.cursor)}, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000);
+        absorb(r);
+      }
+      if (!this.covers(dayStart)) st.stop = 'page limit reached';
+      if (CONFIG.DEBUG_DUMP) dump(st.raws);
+    },
+    async restart(status) {
+      await status('Refreshing');
+      const r = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000);
+      reset(); absorb(r);
+    },
+    day: (from, to) => [...st.items.values()].filter(a => a.ts != null && a.ts >= from && a.ts < to),
+    get: (id) => st.items.get(id),
+    update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
+    scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
+  };
+}
+
+// Strava pushes iPhone browsers to the app; a desktop user agent gets the full website.
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15';
+
+async function openStrava(wv, path) {
+  try {
+    const req = new Request(STRAVA + path);
+    req.headers = { 'User-Agent': DESKTOP_UA };
+    await wv.loadRequest(req);
+  } catch (e) {
+    await wv.loadURL(STRAVA + path);
+  }
+}
+
+async function authInfo(sx) {
+  try { return await sx('__SD.auth()', 20000); }
+  catch (e) { return { loggedIn: false, error: String(e.message || e) }; }
+}
+
+// ──────────────────────── data shaping (native) ────────────────────────
+
+const RX = { dist: /dist|atstum/i, time: /time|laik/i, pace: /pace|tempas/i, speed: /speed|greit/i, hr: /heart|bpm|pulsas|\bhr\b/i };
+
+function mergeDetails(a, d) {
+  if (!d || d.error) return;
+  const real = c => c && !(c.h === 0 && c.m === 0);
+  if (!real(a.clock)) a.clock = null;
+  if (real(d.clock) && (!a.clock || d.clock.src > a.clock.src)) a.clock = d.clock;
+  if (!a.hr && d.hr) a.hr = `${d.hr} bpm` + (d.maxHr ? `, max ${d.maxHr}` : '');
+  if (d.prs != null) a.ach.prs = Math.max(a.ach.prs || 0, d.prs);
+  if (d.achievements != null) a.ach.total = Math.max(a.ach.total || 0, d.achievements);
+  if (d.list && d.list.length && !a.ach.list.length) a.ach.list = d.list;
+  if (d.photos && d.photos.length) {
+    const byKey = new Map();
+    [...a.photos, ...d.photos].forEach(u => { const k = photoKey(u); if (!byKey.has(k)) byKey.set(k, u); });
+    a.photos = [...byKey.values()].slice(0, 12);
+  }
+}
+
+function derive(a) {
+  if (a.clock && a.clock.h === 0 && a.clock.m === 0) a.clock = null;
+  const get = rx => (a.stats.find(s => rx.test(s.label)) || {}).value;
+  a.km = parseDist(get(RX.dist));
+  const time = get(RX.time);
+  if (!get(RX.pace) && !get(RX.speed) && a.km && time) {
+    const sec = parseDur(time);
+    if (sec) a.stats.push(/run|walk|hike/i.test(a.type)
+      ? { label: 'Pace', value: `${fmtPace(sec / a.km.value)} /${a.km.unit}` }
+      : { label: 'Speed', value: `${(a.km.value / (sec / 3600)).toFixed(1)} ${a.km.unit}/h` });
+  }
+  if (a.hr && a.stats.some(s => RX.hr.test(s.label + ' ' + s.value))) a.hrInStats = true;
+}
+
+// Early-start badges, keyed by the hour the activity started (athlete's local time).
+const EARLY = {
+  4: { icon: '🦉', label: '4 AM club', cls: 'e4' },
+  5: { icon: '🌙', label: '5 AM club', cls: 'e5' },
+  6: { icon: '🌅', label: '6 AM club', cls: 'e6' },
+};
+const early = a => (a.clock ? EARLY[a.clock.h] : null) || null;
+const fmtClock = c => `${String(c.h).padStart(2, '0')}:${String(c.m).padStart(2, '0')}`;
+
+const personKey = a => a.athleteId || a.athleteName || 'unknown';
+
+function groupByAthlete(acts) {
+  const map = new Map();
+  for (const a of acts) {
+    const k = personKey(a);
+    if (!map.has(k)) map.set(k, { id: k, name: a.athleteName || 'Unknown athlete', avatar: a.avatar, acts: [] });
+    const p = map.get(k); p.acts.push(a);
+    if (!p.avatar && a.avatar) p.avatar = a.avatar;
+  }
+  const score = a => (early(a) ? 500 : 0) + (a.ach.prs || 0) * 1000 + (a.ach.total || 0) * 10 + (a.km ? a.km.value : 0) + a.photos.length * 0.5;
+  const people = [...map.values()];
+  for (const p of people) {
+    p.acts.sort((x, y) => (x.start || 0) - (y.start || 0));
+    p.primary = p.acts.find(a => a.hasKudoed) || [...p.acts].sort((x, y) => score(y) - score(x))[0];
+    p.kudoed = p.acts.some(a => a.hasKudoed);
+    p.early = p.acts.map(early).filter(Boolean).sort((x, y) => x.cls.localeCompare(y.cls))[0] || null;
+    p.latest = Math.max(...p.acts.map(a => a.start || 0));
+    const units = new Set(p.acts.filter(a => a.km).map(a => a.km.unit));
+    if (units.size === 1) {
+      const sum = p.acts.reduce((n, a) => n + (a.km ? a.km.value : 0), 0);
+      if (sum >= 0.05) p.total = `${sum.toFixed(1)} ${[...units][0]}`;
+    }
+  }
+  people.sort((a, b) => b.latest - a.latest);
+  return people;
+}
+
+function parseDist(s) {
+  if (!s) return null;
+  let t = String(s).replace(/(\d)[,\u00a0\u202f ](?=\d{3}\b)/g, '$1');   // thousands separators: 2,100 m / 2 100 m
+  t = t.replace(/(\d),(\d)/, '$1.$2');                                     // decimal comma: 10,02 km
+  const m = t.match(/([\d.]+)\s*(km|mi|m)\b/i);
+  if (!m) return null;
+  let v = +m[1], u = m[2].toLowerCase();
+  if (u === 'm') { v /= 1000; u = 'km'; }
+  return v > 0 ? { value: v, unit: u } : null;
+}
+
+function parseDur(s) {
+  s = String(s || '').trim();
+  const m = s.match(/^(\d+):(\d{2})(?::(\d{2}))?$/);
+  if (m) return m[3] != null ? +m[1] * 3600 + +m[2] * 60 + +m[3] : +m[1] * 60 + +m[2];
+  let t = 0, hit = false;
+  s.replace(/(\d+)\s*(h|min|m|s)\b/gi, (_, n, u) => { hit = true; u = u.toLowerCase(); t += +n * (u === 'h' ? 3600 : u === 's' ? 1 : 60); });
+  return hit ? t : null;
+}
+
+function fmtPace(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; }
+function photoKey(u) { return String(u).replace(/-\d+x\d+(?=\.\w+)/, '').replace(/\?.*$/, ''); }
+
+function dump(raws) {
+  try {
+    let fm; try { fm = FileManager.iCloud(); } catch (e) { fm = FileManager.local(); }
+    const path = fm.joinPath(fm.documentsDirectory(), 'strava-feed-debug.json');
+    fm.writeString(path, JSON.stringify(raws, null, 2));
+    console.log('Raw feed saved to ' + path);
+  } catch (e) { console.warn('Dump failed: ' + e); }
+}
+
+// ───────────────── bridge to the strava.com session ─────────────────
+
+function makeSx(sv) {
+  let chain = Promise.resolve();
+  const run = async (expr) => {
+    const js = `(${stravaLib.toString()})();
+(async () => {
+  try { const r = await (${expr}); completion(JSON.stringify(r === undefined ? null : r)); }
+  catch (e) { completion(JSON.stringify({ __error: String((e && e.message) || e) })); }
+})();
+'pending';`; // last value must be a plain string: WebKit can't return a Promise to Scriptable
+    const raw = await sv.evaluateJavaScript(js, true);
+    const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (res && res.__error) throw new Error(res.__error);
+    return res;
+  };
+  const withTimeout = (p, ms) => !ms ? p : Promise.race([p, new Promise((_, rej) =>
+    Timer.schedule(ms, false, () => rej(new Error('Strava took too long to respond. Check the activity in Strava before trying again.'))))]);
+  // serialize calls so concurrent taps never share one callback
+  return (expr, ms) => { const p = chain.then(() => withTimeout(run(expr), ms)); chain = p.catch(() => {}); return p; };
+}
+
+// Injected into strava.com. Must be self-contained (no outer variables).
+function stravaLib() {
+  if (window.__SD) return;
+  const SD = {};
+  const XHR = { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json, text/javascript, */*; q=0.01' };
+
+  SD.state = () => ({ path: location.pathname, csrf: !!document.querySelector('meta[name="csrf-token"]') });
+
+  // Pages that need a login; logged-out requests get redirected to /login.
+  SD.PROBES = ['/settings/profile', '/dashboard', '/athlete/training'];
+
+  SD.get = async (path) => {
+    const r = await fetch(path, { credentials: 'include', headers: { 'Accept': 'text/html' } });
+    return { url: r.url, status: r.status, html: await r.text() };
+  };
+
+  SD.auth = async () => {
+    const info = { page: location.pathname, title: document.title.slice(0, 60), loggedIn: false, probes: [] };
+    for (const p of SD.PROBES) {
+      try {
+        const r = await SD.get(p);
+        const toLogin = /\/(login|session|register|signup)/i.test(r.url);
+        info.probes.push(`${p} → ${r.status} ${r.url.replace(/^https:\/\/www\.strava\.com/, '')}`);
+        if (r.status === 200 && !toLogin) {
+          info.loggedIn = true;
+          const id = r.html.match(/href="\/athletes\/(\d+)"/);
+          if (id) info.athleteGuess = id[1];
+          SD._html = r.html;
+          break;
+        }
+      } catch (e) { info.probes.push(`${p} → ${String(e).slice(0, 80)}`); }
+    }
+    return info;
+  };
+
+  SD.csrfFrom = html => {
+    const x = html.match(/name="csrf-token"\s+content="([^"]+)"/) || html.match(/content="([^"]+)"\s+name="csrf-token"/);
+    return x ? x[1] : '';
+  };
+
+  SD.csrf = async () => {
+    const m = document.querySelector('meta[name="csrf-token"]');
+    if (m && m.content) return m.content;
+    if (SD._csrf) return SD._csrf;
+    for (const p of SD.PROBES) {
+      try { const t = SD.csrfFrom((await SD.get(p)).html); if (t) return (SD._csrf = t); } catch (e) {}
+    }
+    return '';
+  };
+
+  SD.athleteId = async () => {
+    try { if (window.currentAthlete && window.currentAthlete.id) return String(window.currentAthlete.id); } catch (e) {}
+    const pages = [document.documentElement.outerHTML];
+    if (SD._html) pages.push(SD._html);
+    for (const p of SD.PROBES) { try { pages.push((await SD.get(p)).html); } catch (e) {} }
+    for (const html of pages) {
+      const m1 = html.match(/currentAthlete[\s\S]{0,300}?["']?id["']?\s*[:=]\s*["']?(\d+)/);
+      if (m1) return m1[1];
+      const m3 = html.match(/href="\/athletes\/(\d+)"/);
+      if (m3) return m3[1];
+    }
+    return null;
+  };
+
+  SD.text = s => String(s == null ? '' : s)
+    .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ').trim();
+
+  SD.walk = (o, fn, depth = 0, seen = new Set()) => {
+    if (!o || typeof o !== 'object' || depth > 10 || seen.has(o)) return;
+    seen.add(o);
+    for (const k of Object.keys(o)) {
+      const v = o[k]; fn(k, v);
+      if (v && typeof v === 'object') SD.walk(v, fn, depth + 1, seen);
+    }
+  };
+
+  SD.photos = (o) => {
+    const best = new Map();
+    SD.walk(o, (k, v) => {
+      if (typeof v !== 'string' || !/^https?:\/\//.test(v)) return;
+      if (!/\.(jpe?g|png|webp)(\?|$)/i.test(v)) return;
+      if (/pictures\/athletes|avatar|profile|mapbox|\/maps?\/|static|badge|logo|icon/i.test(v)) return;
+      if (!/photo|cloudfront|media|image|large|thumb/i.test(k + ' ' + v)) return;
+      const key = v.replace(/-\d+x\d+(?=\.\w+)/, '').replace(/\?.*$/, '');
+      const m = v.match(/-(\d+)x(\d+)\./);
+      const size = m ? +m[1] * +m[2] : (/large|full|orig/i.test(k) ? 1e7 : 1e5);
+      const cur = best.get(key);
+      if (!cur || size > cur.size) best.set(key, { url: v, size });
+    });
+    return [...best.values()].map(x => x.url).slice(0, 12);
+  };
+
+  SD.stats = (arr) => {
+    const out = [];
+    if (!Array.isArray(arr)) return out;
+    const map = {};
+    arr.forEach(s => { if (s && s.key) map[s.key] = s.value; });
+    for (const s of arr) {
+      if (!s) continue;
+      if (s.subtitle !== undefined || s.label !== undefined) {
+        out.push({ label: SD.text(s.subtitle !== undefined ? s.subtitle : s.label), value: SD.text(s.value) });
+        continue;
+      }
+      if (!s.key || /_subtitle$/.test(s.key)) continue;
+      out.push({ label: SD.text(map[s.key + '_subtitle']) || s.key, value: SD.text(s.value) });
+    }
+    return out.filter(x => x.value);
+  };
+
+  SD.dur = s => { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? `${h}h ${m}m` : `${m}m ${x}s`; };
+
+  SD.rawStats = (a) => {
+    const out = [];
+    const d = +a.distance, t = +(a.moving_time || a.movingTime || a.elapsed_time || a.elapsedTime);
+    if (d > 0) out.push({ label: 'Distance', value: (d / 1000).toFixed(2) + ' km' });
+    if (t > 0) out.push({ label: 'Time', value: SD.dur(t) });
+    const eg = +(a.elevation_gain || a.total_elevation_gain || a.elevationGain);
+    if (eg > 0) out.push({ label: 'Elevation', value: Math.round(eg) + ' m' });
+    return out;
+  };
+
+  SD.achievements = (o) => {
+    let prs = 0, total = 0; const list = [];
+    SD.walk(o, (k, v) => {
+      if (/^(pr_?count|prCount|num_?prs|personalRecordCount)$/i.test(k) && typeof v === 'number') prs = Math.max(prs, v);
+      if (/achievements?_?count/i.test(k) && typeof v === 'number') total = Math.max(total, v);
+      if (/achievement/i.test(k) && Array.isArray(v)) {
+        for (const a of v) {
+          if (!a || typeof a !== 'object') continue;
+          list.push({
+            type: SD.text(a.type || a.achievementType || a.kind || a.achievement_type || ''),
+            name: SD.text(a.name || a.segmentName || a.segment_name || a.description || a.title || a.effort_name || ''),
+            rank: a.rank || a.place || null,
+          });
+        }
+      }
+    });
+    const prList = list.filter(a => /\bpr\b|personal|best/i.test(a.type)).length;
+    return { prs: Math.max(prs, prList), total: Math.max(total, list.length), list: list.slice(0, 10) };
+  };
+
+  SD.hr = (o, stats) => {
+    for (const s of stats) if (/heart|bpm|pulsas|\bhr\b/i.test(s.label + ' ' + s.value)) return s.value;
+    let hr = null;
+    SD.walk(o, (k, v) => {
+      if (hr == null && /^(avg|average)_?(heart_?rate|heartrate|hr)$/i.test(k) && +v > 0) hr = Math.round(+v) + ' bpm';
+    });
+    return hr;
+  };
+
+  // Start time on the athlete's own clock: {h, m, src}. src: 3 = local timestamp, 2 = Strava's label, 1 = UTC shown in phone time.
+  SD.to24 = (h, m, ap) => {
+    h = +h; ap = String(ap || '').replace(/\./g, '').toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return { h, m: +m };
+  };
+  SD.clockFromText = (s, src = 2) => {
+    const m = String(s || '').match(/(\d{1,2}):(\d{2})\s*([AaPp]\.?\s?[Mm]\.?)?/);
+    if (!m) return null;
+    const c = SD.to24(m[1], m[2], m[3]);
+    return c.h < 24 && c.m < 60 ? Object.assign(c, { src }) : null;
+  };
+  SD.clockLocal = (o) => {
+    let c = null;
+    SD.walk(o, (k, v) => {
+      if (c || typeof v !== 'string' || !/local/i.test(k) || !/start|date|time/i.test(k)) return;
+      const m = v.match(/\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/);
+      if (m && !(+m[1] === 0 && +m[2] === 0)) c = { h: +m[1], m: +m[2], src: 3 };
+    });
+    return c;
+  };
+  SD.clockUtc = (s) => {
+    if (!/T\d{2}:\d{2}/.test(s || '') || /T00:00(:00)?(\.0+)?(Z|[+-]00:?00)?$/.test(s)) return null;
+    const d = new Date(s);
+    return isNaN(d) ? null : { h: d.getHours(), m: d.getMinutes(), src: 1 };
+  };
+  SD.best = (...cs) => cs.filter(c => c && !(c.h === 0 && c.m === 0)).sort((x, y) => y.src - x.src)[0] || null;
+
+  SD.item = (a, f) => {
+    const stats = Array.isArray(a.stats) ? SD.stats(a.stats) : SD.rawStats(a);
+    const st = Date.parse(f.start || '');
+    return {
+      id: String(f.id), name: SD.text(f.name), type: String(f.type || ''),
+      start: isNaN(st) ? null : st, when: SD.text(f.when || ''), location: SD.text(f.location || ''),
+      clock: SD.best(SD.clockLocal(a), SD.clockFromText(SD.text(f.when || '')), SD.clockUtc(f.start)),
+      athleteId: String(f.athleteId || ''), athleteName: SD.text(f.athleteName || ''), avatar: f.avatar || '',
+      description: SD.text(a.description || ''),
+      stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a),
+      kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
+    };
+  };
+
+  SD.normalize = (e) => {
+    const out = [];
+    if (e.activity && e.activity.id != null) {
+      const a = e.activity, ath = a.athlete || {}, kc = a.kudosAndComments || {}, tl = a.timeAndLocation || {};
+      out.push(SD.item(a, {
+        id: a.id, name: a.activityName || a.name, type: a.type || a.activityType || a.sportType,
+        start: a.startDate || a.start_date, when: tl.displayDateAtTime, location: tl.location,
+        athleteId: ath.athleteId || ath.id, avatar: ath.avatarUrl || ath.profileUrl || ath.avatar,
+        athleteName: ath.athleteName || ath.name || [ath.firstName, ath.lastName].filter(Boolean).join(' '),
+        kudos: kc.kudosCount, comments: kc.commentCount != null ? kc.commentCount : (Array.isArray(kc.comments) ? kc.comments.length : 0),
+        hasKudoed: kc.hasKudoed, canKudo: kc.canKudo, photoSrc: a.mapAndPhotos || a,
+      }));
+    }
+    const group = (e.rowData && e.rowData.activities) || e.activities || (e.groupActivity && e.groupActivity.activities);
+    if (Array.isArray(group)) {
+      for (const a of group) {
+        if (!a || (a.activity_id == null && a.id == null)) continue;
+        out.push(SD.item(a, {
+          id: a.activity_id != null ? a.activity_id : a.id, name: a.name || a.activity_name, type: a.type || a.activity_type,
+          start: a.start_date || a.startDate, location: a.location,
+          athleteId: a.athlete_id || a.athleteId, athleteName: a.athlete_name || a.athleteName,
+          avatar: a.athlete_avatar || a.avatar_url || a.profile,
+          kudos: a.kudos_count != null ? a.kudos_count : a.kudosCount,
+          comments: a.comments_count != null ? a.comments_count : a.commentCount,
+          hasKudoed: a.has_kudoed || a.kudosed || a.hasKudoed,
+        }));
+      }
+    }
+    return out;
+  };
+
+  SD.page = async (athleteId, before, cursor, dayStart, dayEnd, keepRaw) => {
+    let url = `/dashboard/feed?feed_type=following&athlete_id=${athleteId}&club_id=`;
+    if (before != null) url += `&before=${before}&cursor=${cursor}`;
+    const r = await fetch(url, { credentials: 'include', headers: XHR });
+    const t = await r.text();
+    let page;
+    try { page = JSON.parse(t); }
+    catch (e) { throw new Error(`Strava feed returned HTTP ${r.status} instead of data. Strava may have changed its website; turn on DEBUG_DUMP and check the log.`); }
+    const entries = page.entries || page.feedEntries || page.items || [];
+    const cdOf = e => e.cursorData || e.cursor_data || e.cursor || {};
+    const items = []; let oldest = null, oldestStart = null, firstId = null;
+    for (const e of entries) {
+      const cd = cdOf(e);
+      const upd = cd.updated_at != null ? +cd.updated_at : (cd.updatedAt != null ? +cd.updatedAt : null);
+      if (upd != null && !isNaN(upd)) oldest = oldest == null ? upd : Math.min(oldest, upd);
+      for (const a of SD.normalize(e)) {
+        if (firstId == null) firstId = a.id;
+        if (a.start) oldestStart = oldestStart == null ? a.start : Math.min(oldestStart, a.start);
+        const ts = a.start || (upd ? upd * 1000 : null);
+        a.ts = ts;
+        if (ts != null && ts >= dayStart && ts < dayEnd) items.push(a);
+      }
+    }
+    // Work out how to ask for the next (older) page.
+    const last = entries[entries.length - 1];
+    const lcd = last ? cdOf(last) : {};
+    const pg = page.pagination || {};
+    let next = null;
+    const lastUpd = lcd.updated_at != null ? lcd.updated_at : lcd.updatedAt;
+    if (lastUpd != null) next = { before: lastUpd, cursor: lcd.rank != null ? lcd.rank : lastUpd };
+    else {
+      const c = pg.cursor || pg.nextCursor || pg.next_cursor || page.cursor || page.nextCursor || page.next_cursor;
+      const b = pg.before || page.before;
+      if (c != null || b != null) next = { before: b != null ? b : c, cursor: c != null ? c : b };
+      else if (oldestStart) { const sec = Math.floor(oldestStart / 1000); next = { before: sec, cursor: sec }; }
+    }
+    if (!entries.length || pg.hasMore === false || pg.has_more === false) next = null;
+    const shape = {
+      pageKeys: Object.keys(page).slice(0, 12),
+      entryKeys: last ? Object.keys(last).slice(0, 12) : [],
+      cursorKeys: Object.keys(lcd).slice(0, 8),
+    };
+    return { items, oldest, oldestStart, firstId, entryCount: entries.length, next, shape, raw: keepRaw ? page : null };
+  };
+
+  SD.details = async (id) => {
+    const html = await (await fetch(`/activities/${id}`, { credentials: 'include' })).text();
+    const res = { hr: null, maxHr: null, prs: null, achievements: null, list: [], photos: [], clock: null };
+    const nd = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (nd) {
+      try {
+        const j = JSON.parse(nd[1]);
+        SD.walk(j, (k, v) => {
+          if (res.hr == null && /^(avg|average)_?(heart_?rate|heartrate|hr)$/i.test(k) && +v > 0) res.hr = Math.round(+v);
+          if (res.maxHr == null && /^max_?(heart_?rate|heartrate|hr)$/i.test(k) && +v > 0) res.maxHr = Math.round(+v);
+        });
+        const a = SD.achievements(j);
+        if (a.total || a.prs) { res.prs = a.prs; res.achievements = a.total; res.list = a.list; }
+        res.photos = SD.photos(j);
+        res.clock = SD.clockLocal(j);
+      } catch (e) {}
+    }
+    const txt = SD.text(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' '));
+    if (res.hr == null) {
+      const m = txt.match(/Heart\s*Rate\s*(\d{2,3})\s*bpm(?:\s*(\d{2,3})\s*bpm)?/i);
+      if (m) { res.hr = +m[1]; if (m[2]) res.maxHr = +m[2]; }
+    }
+    if (res.achievements == null) {
+      const m = txt.match(/(\d+)\s*Achievements?\b/i) || txt.match(/Achievements?\s*(\d+)\b/i);
+      if (m) res.achievements = +m[1];
+    }
+    if (res.prs == null) { const m = txt.match(/(\d+)\s*(?:PRs?|Personal Records?)\b/i); if (m) res.prs = +m[1]; }
+    if (!res.clock) {
+      const lm = html.match(/start_?date_?local[^0-9]{0,12}\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})/i);
+      const on = txt.match(/(\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s?[Mm]\.?)?)\s+on\s+[A-Z][a-z]+day/);
+      const tm = html.match(/<time[^>]*>([^<]{4,80})<\/time>/i);
+      res.clock = SD.best(lm && { h: +lm[1], m: +lm[2], src: 3 }, on && SD.clockFromText(on[1]), tm && SD.clockFromText(tm[1]));
+    }
+    if (!res.photos.length) {
+      const urls = html.match(/https:\/\/dgtzuqphqg23d\.cloudfront\.net\/[^"'\s)\\]+\.(?:jpe?g|png)/gi) || [];
+      res.photos = SD.photos({ photos: urls });
+    }
+    return res;
+  };
+
+  SD.enrich = async (ids, conc) => {
+    const out = {}; let i = 0;
+    const worker = async () => {
+      while (i < ids.length) {
+        const id = ids[i++];
+        try { out[id] = await SD.details(id); } catch (e) { out[id] = { error: String(e) }; }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, ids.length)) }, worker));
+    return out;
+  };
+
+  SD.post = async (attempts) => {
+    const token = await SD.csrf();
+    let last = '';
+    for (const [path, body] of attempts) {
+      try {
+        const r = await fetch(path, {
+          method: 'POST', credentials: 'include',
+          headers: Object.assign({}, XHR, { 'X-CSRF-Token': token, 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }),
+          body: `authenticity_token=${encodeURIComponent(token)}${body ? '&' + body : ''}`,
+        });
+        if (r.ok) return { ok: true, path };
+        last = `HTTP ${r.status}`;
+      } catch (e) { last = String(e); }
+    }
+    return { ok: false, error: last };
+  };
+
+  SD.kudo = (id) => SD.post([[`/feed/activity/${id}/kudo`, '']]);
+
+  SD.sleep = ms => new Promise(r => setTimeout(r, ms));
+  SD.waitFor = async (fn, timeout) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) { const v = fn(); if (v) return v; await SD.sleep(250); }
+    return null;
+  };
+  const visible = el => !!(el && (el.offsetParent !== null || el.getClientRects().length));
+  const describe = el => [el.placeholder, el.getAttribute('aria-label'), el.getAttribute('data-testid'),
+    el.getAttribute('title'), el.name, el.id, el.className, el.value, el.textContent].join(' ');
+  const COMMENT_RX = /comment|komentar/i;
+
+  // Record the page's own network calls so we can tell whether Strava accepted the comment.
+  SD.hookNet = () => {
+    if (window.__SDnet) return;
+    const log = window.__SDnet = [];
+    const of = window.fetch;
+    window.fetch = function (input, init) {
+      const rec = { url: typeof input === 'string' ? input : (input && input.url), method: ((init && init.method) || (input && input.method) || 'GET').toUpperCase() };
+      log.push(rec);
+      return of.apply(this, arguments).then(r => { rec.status = r.status; return r; }, e => { rec.status = -1; throw e; });
+    };
+    const oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (m, u) { this.__rec = { method: String(m).toUpperCase(), url: u }; return oo.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function () {
+      const rec = this.__rec || {}; log.push(rec);
+      this.addEventListener('loadend', () => { rec.status = this.status || -1; });
+      return os.apply(this, arguments);
+    };
+  };
+
+  SD.findCommentBox = () => [...document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]')]
+    .find(el => visible(el) && COMMENT_RX.test(describe(el)));
+
+  SD.commentViaUI = async (text) => {
+    SD.hookNet();
+    let box = await SD.waitFor(SD.findCommentBox, 6000);
+    if (!box) {
+      const opener = [...document.querySelectorAll('button, a, [role="button"]')]
+        .find(b => visible(b) && COMMENT_RX.test(describe(b)) && !/kudo/i.test(describe(b)));
+      if (opener) { opener.click(); box = await SD.waitFor(SD.findCommentBox, 5000); }
+    }
+    if (!box) return { ok: false, error: 'the comment box was not found on the activity page' };
+
+    box.scrollIntoView({ block: 'center' });
+    box.focus();
+    if (box.isContentEditable) {
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, text);
+    } else {
+      const proto = box.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(box, text);
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    await SD.sleep(400);
+
+    window.__SDnet.length = 0;
+    let scope = box.closest('form') || box.parentElement;
+    let btn = null;
+    for (let i = 0; i < 5 && scope && !btn; i++, scope = scope.parentElement) {
+      btn = [...scope.querySelectorAll('button, input[type="submit"]')].find(b => visible(b) && !b.disabled &&
+        (b.type === 'submit' || /post|send|publish|submit|skelbti|siųsti|komentuoti/i.test(describe(b))) && !/kudo|cancel|atšaukti/i.test(describe(b)));
+    }
+    if (btn) btn.click();
+    else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+
+    const req = await SD.waitFor(() => window.__SDnet.find(r => r.method !== 'GET' && r.status), 10000);
+    if (req && req.status >= 200 && req.status < 300) return { ok: true, via: `${req.method} ${req.url}` };
+    await SD.sleep(800);
+    const left = box.isContentEditable ? box.textContent : box.value;
+    if (!String(left || '').includes(text) && document.body.innerText.includes(text)) return { ok: true, via: 'page' };
+    return { ok: false, error: req ? `Strava answered HTTP ${req.status}` : 'Strava did not send the comment' };
+  };
+
+  window.__SD = SD;
+}
+
+// ───────────────────────────── rendering ─────────────────────────────
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function initials(n) { return String(n || '?').split(/\s+/).map(w => w[0] || '').join('').slice(0, 2).toUpperCase(); }
+
+function emoji(t) {
+  t = String(t || '').toLowerCase();
+  if (/trail/.test(t)) return '⛰️';
+  if (/run/.test(t)) return '🏃';
+  if (/ride|bike|cycl/.test(t)) return '🚴';
+  if (/swim/.test(t)) return '🏊';
+  if (/walk/.test(t)) return '🚶';
+  if (/hike/.test(t)) return '🥾';
+  if (/ski|snowboard/.test(t)) return '⛷️';
+  if (/row|kayak|canoe|paddle/.test(t)) return '🚣';
+  if (/yoga|pilates/.test(t)) return '🧘';
+  if (/weight|workout|crossfit|hiit|strength/.test(t)) return '🏋️';
+  if (/tennis|padel|squash|badminton/.test(t)) return '🎾';
+  return '⚡';
+}
+
+function dayLabel(t) {
+  const df = new DateFormatter(); df.dateFormat = 'EEE d MMM, HH:mm';
+  return df.string(new Date(t));
+}
+
+function daysNav(current) {
+  const df = new DateFormatter(); df.dateFormat = 'EEE d';
+  const chips = [];
+  for (let i = 0; i < CONFIG.DAYS_IN_PICKER; i++) {
+    const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - i);
+    const label = i === 0 ? 'Today' : i === 1 ? 'Yesterday' : df.string(d);
+    chips.push(`<button class="day${i === current ? ' on' : ''}" data-day="${i}"${i === current ? ' aria-current="date"' : ''}>${esc(label)}</button>`);
+  }
+  return `<nav class="days" aria-label="Choose day">${chips.join('')}</nav>`;
+}
+
+function summaryText(people, count) {
+  const prs = people.reduce((n, p) => n + p.acts.reduce((m, a) => m + (a.ach.prs || 0), 0), 0);
+  const birds = people.filter(p => p.early).length;
+  return `${people.length} ${people.length === 1 ? 'person' : 'people'}, ${count} ${count === 1 ? 'activity' : 'activities'}${prs ? `, ${prs} PR${prs > 1 ? 's' : ''}` : ''}${birds ? `, ${birds} early riser${birds > 1 ? 's' : ''}` : ''}`;
+}
+
+function renderDigest({ dayStart, daysBack, scan, people, count }) {
+  const df = new DateFormatter(); df.dateFormat = 'EEEE, d MMMM';
+  const summary = summaryText(people, count);
+  const open = people.filter(p => !p.kudoed && p.primary.canKudo).length;
+  const body = people.length
+    ? people.map(personHtml).join('')
+    : `<div class="center">Nobody you follow has posted ${daysBack ? 'on that day' : 'yet today'}.<br><br><button class="ghost" data-act="refresh">Check again</button>${scanNote(scan)}</div>`;
+  return page(`
+    <div class="top">
+      <div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div>
+      <button class="ghost round" data-act="refresh" aria-label="Refresh">↻</button>
+    </div>
+    ${daysNav(daysBack)}
+    <div id="st" class="loadst" aria-live="polite"></div>
+    ${open > 1 ? `<button class="all" data-act="kudo-all" data-label="Give kudos to all ${open}, one each">Give kudos to all ${open}, one each</button>` : ''}
+    ${body}`);
+}
+
+function scanNote(scan) {
+  if (!scan) return '';
+  const at = t => (t ? dayLabel(t) : 'unknown');
+  return `<p class="scan">Read ${scan.pages} feed page${scan.pages === 1 ? '' : 's'} (${scan.entries} posts), feed reached ${esc(at(scan.position))}, oldest activity ${esc(at(scan.oldest))}. Stopped because ${esc(scan.stop)}.</p>`;
+}
+
+function personHtml(p) {
+  const pid = esc(p.id);
+  const profile = /^\d+$/.test(p.id) ? ` data-athlete="${pid}"` : '';
+  const avatar = p.avatar && !/avatar\/athlete/.test(p.avatar)
+    ? `<img class="av" src="${esc(p.avatar)}"${profile}>`
+    : `<div class="av ph"${profile}>${esc(initials(p.name))}</div>`;
+  const sub = `${p.acts.length} ${p.acts.length > 1 ? 'activities' : 'activity'}${p.total ? `, ${esc(p.total)}` : ''}`;
+  const btn = p.primary.canKudo
+    ? `<button class="kudo person-k${p.kudoed ? ' done' : ''}" data-kudo="${esc(p.primary.id)}" data-pid="${pid}"${p.kudoed ? ' disabled' : ''}>${p.kudoed ? '✓ Kudos given' : '👍 Kudos'}</button>`
+    : '';
+  return `<section class="person" data-pid="${pid}">
+    <header>${avatar}<div class="pn"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span>${sub}</span></div>${btn}</header>
+    ${p.acts.map(a => actHtml(a, p)).join('')}
+  </section>`;
+}
+
+function actHtml(a, p) {
+  const id = esc(a.id);
+  const fallback = String(a.when || '').replace(/^(today|šiandien)\s*(at|)\s*/i, '');
+  const df = new DateFormatter(); df.dateFormat = 'MMM d';
+  const date = a.ts ? df.string(new Date(a.ts)) : '';
+  const when = date
+    ? `<span class="clk">${esc(date)}${a.clock ? `, ${fmtClock(a.clock)}` : ''}</span>`
+    : (a.clock ? `<span class="clk">${fmtClock(a.clock)}</span>` : esc(fallback));
+  const meta = [when, esc(a.location)].filter(Boolean).join(', ');
+  const e = early(a);
+  const stats = a.stats.map(s => `<div class="st"><b>${esc(s.value)}</b><small>${esc(s.label)}</small></div>`).join('')
+    + (a.hr && !a.hrInStats ? `<div class="st hr"><b>${esc(a.hr)}</b><small>Heart rate</small></div>` : '');
+  const badges = [];
+  if (e) badges.push(`<span class="early ${e.cls}">${e.icon} ${e.label}</span>`);
+  if (a.ach.prs) badges.push(`<span class="pr">🏆 ${a.ach.prs} PR${a.ach.prs > 1 ? 's' : ''}</span>`);
+  if (a.ach.total > (a.ach.prs || 0)) badges.push(`<span class="pr soft">${a.ach.total} achievement${a.ach.total > 1 ? 's' : ''}</span>`);
+  const achList = a.ach.list.filter(x => x.name).slice(0, 5)
+    .map(x => `<li>${esc([x.type, x.name].filter(Boolean).join(': '))}${x.rank ? ` (#${esc(x.rank)})` : ''}</li>`).join('');
+  const photos = a.photos.length
+    ? `<div class="photos">${a.photos.map(u => `<img loading="lazy" src="${esc(u)}" data-photo="1" alt="Activity photo" onerror="this.remove()">`).join('')}</div>` : '';
+  const main = p.acts.length > 1 && p.primary.id === a.id ? `<span class="main">gets the kudos</span>` : '';
+  return `<article class="act" data-id="${id}">
+    <div class="ah"><span class="emo">${emoji(a.type)}</span><div class="at"><b>${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div></div>
+    ${stats ? `<div class="stats">${stats}</div>` : ''}
+    ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
+    ${achList ? `<ul class="alist">${achList}</ul>` : ''}
+    ${a.description ? `<p class="desc">${esc(a.description)}</p>` : ''}
+    ${photos}
+    <div class="bar">
+      <span class="counts">👍 <i class="kc">${a.kudos}</i>&nbsp;&nbsp;💬 <i class="cc">${a.comments}</i></span>
+      ${a.canKudo ? `<button class="small kudo${a.hasKudoed ? ' done' : ''}" data-kudo="${id}" data-pid="${esc(p.id)}"${a.hasKudoed ? ' disabled' : ''}>${a.hasKudoed ? '✓' : '👍'}</button>` : ''}
+      <button class="small" data-act="toggle-comment" aria-label="Comment">💬</button>
+      <button class="small" data-activity="${id}" aria-label="Open in Strava">↗</button>
+    </div>
+    <div class="cbox" hidden>
+      <div class="crow"><textarea rows="3" placeholder="Write a comment, or tap Suggest"></textarea><button data-comment="${id}">Post</button></div>
+      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest</button>${CONFIG.AI.LANGUAGES.map(([code, name]) =>
+        `<button class="lng${name === STATE.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
+      <div class="sugs"></div>
+    </div>
+  </article>`;
+}
+
+function shell(msg, isError) {
+  return page(`<div class="center">${isError ? '' : '<div class="spin"></div>'}<div id="st">${msg}</div>
+    ${isError ? '<br><button class="ghost" data-act="refresh">Try again</button>' : ''}</div>`);
+}
+
+function page(content) {
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>
+:root{--bg:#f2f1ee;--card:#fff;--fg:#17171a;--mut:#6d6c72;--line:#e3e1dc;--soft:#efeeea;--accent:#fc4c02;--gold:#9a6200;--goldbg:#fdf0d2;--hr:#c92a5c}
+@media (prefers-color-scheme:dark){:root{--bg:#121214;--card:#1c1c20;--fg:#f1f0ee;--mut:#9b9aa2;--line:#2c2c31;--soft:#26262b;--gold:#f3c15c;--goldbg:#3b2d0f;--hr:#ff7aa2}}
+*{box-sizing:border-box}
+html,body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}
+button,img{touch-action:manipulation}
+textarea,input{font-size:16px!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 -apple-system,system-ui,sans-serif;padding:max(14px,env(safe-area-inset-top)) 12px 70px;-webkit-text-size-adjust:100%}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 4px 14px}
+h1{font-size:24px;line-height:1.15;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mut);font-size:13px;margin-top:2px}
+button{font:inherit;border:0;border-radius:999px;padding:8px 14px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.ghost{background:var(--soft);color:var(--fg)}
+button.round{width:40px;height:40px;padding:0;font-size:18px;flex:none}
+button.small{background:var(--soft);color:var(--fg);padding:6px 12px}
+button.done,button:disabled{background:var(--soft);color:var(--mut)}
+button.all{width:100%;margin:0 0 14px;padding:12px}
+.person{background:var(--card);border-radius:18px;padding:14px;margin-bottom:12px}
+.person header{display:flex;align-items:center;gap:10px}
+.av{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none;background:var(--soft)}
+.av.ph{display:grid;place-items:center;font-weight:700;color:var(--mut)}
+.pn{flex:1;min-width:0}.pn b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:16px}.pn span{color:var(--mut);font-size:13px}
+.act{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.ah{display:flex;gap:10px;align-items:flex-start}.emo{font-size:22px;line-height:1.1}
+.at b{font-size:16px}.at small{display:block;color:var(--mut);font-size:12px}
+.main{font-size:11px;color:var(--accent);font-weight:700;margin-left:6px}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:12px 10px;margin-top:12px}
+.st b{display:block;font-size:19px;font-weight:650;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.15}
+.st small{color:var(--mut);font-size:12px}
+.st.hr b{color:var(--hr)}
+.badges{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.pr{background:var(--goldbg);color:var(--gold);border-radius:999px;padding:3px 10px;font-weight:700;font-size:13px}
+.pr.soft{font-weight:600}
+.alist{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
+.desc{margin:10px 0 0;font-size:14px;white-space:pre-wrap}
+.photos{display:flex;gap:6px;overflow-x:auto;margin:12px -14px 0;padding:0 14px;scroll-snap-type:x mandatory}
+.days{display:flex;gap:6px;overflow-x:auto;margin:0 -12px 14px;padding:2px 12px;scrollbar-width:none}
+.days::-webkit-scrollbar{display:none}
+.day{flex:none;background:var(--card);color:var(--fg);padding:7px 14px;font-weight:600}
+.day.on{background:var(--fg);color:var(--bg)}
+.scan{margin:28px auto 0;max-width:34em;font-size:12px;line-height:1.5;color:var(--mut);word-break:break-word}
+.loadst{display:none;color:var(--mut);font-size:13px;margin:-6px 4px 12px}
+body.loading .loadst{display:block}
+.clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
+.nb{font-size:15px}
+.early{border-radius:999px;padding:3px 11px;font-weight:700;font-size:13px;color:#fff}
+.early.e4{background:linear-gradient(135deg,#070b1f,#2a1d5e);box-shadow:inset 0 0 0 1px #6c5ce7}
+.early.e5{background:linear-gradient(135deg,#1c2a6e,#8a3f8f)}
+.early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
+#lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
+#lb[hidden]{display:none}
+#sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
+#sheet[hidden]{display:none}
+.shc{width:100%;background:var(--card);border-radius:18px 18px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:grid;gap:8px}
+.shc button{padding:13px}
+.lbtop{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#fff;font-size:14px;font-variant-numeric:tabular-nums;min-height:58px}
+.lbx{background:rgba(255,255,255,.18);color:#fff;width:38px;height:38px;padding:0;font-size:16px}
+.lbs{flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none}
+.lbs::-webkit-scrollbar{display:none}
+.lbi{flex:0 0 100%;height:100%;display:grid;place-items:center;scroll-snap-align:center;padding:0 6px 30px}
+.lbi img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.photos img{height:132px;max-width:220px;border-radius:12px;flex:none;object-fit:cover;scroll-snap-align:start;background:var(--soft)}
+.bar{display:flex;align-items:center;gap:6px;margin-top:12px}
+.counts{flex:1;color:var(--mut);font-size:13px}.counts i{font-style:normal;font-variant-numeric:tabular-nums}
+.cbox{margin-top:8px}.cbox[hidden]{display:none}
+.crow{display:flex;gap:6px;align-items:flex-end}
+.ai{display:flex;gap:6px;align-items:center;margin-top:8px}
+.lng{background:transparent;color:var(--mut);padding:6px 10px;border:1px solid var(--line)}
+.lng.on{background:var(--soft);color:var(--fg);border-color:var(--soft)}
+.sugs{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.sug{background:var(--soft);color:var(--fg);font-weight:500;text-align:left;border-radius:14px;padding:9px 12px;line-height:1.35}
+.keyrow{display:flex;gap:6px}.keyrow input{flex:1;min-width:0;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px}
+.keyhelp{font-size:12px;color:var(--mut);margin:0}
+textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px;resize:none}
+.center{text-align:center;color:var(--mut);padding:80px 20px}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 14px;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translate(-50%,90px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;transition:transform .25s;max-width:90vw}
+#toast.on{transform:translate(-50%,0)}
+body.loading .person{opacity:.45}
+</style></head><body>
+${content}
+<div id="sheet" hidden><div class="shc">
+  <button data-act="open-here">View here</button>
+  <button class="ghost" data-act="open-app">Open in Strava app</button>
+  <button class="ghost" data-act="sheet-close">Cancel</button>
+</div></div>
+<div id="lb" hidden><div class="lbtop"><span id="lbc"></span><button class="lbx" data-act="lb-close" aria-label="Close photos">✕</button></div><div class="lbs"></div></div>
+<div id="toast"></div>
+<script>
+['gesturestart','gesturechange','gestureend'].forEach(function(n){ document.addEventListener(n,function(e){ e.preventDefault(); },{passive:false}); });
+var lastTouchEnd=0;
+document.addEventListener('touchend',function(e){ var now=Date.now(); if(now-lastTouchEnd<300&&!e.target.closest('textarea,input')) e.preventDefault(); lastTouchEnd=now; },{passive:false});
+var q=[],pending={},busy=false,armed=false,OPEN_IN='${CONFIG.OPEN_IN}';
+document.addEventListener('click',function(e){ if(e.target.id==='sheet') e.target.hidden=true; });
+function send(action,params,cb){
+  var req='r'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  pending[req]=cb||function(){};
+  var p=Object.assign({req:req},params||{});
+  var qs=Object.keys(p).map(function(k){return k+'='+encodeURIComponent(p[k]);}).join('&');
+  q.push('${SCHEME}'+action+'?'+qs); pump();
+}
+function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift(); setTimeout(function(){busy=false;pump();},300); }
+var aiLang=document.querySelector('.lng.on')?document.querySelector('.lng.on').dataset.lang:'';
+function suggest(btn){
+  if(btn.disabled) return;
+  var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
+  btn.disabled=true; btn.dataset.busy='1'; btn.textContent='✨ Thinking…';
+  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim()},function(ok,msg){
+    btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
+    sugs.innerHTML='';
+    if(!ok&&msg==='NEED_KEY'){
+      sugs.innerHTML='<p class="keyhelp">Paste your OpenAI API key once. It stays in this phone\u2019s Keychain and is only sent to OpenAI.</p><div class="keyrow"><input type="password" autocomplete="off" placeholder="sk-..."><button data-savekey>Save</button></div>';
+      btn.textContent='✨ Suggest'; return;
+    }
+    if(!ok){ toast('Suggestions failed: '+(msg||'unknown error')); return; }
+    var list=[]; try{ list=JSON.parse(msg); }catch(e){}
+    list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
+  });
+}
+window.__done=function(req,ok,msg){ var cb=pending[req]; delete pending[req]; if(cb) cb(ok,msg); };
+window.__patchPerson=function(pid,html){
+  var old=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]'); if(!old) return;
+  if(old.querySelector('.cbox:not([hidden])')||old.querySelector('[data-busy]')||old.contains(document.activeElement)) return;
+  var t=document.createElement('template'); t.innerHTML=html.trim(); old.replaceWith(t.content.firstElementChild);
+};
+window.__patchSummary=function(text){ var el=document.querySelector('.top .sub'); if(el) el.textContent=text; };
+window.setStatus=function(s){ var el=document.getElementById('st'); if(el) el.textContent=s; };
+function toast(t){ var el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(function(){el.classList.remove('on');},2400); }
+function markKudo(id,pid){
+  document.querySelectorAll('[data-kudo="'+CSS.escape(id)+'"]').forEach(function(b){ b.classList.add('done'); b.disabled=true; b.textContent=b.classList.contains('small')?'✓':'✓ Kudos given'; });
+  var kc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .kc'); if(kc) kc.textContent=(+kc.textContent||0)+1;
+  var pb=document.querySelector('.person-k[data-pid="'+CSS.escape(pid)+'"]'); if(pb){ pb.classList.add('done'); pb.disabled=true; pb.textContent='✓ Kudos given'; }
+}
+function kudo(btn){
+  if(btn.disabled) return;
+  var id=btn.dataset.kudo,pid=btn.dataset.pid,old=btn.textContent;
+  btn.disabled=true; btn.textContent='…'; btn.dataset.busy='1';
+  send('kudo',{id:id},function(ok,msg){
+    delete btn.dataset.busy;
+    if(ok) markKudo(id,pid);
+    else { btn.disabled=false; btn.textContent=old; toast('Kudos not sent: '+(msg||'unknown error')); }
+  });
+}
+function kudoAll(btn){
+  var list=[].slice.call(document.querySelectorAll('.person-k:not(.done)'));
+  if(!list.length){ toast('Everyone already has kudos'); return; }
+  if(!armed){ armed=true; btn.textContent='Tap again to send '+list.length+' kudos';
+    setTimeout(function(){ armed=false; btn.textContent=btn.dataset.label; },4000); return; }
+  armed=false; btn.disabled=true; btn.textContent='Sending '+list.length+' kudos';
+  list.forEach(kudo);
+}
+var lbN=0;
+function lbCount(){ var sc=document.querySelector('#lb .lbs'); document.getElementById('lbc').textContent=lbN>1?(Math.round(sc.scrollLeft/sc.clientWidth)+1)+' / '+lbN:''; }
+function openPhotos(img){
+  var imgs=[].slice.call(img.closest('.photos').querySelectorAll('img'));
+  var i=Math.max(0,imgs.indexOf(img)), lb=document.getElementById('lb'), sc=lb.querySelector('.lbs');
+  sc.innerHTML='';
+  imgs.forEach(function(x){ var d=document.createElement('div'); d.className='lbi'; var im=document.createElement('img'); im.src=x.src; im.alt='Activity photo'; d.appendChild(im); sc.appendChild(d); });
+  lbN=imgs.length; lb.hidden=false; document.body.style.overflow='hidden';
+  sc.scrollLeft=i*sc.clientWidth; requestAnimationFrame(function(){ sc.scrollLeft=i*sc.clientWidth; lbCount(); });
+}
+function closePhotos(){ document.getElementById('lb').hidden=true; document.body.style.overflow=''; }
+(function(){
+  var lb=document.getElementById('lb'), sc=lb.querySelector('.lbs'), x0=0, y0=0;
+  sc.addEventListener('scroll',lbCount,{passive:true});
+  lb.addEventListener('click',function(e){ if(e.target===lb||e.target.classList.contains('lbi')) closePhotos(); });
+  sc.addEventListener('touchstart',function(e){ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
+  sc.addEventListener('touchend',function(e){ var t=e.changedTouches[0]; if(t.clientY-y0>90&&Math.abs(t.clientX-x0)<60) closePhotos(); },{passive:true});
+})();
+document.addEventListener('click',function(e){
+  var t=e.target.closest('button,[data-open],[data-photo],[data-athlete]'); if(!t) return;
+  if(t.dataset.activity){
+    if(OPEN_IN==='app') return send('activity',{id:t.dataset.activity});
+    if(OPEN_IN==='here') return send('view',{id:t.dataset.activity,y:Math.round(window.scrollY)});
+    var sh=document.getElementById('sheet'); sh.dataset.id=t.dataset.activity; sh.hidden=false; return;
+  }
+  if(t.dataset.act==='open-here'||t.dataset.act==='open-app'||t.dataset.act==='sheet-close'){
+    var sh2=document.getElementById('sheet'), aid=sh2.dataset.id; sh2.hidden=true;
+    if(t.dataset.act==='open-here') send('view',{id:aid,y:Math.round(window.scrollY)});
+    if(t.dataset.act==='open-app') send('activity',{id:aid});
+    return;
+  }
+  if(t.dataset.athlete) return send('athlete',{id:t.dataset.athlete});
+  if(t.dataset.photo) return openPhotos(t);
+  if(t.dataset.day!==undefined){
+    if(t.classList.contains('on')) return;
+    document.querySelectorAll('.day').forEach(function(b){ b.classList.toggle('on', b===t); });
+    document.body.classList.add('loading'); toast('Loading '+t.textContent);
+    return send('day',{back:t.dataset.day});
+  }
+  if(t.dataset.kudo) return kudo(t);
+  if(t.dataset.open) return send('open',{url:t.dataset.open});
+  if(t.dataset.lang){
+    var row=t.closest('.ai'); row.querySelectorAll('.lng').forEach(function(b){ b.classList.toggle('on', b===t); });
+    document.querySelectorAll('.lng').forEach(function(b){ b.classList.toggle('on', b.dataset.lang===t.dataset.lang); });
+    aiLang=t.dataset.lang; send('setlang',{lang:aiLang}); return;
+  }
+  if(t.dataset.suggest) return suggest(t);
+  if(t.dataset.sug!==undefined){
+    var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent; ta.focus(); return;
+  }
+  if(t.dataset.savekey!==undefined){
+    var box2=t.closest('.cbox'), inp=box2.querySelector('.keyrow input');
+    t.disabled=true;
+    send('setkey',{key:inp.value},function(ok,msg){
+      t.disabled=false;
+      if(!ok){ toast(msg||'Key not saved'); return; }
+      toast('Key saved'); suggest(box2.querySelector('[data-suggest]'));
+    });
+    return;
+  }
+  if(t.dataset.comment){
+    var box=t.closest('.cbox'),ta=box.querySelector('textarea'),text=ta.value.trim(),id=t.dataset.comment;
+    if(!text) return;
+    t.disabled=true; t.textContent='…';
+    send('comment',{id:id,text:text},function(ok,msg){
+      t.disabled=false; t.textContent='Post';
+      if(ok){ ta.value=''; box.hidden=true; var cc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .cc'); if(cc) cc.textContent=(+cc.textContent||0)+1; toast('Comment posted'); }
+      else toast('Comment not posted: '+(msg||'unknown error'));
+    });
+    return;
+  }
+  var act=t.dataset.act;
+  if(act==='toggle-comment'){ var b=t.closest('.act').querySelector('.cbox'); b.hidden=!b.hidden; if(!b.hidden) b.querySelector('textarea').focus(); }
+  if(act==='kudo-all') kudoAll(t);
+  if(act==='lb-close') closePhotos();
+  if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
+});
+</script></body></html>`;
+}
+
+// ───────────── entry point (last, so every const above is initialised) ─────────────
+
+if (config.runsInWidget) {
+  const w = new ListWidget();
+  w.backgroundColor = new Color('#fc4c02');
+  const t = w.addText('Strava digest');
+  t.textColor = Color.white(); t.font = Font.boldSystemFont(16);
+  const s = w.addText('Tap to open today');
+  s.textColor = Color.white(); s.font = Font.systemFont(12);
+  w.url = URLScheme.forRunningScript();
+  Script.setWidget(w);
+} else {
+  try { await main(); }
+  catch (e) {
+    const a = new Alert(); a.title = 'Strava digest'; a.message = String(e.message || e);
+    a.addAction('OK'); await a.present();
+  }
+}
+Script.complete();
