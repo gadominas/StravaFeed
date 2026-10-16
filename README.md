@@ -28,6 +28,7 @@ The bigger your feed, the more time it saves.
 | | |
 |---|---|
 | 👍 **Kudos to everyone, in two taps** | One button gives kudos to every person in the day's digest, and asks you to confirm first. |
+| 📥 **Waiting for kudos first** | Each day is split into two sections: people still waiting for your kudos at the top, and people you've already given kudos to below, each with a count. |
 | ☝️ **One kudos per person** | When someone logs several activities, only their main one gets the kudos, so you never spam a friend's notifications. The main one is picked by most PRs first, then an early start, then achievements and distance. You can still give kudos to any activity individually. |
 | ✨ **AI comment ideas** | Get three funny, friendly comment suggestions built from the activity's real stats: distance, pace, heart rate, PRs, early start, and title. Choose English or Lithuanian, tweak the text, then post. |
 | 📅 **One day at a time** | Pick Today, Yesterday or any day in the past week. Only the day you open is loaded. |
