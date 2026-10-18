@@ -26,14 +26,14 @@ const CONFIG = {
   EXTRA_PAGES_PER_DAY: 10, // added for every day further back
   ENRICH_DETAILS: true,    // open each activity page to find HR / PRs / photos the feed omits
   ENRICH_CONCURRENCY: 4,
-  OPEN_IN: 'ask',          // ↗ on an activity: 'ask' (choose each time), 'here' (Strava page inside the digest), 'app'
   AI: {                    // ✨ comment suggestions via the OpenAI API (your own key, stored in the iOS Keychain)
     MODEL: 'gpt-5.4-mini',
     REASONING: 'low',      // 'low' keeps it quick; raise for cleverer jokes
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
     SUGGESTIONS: 3,
   },
-  DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
+  DEBUG_DUMP: false,
+  WIDGET_NAMES: true,      // show first names of people waiting for kudos on medium/large widgets       // save raw feed JSON to Scriptable/strava-feed-debug.json
 };
 
 const STRAVA = 'https://www.strava.com';
@@ -96,8 +96,14 @@ async function main() {
 
   async function viewHere(id) {
     viewing = true;
-    await openStrava(ui, `/activities/${encodeURIComponent(id)}`);
-    addBackButton();
+    try {
+      await openStrava(ui, `/activities/${encodeURIComponent(id)}`);
+      addBackButton();
+    } catch (e) {
+      console.warn('Strava page failed: ' + e);
+      await showDay(false);
+      await js(`window.scrollTo(0, ${savedScroll}); window.toast && toast(${JSON.stringify("Strava's page didn't open. The details view shows everything the digest has.")})`);
+    }
   }
   const js = (code) => ui.evaluateJavaScript(`${code}; 'ok'`).catch(() => {});
   const status = (t) => js(`window.setStatus && window.setStatus(${JSON.stringify(t)})`);
@@ -148,6 +154,7 @@ async function main() {
       viewing = false;
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length }));
+      saveSnapshot(feed);
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
     } catch (e) {
       if (token !== viewToken) return;
@@ -201,7 +208,7 @@ async function main() {
     try {
       if (head === 'kudo') {
         const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, 20000); ok = !!r.ok; msg = r.error || '';
-        if (ok) feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; });
+        if (ok) { feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; }); saveSnapshot(feed); }
       } else if (head === 'comment') {
         if (!cv) { cv = new WebView(); cx = makeSx(cv); }
         await openStrava(cv, `/activities/${encodeURIComponent(p.id)}`);
@@ -393,6 +400,7 @@ function mergeDetails(a, d) {
   if (d.prs != null) a.ach.prs = Math.max(a.ach.prs || 0, d.prs);
   if (d.achievements != null) a.ach.total = Math.max(a.ach.total || 0, d.achievements);
   if (d.list && d.list.length && !a.ach.list.length) a.ach.list = d.list;
+  if (!a.map && d.map) a.map = d.map;
   if (d.photos && d.photos.length) {
     const byKey = new Map();
     [...a.photos, ...d.photos].forEach(u => { const k = photoKey(u); if (!byKey.has(k)) byKey.set(k, u); });
@@ -474,6 +482,144 @@ function parseDur(s) {
 
 function fmtPace(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; }
 function photoKey(u) { return String(u).replace(/-\d+x\d+(?=\.\w+)/, '').replace(/\?.*$/, ''); }
+
+// ─────────────── home-screen widget: today's "waiting for kudos" summary ───────────────
+// Widgets can't use your Strava login, so the digest saves a small summary every time it loads
+// today (and after each kudos); the widget shows that summary.
+
+const SNAPSHOT_FILE = 'strava-digest-widget.json';
+const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+function snapshotFm() {
+  try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); }
+}
+
+function saveSnapshot(feed) {
+  try {
+    const { dayStart, dayEnd } = dayBounds(0);
+    if (!feed.covers(+dayStart)) return;                 // today not fully read yet
+    const acts = feed.day(+dayStart, +dayEnd);
+    const people = groupByAthlete(acts);
+    const waiting = people.filter(p => !p.kudoed);
+    const snap = {
+      date: dayKey(dayStart), updated: Date.now(),
+      waiting: waiting.length, people: people.length, activities: acts.length,
+      prs: acts.reduce((n, a) => n + (a.ach.prs || 0), 0),
+      early: people.filter(p => p.early).length,
+      list: waiting.slice(0, 10).map(p => ({
+        name: String(p.name || '').split(/\s+/)[0], icon: emoji(p.primary.type),
+        early: p.early ? p.early.icon : '', n: p.acts.length,
+      })),
+    };
+    const fm = snapshotFm();
+    fm.writeString(fm.joinPath(fm.documentsDirectory(), SNAPSHOT_FILE), JSON.stringify(snap));
+  } catch (e) { console.warn('Widget summary not saved: ' + e); }
+}
+
+async function readSnapshot() {
+  try {
+    const fm = snapshotFm();
+    const path = fm.joinPath(fm.documentsDirectory(), SNAPSHOT_FILE);
+    if (!fm.fileExists(path)) return null;
+    if (fm.isFileStoredIniCloud && fm.isFileStoredIniCloud(path) && !fm.isFileDownloaded(path)) await fm.downloadFileFromiCloud(path);
+    return JSON.parse(fm.readString(path));
+  } catch (e) { return null; }
+}
+
+// Rounded widget fonts, falling back to the plain system font on older Scriptable versions.
+function wFont(weight, size) {
+  const name = { bold: 'boldRoundedSystemFont', semi: 'semiboldRoundedSystemFont' }[weight] || 'regularRoundedSystemFont';
+  if (typeof Font[name] === 'function') return Font[name](size);
+  return weight === 'bold' ? Font.boldSystemFont(size) : weight === 'semi' ? Font.semiboldSystemFont(size) : Font.systemFont(size);
+}
+
+async function renderWidget() {
+  const fam = config.widgetFamily || 'small';
+  const snap = await readSnapshot();
+  const fresh = !!snap && snap.date === dayKey(new Date());
+  const tf = new DateFormatter(); tf.dateFormat = 'HH:mm';
+  const updated = snap ? tf.string(new Date(snap.updated)) : '';
+  const w = new ListWidget();
+  w.url = URLScheme.forRunningScript();
+  w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+
+  const txt = (stack, s, size, weight, opacity = 1, color = Color.white()) => {
+    const t = stack.addText(s);
+    t.font = wFont(weight, size);
+    t.textColor = color; t.textOpacity = opacity; t.lineLimit = 1; t.minimumScaleFactor = 0.6;
+    return t;
+  };
+  const num = fresh ? String(snap.waiting) : '–';
+
+  // Lock Screen widgets
+  if (fam === 'accessoryInline') { w.addText(fresh ? `👍 ${snap.waiting} waiting for kudos` : '👍 Open to load today'); Script.setWidget(w); return; }
+  if (fam === 'accessoryCircular') {
+    w.addAccessoryWidgetBackground = true;
+    const c = w.addStack(); c.layoutVertically(); c.centerAlignContent();
+    const a = c.addText('👍'); a.font = Font.systemFont(11); a.centerAlignText();
+    const b = c.addText(num); b.font = wFont('bold', 22); b.centerAlignText(); b.minimumScaleFactor = 0.5;
+    Script.setWidget(w); return;
+  }
+  if (fam === 'accessoryRectangular') {
+    const a = w.addText(fresh ? `👍 ${snap.waiting} waiting` : '👍 Strava digest'); a.font = wFont('bold', 15);
+    const b = w.addText(fresh ? `for your kudos, of ${snap.people} today` : 'Open to load today'); b.font = wFont('reg', 12);
+    const c = w.addText(fresh ? `Updated ${updated}` : ''); c.font = wFont('reg', 11); c.textOpacity = 0.7;
+    Script.setWidget(w); return;
+  }
+
+  // Home Screen widgets
+  const g = new LinearGradient();
+  g.colors = [new Color('#fc5c1a'), new Color('#c43c00')]; g.locations = [0, 1];
+  g.startPoint = new Point(0, 0); g.endPoint = new Point(1, 1);
+  w.backgroundGradient = g;
+  w.setPadding(14, 14, 14, 14);
+
+  const row = w.addStack(); row.layoutHorizontally(); row.topAlignContent();
+  const left = row.addStack(); left.layoutVertically();
+  txt(left, '👍 Kudos', 12, 'semi', 0.9);
+  left.addSpacer();
+  txt(left, num, fam === 'small' ? 46 : 52, 'bold');
+  if (!fresh) txt(left, snap ? 'Tap to load today' : 'Tap to open', 13, 'semi');
+  else if (snap.waiting === 0) txt(left, snap.people ? 'All caught up 🎉' : 'Nobody posted yet', 13, 'semi');
+  else txt(left, snap.waiting === 1 ? 'person waiting' : 'people waiting', 13, 'semi');
+  txt(left, fresh ? `of ${snap.people} today, ${updated}` : (snap ? `last check ${updated}` : ''), 11, 'reg', 0.8);
+
+  if (fam !== 'small' && fresh) {
+    row.addSpacer(14);
+    const right = row.addStack(); right.layoutVertically();
+    const max = fam === 'large' ? 9 : 4;
+    const names = CONFIG.WIDGET_NAMES ? snap.list : [];
+    if (!names.length) {
+      txt(right, snap.waiting ? 'Open the digest' : 'Nothing waiting', 13, 'semi', 0.9);
+      txt(right, snap.waiting ? 'to give kudos' : 'Enjoy your day', 12, 'reg', 0.8);
+    }
+    names.slice(0, max).forEach(p => {
+      txt(right, `${p.icon} ${p.name}${p.early ? ' ' + p.early : ''}${p.n > 1 ? ` ×${p.n}` : ''}`, 14, 'semi');
+      right.addSpacer(3);
+    });
+    if (names.length && snap.waiting > Math.min(max, names.length)) txt(right, `+${snap.waiting - Math.min(max, names.length)} more`, 12, 'reg', 0.8);
+    right.addSpacer();
+    if (fam === 'large') {
+      const extra = [snap.prs ? `🏆 ${snap.prs} PR${snap.prs > 1 ? 's' : ''}` : '', snap.early ? `🌅 ${snap.early} early riser${snap.early > 1 ? 's' : ''}` : '', `${snap.activities} activities`].filter(Boolean).join('   ');
+      txt(right, extra, 12, 'reg', 0.85);
+    }
+    row.addSpacer();
+  }
+  Script.setWidget(w);
+}
+
+// Optional: run with ?refresh=1 (or the Shortcuts parameter "refresh") to update the widget
+// summary without showing the digest, e.g. from a Shortcuts automation that runs Scriptable in-app.
+async function refreshOnly() {
+  const sv = new WebView(); const sx = makeSx(sv);
+  await sv.loadURL(`${STRAVA}/robots.txt`);
+  const me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
+  if (!me) throw new Error('Open the digest once first so it can log in.');
+  const first = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, false)`, 20000);
+  const feed = makeFeed(sx, me, first);
+  await feed.readBackTo(+dayBounds(0).dayStart, async () => {}, () => false);
+  saveSnapshot(feed);
+}
 
 function dump(raws) {
   try {
@@ -600,6 +746,18 @@ function stravaLib() {
     return [...best.values()].map(x => x.url).slice(0, 12);
   };
 
+  SD.mapUrl = (o) => {
+    let best = null, score = -1;
+    SD.walk(o, (k, v) => {
+      if (typeof v !== 'string' || !/^https?:\/\//.test(v)) return;
+      if (!(/map/i.test(k) || /\/maps?\/|mapbox|staticmap/i.test(v))) return;
+      if (/avatar|pictures\/athletes/i.test(v)) return;
+      const sc = (/retina|2x|large|dark/i.test(k) ? 2 : 0) + (/dark/i.test(v) ? 1 : 0);
+      if (sc > score) { best = v; score = sc; }
+    });
+    return best;
+  };
+
   SD.stats = (arr) => {
     const out = [];
     if (!Array.isArray(arr)) return out;
@@ -696,7 +854,7 @@ function stravaLib() {
       clock: SD.best(SD.clockLocal(a), SD.clockFromText(SD.text(f.when || '')), SD.clockUtc(f.start)),
       athleteId: String(f.athleteId || ''), athleteName: SD.text(f.athleteName || ''), avatar: f.avatar || '',
       description: SD.text(a.description || ''),
-      stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a),
+      stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a),
       kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
     };
   };
@@ -810,6 +968,8 @@ function stravaLib() {
       const tm = html.match(/<time[^>]*>([^<]{4,80})<\/time>/i);
       res.clock = SD.best(lm && { h: +lm[1], m: +lm[2], src: 3 }, on && SD.clockFromText(on[1]), tm && SD.clockFromText(tm[1]));
     }
+    const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    if (og && !/logo|default|placeholder/i.test(og[1])) res.map = og[1].replace(/&amp;/g, '&');
     if (!res.photos.length) {
       const urls = html.match(/https:\/\/dgtzuqphqg23d\.cloudfront\.net\/[^"'\s)\\]+\.(?:jpe?g|png)/gi) || [];
       res.photos = SD.photos({ photos: urls });
@@ -1035,8 +1195,8 @@ function actHtml(a, p) {
   const photos = a.photos.length
     ? `<div class="photos">${a.photos.map(u => `<img loading="lazy" src="${esc(u)}" data-photo="1" alt="Activity photo" onerror="this.remove()">`).join('')}</div>` : '';
   const main = p.acts.length > 1 && p.primary.id === a.id ? `<span class="main">gets the kudos</span>` : '';
-  return `<article class="act" data-id="${id}">
-    <div class="ah"><span class="emo">${emoji(a.type)}</span><div class="at"><b>${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div></div>
+  return `<article class="act" data-id="${id}" data-map="${esc(a.map || '')}">
+    <div class="ah"><span class="emo">${emoji(a.type)}</span><div class="at"><b class="ttl" data-detail="${id}">${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div></div>
     ${stats ? `<div class="stats">${stats}</div>` : ''}
     ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
     ${achList ? `<ul class="alist">${achList}</ul>` : ''}
@@ -1046,7 +1206,7 @@ function actHtml(a, p) {
       <span class="counts">👍 <i class="kc">${a.kudos}</i>&nbsp;&nbsp;💬 <i class="cc">${a.comments}</i></span>
       ${a.canKudo ? `<button class="small kudo${a.hasKudoed ? ' done' : ''}" data-kudo="${id}" data-pid="${esc(p.id)}"${a.hasKudoed ? ' disabled' : ''}>${a.hasKudoed ? '✓' : '👍'}</button>` : ''}
       <button class="small" data-act="toggle-comment" aria-label="Comment">💬</button>
-      <button class="small" data-activity="${id}" aria-label="Open in Strava">↗</button>
+      <button class="small" data-detail="${id}" aria-label="Activity details">↗</button>
     </div>
     <div class="cbox" hidden>
       <div class="crow"><textarea rows="3" placeholder="Write a comment, or tap Suggest"></textarea><button data-comment="${id}">Post</button></div>
@@ -1062,7 +1222,7 @@ function bootScreen(msg) {
     <div class="scene" aria-hidden="true">
       <div class="sunb"></div>
       <div class="pile"></div>
-      <div class="runner">🏃</div>
+      <svg class="runner" viewBox="0 0 60 80" aria-hidden="true"><g class="body"><g transform="translate(30 41)"><g class="thigh b"><line x1="0" y1="0" x2="0" y2="15"/><g transform="translate(0 15)"><g class="shin b"><line x1="0" y1="0" x2="0" y2="15"/><line x1="0" y1="15" x2="5" y2="15"/></g></g></g></g><g transform="translate(34 24)"><g class="uarm b"><line x1="0" y1="0" x2="0" y2="10"/><g transform="translate(0 10)"><g class="farm b"><line x1="0" y1="0" x2="0" y2="9"/></g></g></g></g><line class="torso" x1="30" y1="41" x2="35" y2="22"/><circle class="head" cx="37" cy="14" r="6"/><g transform="translate(30 41)"><g class="thigh f"><line x1="0" y1="0" x2="0" y2="15"/><g transform="translate(0 15)"><g class="shin f"><line x1="0" y1="0" x2="0" y2="15"/><line x1="0" y1="15" x2="5" y2="15"/></g></g></g></g><g transform="translate(34 24)"><g class="uarm f"><line x1="0" y1="0" x2="0" y2="10"/><g transform="translate(0 10)"><g class="farm f"><line x1="0" y1="0" x2="0" y2="9"/></g></g></g></g></g></svg>
       <div class="track"></div>
     </div>
     <div class="cnt"><b id="cnt">0</b><span>posts loaded</span></div>
@@ -1131,9 +1291,21 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 @keyframes sunb{50%{transform:translateY(6px) scale(1.08)}}
 .track{position:absolute;left:0;right:0;bottom:18px;height:3px;background:repeating-linear-gradient(90deg,var(--line) 0 18px,transparent 18px 30px);background-size:30px 3px;animation:trackmove .45s linear infinite}
 @keyframes trackmove{to{background-position:-30px 0}}
-.runner{position:absolute;left:118px;bottom:20px;font-size:44px;line-height:1;animation:stride .45s ease-in-out infinite;transform-origin:50% 100%}
-@keyframes stride{0%,100%{transform:scaleX(-1) translateY(0) rotate(-4deg)}50%{transform:scaleX(-1) translateY(-7px) rotate(4deg)}}
-.runner{transform:scaleX(-1)}  /* Apple's runner emoji faces left; mirror it to run toward the pile */
+.runner{position:absolute;left:112px;bottom:19px;width:48px;height:64px;overflow:visible}
+.runner line{stroke:var(--fg);stroke-width:5;stroke-linecap:round}
+.runner .torso{stroke:var(--accent);stroke-width:8}
+.runner .head{fill:var(--fg)}
+.runner .b line{stroke:var(--mut)}
+.runner .body{animation:bob .3s ease-in-out infinite}
+.thigh{animation:thigh .6s ease-in-out infinite}
+.shin{animation:shin .6s linear infinite}
+.uarm{animation:uarm .6s ease-in-out infinite}
+.farm{transform:rotate(-80deg)}
+.thigh.b,.shin.b,.uarm.b{animation-delay:-.3s}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes thigh{0%,100%{transform:rotate(-38deg)}50%{transform:rotate(32deg)}}
+@keyframes shin{0%{transform:rotate(12deg)}25%{transform:rotate(8deg)}50%{transform:rotate(55deg)}75%{transform:rotate(100deg)}100%{transform:rotate(12deg)}}
+@keyframes uarm{0%,100%{transform:rotate(40deg)}50%{transform:rotate(-50deg)}}
 .pile{position:absolute;right:14px;bottom:21px;width:46px;display:flex;flex-direction:column-reverse;gap:2px}
 .pile i{display:block;height:5px;border-radius:2px;background:var(--fg);opacity:.85;box-shadow:inset 6px 0 0 var(--accent)}
 .pile i:nth-child(odd){transform:translateX(-2px) rotate(-2deg)}
@@ -1155,7 +1327,12 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 @keyframes tick{40%{transform:scale(1.12);color:var(--accent)}}
 .quip{font-size:16px;font-weight:600;margin-top:16px;min-height:1.4em;transition:opacity .25s}
 .bootst{color:var(--mut);font-size:13px;margin-top:4px}
-@media (prefers-reduced-motion:reduce){.track,.runner,.sunb,.post,.cnt.tick b{animation:none}.post{display:none}}
+@media (prefers-reduced-motion:reduce){.track,.sunb,.post,.cnt.tick b,.runner .body,.thigh,.shin,.uarm{animation:none}.post{display:none}}
+#ptr{position:fixed;left:50%;top:env(safe-area-inset-top,0px);transform:translate(-50%,-60px);opacity:0;z-index:30;display:flex;align-items:center;gap:8px;background:var(--card);color:var(--fg);padding:9px 15px;border-radius:999px;font-size:13px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.28);pointer-events:none;transition:opacity .15s}
+#ptr .ptri{display:inline-block;font-size:16px;line-height:1}
+#ptr.ready{color:var(--accent)}
+#ptr.busy{transition:transform .2s,opacity .15s}
+#ptr.busy .ptri{animation:s .8s linear infinite}
 .loadst{display:none;color:var(--mut);font-size:13px;margin:-6px 4px 12px}
 body.loading .loadst{display:block}
 .clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
@@ -1166,6 +1343,22 @@ body.loading .loadst{display:block}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
+#det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
+#det[hidden]{display:none}
+.detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(40px);opacity:.4}}
+.deth{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--card)}
+.detwho{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+.detwho .av{width:36px;height:36px}
+.detwho b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deth .lbx{background:var(--soft);color:var(--fg)}
+.detb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px}
+.detmap{display:block;width:100%;border-radius:14px;margin-bottom:4px;background:var(--soft);max-height:46vh;object-fit:cover}
+.detb .act{border-top:0;margin-top:0;padding:4px 2px 0}
+.detb .photos img{height:170px;max-width:260px}
+.detf{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
+.detf button{padding:11px 8px;font-size:14px}
+.ttl{cursor:pointer}
 #sendov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);display:grid;place-items:center;touch-action:none;padding:20px}
 #sendov[hidden]{display:none}
 .sv{width:min(330px,100%);background:var(--card);border-radius:24px;padding:20px 18px 22px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.45)}
@@ -1253,6 +1446,11 @@ ${content}
   <p class="svq"></p>
   <button class="svok" data-act="send-close" hidden>OK</button>
 </div></div>
+<div id="det" hidden><div class="detp" role="dialog" aria-label="Activity details">
+  <div class="deth"><div class="detwho"></div><button class="lbx" data-act="det-close" aria-label="Close">✕</button></div>
+  <div class="detb"></div>
+  <div class="detf"><button data-act="det-app">Open in Strava app</button><button class="ghost" data-act="det-web">Strava website</button></div>
+</div></div>
 <div id="sheet" hidden><div class="shc">
   <button data-act="open-here">View here</button>
   <button class="ghost" data-act="open-app">Open in Strava app</button>
@@ -1264,7 +1462,7 @@ ${content}
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){ document.addEventListener(n,function(e){ e.preventDefault(); },{passive:false}); });
 var lastTouchEnd=0;
 document.addEventListener('touchend',function(e){ var now=Date.now(); if(now-lastTouchEnd<300&&!e.target.closest('textarea,input')) e.preventDefault(); lastTouchEnd=now; },{passive:false});
-var q=[],pending={},busy=false,armed=false,OPEN_IN='${CONFIG.OPEN_IN}';
+var q=[],pending={},busy=false,armed=false;
 document.addEventListener('click',function(e){ if(e.target.id==='sheet') e.target.hidden=true; });
 function send(action,params,cb){
   var req='r'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -1302,7 +1500,7 @@ window.setStatus=function(s){ var el=document.getElementById('st'); if(el) el.te
 function toast(t){ var el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(function(){el.classList.remove('on');},2400); }
 function markKudo(id,pid){
   document.querySelectorAll('[data-kudo="'+CSS.escape(id)+'"]').forEach(function(b){ b.classList.add('done'); b.disabled=true; b.textContent=b.classList.contains('small')?'✓':'✓ Kudos given'; });
-  var kc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .kc'); if(kc) kc.textContent=(+kc.textContent||0)+1;
+  document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .kc').forEach(function(kc){ kc.textContent=(+kc.textContent||0)+1; });
   var pb=document.querySelector('.person-k[data-pid="'+CSS.escape(pid)+'"]'); if(pb){ pb.classList.add('done'); pb.disabled=true; pb.textContent='✓ Kudos given'; }
   var sec=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]');
   if(sec&&!sec.dataset.counted){ sec.dataset.counted='1';
@@ -1396,6 +1594,63 @@ window.setCount=function(n){
     setTimeout(function(){ p.remove(); var pile=document.querySelector('.pile'); if(pile){ pile.classList.remove('bump'); void pile.offsetWidth; pile.classList.add('bump'); } },1300);
   },420);
 })();
+// ── pull down at the top of the digest to refresh ──
+(function(){
+  if(!document.querySelector('.days')) return;
+  var ptr=document.createElement('div'); ptr.id='ptr'; ptr.setAttribute('aria-hidden','true');
+  ptr.innerHTML='<span class="ptri">↓</span><span class="ptrt">Pull to refresh</span>';
+  document.body.appendChild(ptr);
+  var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
+  var y0=null, x0=0, dist=0, armed=false, TH=75;
+  function overlayOpen(){ return ['lb','sendov','sheet','det'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
+  document.addEventListener('touchstart',function(e){
+    if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.days,.photos,textarea,input')){ y0=null; return; }
+    y0=e.touches[0].clientY; x0=e.touches[0].clientX; dist=0;
+  },{passive:true});
+  document.addEventListener('touchmove',function(e){
+    if(y0==null) return;
+    var dy=e.touches[0].clientY-y0, dx=Math.abs(e.touches[0].clientX-x0);
+    if(window.scrollY>0||dy<=0||dx>dy){ reset(); return; }
+    dist=Math.min(150,dy*0.6);
+    var p=Math.min(1,dist/TH);
+    ptr.style.transform='translate(-50%,'+Math.round(dist-50)+'px)'; ptr.style.opacity=Math.min(1,p*1.3);
+    icon.style.transform='rotate('+Math.round(p*180)+'deg)';
+    var ready=dist>=TH;
+    if(ready!==armed){ armed=ready; ptr.classList.toggle('ready',armed); label.textContent=armed?'Release to refresh':'Pull to refresh'; }
+  },{passive:true});
+  document.addEventListener('touchend',function(){
+    if(y0==null) return;
+    y0=null;
+    if(!armed){ reset(); return; }
+    armed=false; ptr.classList.remove('ready'); ptr.classList.add('busy');
+    icon.style.transform=''; icon.textContent='↻'; label.textContent='Refreshing…';
+    ptr.style.transform='translate(-50%,18px)'; ptr.style.opacity=1;
+    document.body.classList.add('loading');
+    send('refresh',{});
+  },{passive:true});
+})();
+// ── activity details sheet: everything the digest knows, without leaving it ──
+function openDetail(id){
+  var art=document.querySelector('section.person .act[data-id="'+CSS.escape(id)+'"]');
+  if(!art) return;
+  var det=document.getElementById('det'), body=det.querySelector('.detb'), who=det.querySelector('.detwho');
+  var person=art.closest('section.person');
+  det.dataset.id=id; det.dataset.pid=person?person.dataset.pid:'';
+  who.innerHTML='';
+  if(person){
+    var av=person.querySelector('.av'); if(av) who.appendChild(av.cloneNode(true));
+    var nm=document.createElement('b'); nm.textContent=(person.querySelector('.pn b').firstChild||{}).textContent||''; who.appendChild(nm);
+  }
+  body.innerHTML='';
+  if(art.dataset.map){ var m=document.createElement('img'); m.className='detmap'; m.src=art.dataset.map; m.alt='Route map'; m.onerror=function(){ m.remove(); }; body.appendChild(m); }
+  var c=art.cloneNode(true); c.querySelectorAll('[data-detail]').forEach(function(x){ if(x.tagName==='BUTTON') x.remove(); else x.removeAttribute('data-detail'); });
+  var cb=c.querySelector('.cbox'); if(cb){ cb.hidden=true; var ta=cb.querySelector('textarea'); if(ta) ta.value=''; var sg=cb.querySelector('.sugs'); if(sg) sg.innerHTML=''; }
+  body.appendChild(c);
+  det.hidden=false; document.body.style.overflow='hidden'; body.scrollTop=0;
+}
+function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
+document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
 var lbN=0;
 function lbCount(){ var sc=document.querySelector('#lb .lbs'); document.getElementById('lbc').textContent=lbN>1?(Math.round(sc.scrollLeft/sc.clientWidth)+1)+' / '+lbN:''; }
 function openPhotos(img){
@@ -1415,12 +1670,11 @@ function closePhotos(){ document.getElementById('lb').hidden=true; document.body
   sc.addEventListener('touchend',function(e){ var t=e.changedTouches[0]; if(t.clientY-y0>90&&Math.abs(t.clientX-x0)<60) closePhotos(); },{passive:true});
 })();
 document.addEventListener('click',function(e){
-  var t=e.target.closest('button,[data-open],[data-photo],[data-athlete]'); if(!t) return;
-  if(t.dataset.activity){
-    if(OPEN_IN==='app') return send('activity',{id:t.dataset.activity});
-    if(OPEN_IN==='here') return send('view',{id:t.dataset.activity,y:Math.round(window.scrollY)});
-    var sh=document.getElementById('sheet'); sh.dataset.id=t.dataset.activity; sh.hidden=false; return;
-  }
+  var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
+  if(t.dataset.detail) return openDetail(t.dataset.detail);
+  if(t.dataset.act==='det-close') return closeDetail();
+  if(t.dataset.act==='det-app') return send('activity',{id:document.getElementById('det').dataset.id});
+  if(t.dataset.act==='det-web'){ var did=document.getElementById('det').dataset.id; closeDetail(); return send('view',{id:did,y:Math.round(window.scrollY)}); }
   if(t.dataset.act==='open-here'||t.dataset.act==='open-app'||t.dataset.act==='sheet-close'){
     var sh2=document.getElementById('sheet'), aid=sh2.dataset.id; sh2.hidden=true;
     if(t.dataset.act==='open-here') send('view',{id:aid,y:Math.round(window.scrollY)});
@@ -1461,10 +1715,12 @@ document.addEventListener('click',function(e){
     if(!text) return;
     t.disabled=true; t.textContent='…';
     if(document.activeElement) document.activeElement.blur();
-    var flight=showSending(t.closest('section.person'), text);
+    var det=document.getElementById('det');
+    var who=t.closest('section.person')||(t.closest('#det')&&det.dataset.pid?document.querySelector('section.person[data-pid="'+CSS.escape(det.dataset.pid)+'"]'):null);
+    var flight=showSending(who, text);
     send('comment',{id:id,text:text},function(ok,msg){
       t.disabled=false; t.textContent='Post';
-      if(ok){ ta.value=''; box.hidden=true; var cc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .cc'); if(cc) cc.textContent=(+cc.textContent||0)+1; }
+      if(ok){ ta.value=''; box.hidden=true; document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .cc').forEach(function(cc){ cc.textContent=(+cc.textContent||0)+1; }); }
       flight.finish(ok,msg);
     });
     return;
@@ -1481,15 +1737,11 @@ document.addEventListener('click',function(e){
 
 // ───────────── entry point (last, so every const above is initialised) ─────────────
 
-if (config.runsInWidget) {
-  const w = new ListWidget();
-  w.backgroundColor = new Color('#fc4c02');
-  const t = w.addText('Strava digest');
-  t.textColor = Color.white(); t.font = Font.boldSystemFont(16);
-  const s = w.addText('Tap to open today');
-  s.textColor = Color.white(); s.font = Font.systemFont(12);
-  w.url = URLScheme.forRunningScript();
-  Script.setWidget(w);
+const wantsRefreshOnly = !!(qp.refresh || args.shortcutParameter === 'refresh');
+if (config.runsInWidget || config.runsInAccessoryWidget) {
+  await renderWidget();
+} else if (wantsRefreshOnly) {
+  try { await refreshOnly(); } catch (e) { console.error(e); }
 } else {
   try { await main(); }
   catch (e) {
