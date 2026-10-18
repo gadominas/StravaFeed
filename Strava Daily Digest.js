@@ -101,9 +101,10 @@ async function main() {
   }
   const js = (code) => ui.evaluateJavaScript(`${code}; 'ok'`).catch(() => {});
   const status = (t) => js(`window.setStatus && window.setStatus(${JSON.stringify(t)})`);
+  const count = (n) => js(`window.setCount && window.setCount(${+n || 0})`);
 
   // Show the window straight away; everything else loads behind it.
-  await ui.loadHTML(shell('Opening your feed'));
+  await ui.loadHTML(bootScreen('Opening your feed'));
   const shown = ui.present(true);
   shown.then(() => { closed = true; });
 
@@ -119,7 +120,7 @@ async function main() {
       await ui.loadHTML(page(`<div class="center"><h1>Log in to Strava</h1><p>Use email and password or the emailed code. Google sign-in usually doesn't work here.<br>The digest opens by itself once you're logged in.</p><br><button data-act="login">Log in to Strava</button></div>`));
       while (!closed && !(await authInfo(sx)).loggedIn) await sleep(2500);
       if (closed) return null;
-      await ui.loadHTML(shell('Logged in. Loading your feed'));
+      await ui.loadHTML(bootScreen('Logged in. Loading your feed'));
     }
     me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : await sx('__SD.athleteId()');
     if (!me) throw new Error('Could not detect your athlete ID. Open your Strava profile, copy the number from strava.com/athletes/<ID>, and set CONFIG.ATHLETE_ID at the top of the script.');
@@ -135,16 +136,17 @@ async function main() {
   }
 
   // Load only what the chosen day needs, render it, then fill in details card by card.
-  async function showDay(force) {
+  async function showDay(force, booting) {
     const token = ++viewToken;
     const { dayStart, dayEnd } = dayBounds(daysBack);
     try {
       if (force) await feed.restart(status);
-      if (!feed.covers(+dayStart)) await feed.readBackTo(+dayStart, status, () => token !== viewToken);
+      if (!feed.covers(+dayStart)) await feed.readBackTo(+dayStart, status, () => token !== viewToken, count);
       if (token !== viewToken || closed) return;
       const acts = feed.day(+dayStart, +dayEnd);
       acts.forEach(a => { if (details.has(a.id)) mergeDetails(a, details.get(a.id)); derive(a); });
       viewing = false;
+      if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length }));
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
     } catch (e) {
@@ -237,7 +239,8 @@ async function main() {
       const session = await startSession();
       if (!session) return;
       feed = makeFeed(sx, session.me, session.first);
-      await showDay(false);
+      await count(feed.scan().entries);
+      await showDay(false, true);
     } catch (e) {
       await ui.loadHTML(page(`<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="retry">Try again</button></div>`));
     }
@@ -335,13 +338,14 @@ function makeFeed(sx, me, first) {
 
   return {
     covers: (dayStart) => st.done || (st.position != null && st.position < dayStart - MARGIN),
-    async readBackTo(dayStart, status, cancelled) {
+    async readBackTo(dayStart, status, cancelled, onCount) {
       const limit = st.pages + CONFIG.MAX_PAGES + CONFIG.EXTRA_PAGES_PER_DAY * 3;
       while (!this.covers(dayStart) && st.pages < limit) {
         if (cancelled()) return;
         await status(`Reading feed${st.position ? `, back to ${dayLabel(st.position)}` : ''}`);
         const r = await sx(`__SD.page(${JSON.stringify(me)}, ${JSON.stringify(st.next.before)}, ${JSON.stringify(st.next.cursor)}, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000);
         absorb(r);
+        if (onCount) await onCount(st.entries);
       }
       if (!this.covers(dayStart)) st.stop = 'page limit reached';
       if (CONFIG.DEBUG_DUMP) dump(st.raws);
@@ -1053,6 +1057,20 @@ function actHtml(a, p) {
   </article>`;
 }
 
+function bootScreen(msg) {
+  return page(`<div class="boot" role="status" aria-live="polite">
+    <div class="scene" aria-hidden="true">
+      <div class="sunb"></div>
+      <div class="pile"></div>
+      <div class="runner">🏃</div>
+      <div class="track"></div>
+    </div>
+    <div class="cnt"><b id="cnt">0</b><span>posts loaded</span></div>
+    <div class="quip" id="quip">Lacing up your feed</div>
+    <div id="st" class="bootst">${esc(msg)}</div>
+  </div>`);
+}
+
 function shell(msg, isError) {
   return page(`<div class="center">${isError ? '' : '<div class="spin"></div>'}<div id="st">${msg}</div>
     ${isError ? '<br><button class="ghost" data-act="refresh">Try again</button>' : ''}</div>`);
@@ -1107,6 +1125,37 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .sec:first-of-type{margin-top:4px}
 .sec span{background:var(--soft);color:var(--fg);border-radius:999px;padding:1px 9px;font-size:12px;font-variant-numeric:tabular-nums}
 .sec.todo span{background:var(--accent);color:#fff}
+.boot{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px 0}
+.scene{position:relative;width:300px;height:150px;overflow:hidden}
+.sunb{position:absolute;right:30px;top:10px;width:34px;height:34px;border-radius:50%;background:radial-gradient(circle,#ffd27a 0 55%,rgba(255,210,122,0) 70%);animation:sunb 3s ease-in-out infinite}
+@keyframes sunb{50%{transform:translateY(6px) scale(1.08)}}
+.track{position:absolute;left:0;right:0;bottom:18px;height:3px;background:repeating-linear-gradient(90deg,var(--line) 0 18px,transparent 18px 30px);background-size:30px 3px;animation:trackmove .45s linear infinite}
+@keyframes trackmove{to{background-position:-30px 0}}
+.runner{position:absolute;left:118px;bottom:20px;font-size:44px;line-height:1;animation:stride .45s ease-in-out infinite;transform-origin:50% 100%}
+@keyframes stride{0%,100%{transform:scaleX(-1) translateY(0) rotate(-4deg)}50%{transform:scaleX(-1) translateY(-7px) rotate(4deg)}}
+.runner{transform:scaleX(-1)}  /* Apple's runner emoji faces left; mirror it to run toward the pile */
+.pile{position:absolute;right:14px;bottom:21px;width:46px;display:flex;flex-direction:column-reverse;gap:2px}
+.pile i{display:block;height:5px;border-radius:2px;background:var(--fg);opacity:.85;box-shadow:inset 6px 0 0 var(--accent)}
+.pile i:nth-child(odd){transform:translateX(-2px) rotate(-2deg)}
+.pile i:nth-child(even){transform:translateX(2px) rotate(2deg)}
+.pile.bump{animation:bump .25s ease-out}
+@keyframes bump{50%{transform:scaleY(.9) translateY(2px)}}
+.post{position:absolute;left:0;top:0;width:28px;height:20px;border-radius:5px;background:var(--fg);box-shadow:0 2px 6px rgba(0,0,0,.3);animation:deliver 1.3s cubic-bezier(.45,.05,.55,.95) forwards}
+.post::before{content:'';position:absolute;left:4px;top:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.post::after{content:'';position:absolute;left:4px;right:4px;top:12px;height:3px;border-radius:2px;background:var(--mut);box-shadow:0 -5px 0 -0px transparent}
+@keyframes deliver{
+  0%{transform:translate(-34px,var(--y)) rotate(-25deg);opacity:0}
+  12%{opacity:1}
+  50%{transform:translate(126px,-6px) rotate(12deg) scale(1.1)}
+  85%{opacity:1}
+  100%{transform:translate(254px,104px) rotate(0) scale(.6);opacity:0}}
+.cnt b{display:block;font-size:56px;line-height:1;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px}
+.cnt span{color:var(--mut);font-size:13px}
+.cnt.tick b{animation:tick .3s ease-out}
+@keyframes tick{40%{transform:scale(1.12);color:var(--accent)}}
+.quip{font-size:16px;font-weight:600;margin-top:16px;min-height:1.4em;transition:opacity .25s}
+.bootst{color:var(--mut);font-size:13px;margin-top:4px}
+@media (prefers-reduced-motion:reduce){.track,.runner,.sunb,.post,.cnt.tick b{animation:none}.post{display:none}}
 .loadst{display:none;color:var(--mut);font-size:13px;margin:-6px 4px 12px}
 body.loading .loadst{display:block}
 .clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
@@ -1321,6 +1370,32 @@ function showSending(person,text){
     }
   } };
 }
+// ── boot screen: runner collecting posts, counter ticking up to the real number ──
+var cntShown=0,cntTarget=0,cntRaf=0;
+window.setCount=function(n){
+  var el=document.getElementById('cnt'); if(!el) return;
+  cntTarget=Math.max(cntTarget,n||0); cancelAnimationFrame(cntRaf);
+  var from=cntShown, t0=performance.now(), dur=Math.min(1200,300+(cntTarget-from)*25);
+  var wrap=el.parentNode; wrap.classList.remove('tick'); void wrap.offsetWidth; wrap.classList.add('tick');
+  (function step(now){ var k=Math.min(1,(now-t0)/dur); k=1-Math.pow(1-k,3);
+    cntShown=Math.round(from+(cntTarget-from)*k); el.textContent=cntShown;
+    if(k<1) cntRaf=requestAnimationFrame(step); })(t0);
+  var pile=document.querySelector('.pile');
+  if(pile){ var want=Math.min(14,Math.ceil(cntTarget/6)); while(pile.children.length<want) pile.appendChild(document.createElement('i')); }
+};
+(function(){
+  var scene=document.querySelector('.scene'); if(!scene) return;
+  var quips=['Lacing up your feed','Counting who ran before breakfast','Stretching the scroll muscles','Sorting the kudos-hungry','Drafting behind the 5 AM club','Hydrating the feed','Skipping the warm-up, grabbing posts','Checking who beat their PR'];
+  var qi=0, q=document.getElementById('quip');
+  setInterval(function(){ qi=(qi+1)%quips.length; q.style.opacity=0; setTimeout(function(){ q.textContent=quips[qi]; q.style.opacity=1; },250); },1700);
+  if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  setInterval(function(){
+    var p=document.createElement('div'); p.className='post';
+    p.style.setProperty('--y',(20+Math.random()*50)+'px');
+    scene.appendChild(p);
+    setTimeout(function(){ p.remove(); var pile=document.querySelector('.pile'); if(pile){ pile.classList.remove('bump'); void pile.offsetWidth; pile.classList.add('bump'); } },1300);
+  },420);
+})();
 var lbN=0;
 function lbCount(){ var sc=document.querySelector('#lb .lbs'); document.getElementById('lbc').textContent=lbN>1?(Math.round(sc.scrollLeft/sc.clientWidth)+1)+' / '+lbN:''; }
 function openPhotos(img){
