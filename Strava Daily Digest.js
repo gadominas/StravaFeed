@@ -1117,6 +1117,48 @@ body.loading .loadst{display:block}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
+#sendov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);display:grid;place-items:center;touch-action:none;padding:20px}
+#sendov[hidden]{display:none}
+.sv{width:min(330px,100%);background:var(--card);border-radius:24px;padding:20px 18px 22px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.stage{position:relative;width:280px;height:130px;margin:0 auto 8px}
+.arc{position:absolute;inset:0;width:280px;height:130px;overflow:visible}
+.arc path{fill:none;stroke:var(--line);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:3 8;animation:ants .7s linear infinite}
+@keyframes ants{to{stroke-dashoffset:-22}}
+.me,.them{position:absolute;top:37px;width:56px;height:56px;border-radius:50%;background:var(--soft);display:grid;place-items:center;overflow:hidden}
+.me{left:6px;font-size:26px;animation:scribble 1.9s ease-in-out infinite}
+.them{left:218px;font-weight:700;color:var(--mut);font-size:18px;box-shadow:0 0 0 3px var(--card),0 0 0 5px var(--accent);animation:catch 1.9s ease-in-out infinite}
+.them img{width:100%;height:100%;object-fit:cover}
+.plane{position:absolute;left:0;top:0;width:30px;height:30px;font-size:26px;line-height:30px;animation:fly 1.9s ease-in-out infinite;will-change:transform}
+@keyframes fly{
+  0%{transform:translate(47px,50px) rotate(-35deg) scale(.5);opacity:0}
+  10%{opacity:1}
+  25%{transform:translate(86px,24px) rotate(-18deg) scale(.9)}
+  50%{transform:translate(125px,15px) rotate(0) scale(1.1)}
+  75%{transform:translate(164px,24px) rotate(18deg) scale(.9)}
+  92%{opacity:1}
+  100%{transform:translate(203px,50px) rotate(35deg) scale(.4);opacity:0}}
+@keyframes catch{0%,82%{transform:scale(1)}90%{transform:scale(1.14)}100%{transform:scale(1)}}
+@keyframes scribble{0%,100%{transform:rotate(0)}10%{transform:rotate(-12deg)}20%{transform:rotate(8deg)}30%{transform:rotate(0)}}
+.chk{position:absolute;left:252px;top:28px;width:28px;height:28px;border-radius:50%;background:#2fb344;color:#fff;font-weight:800;font-size:16px;display:grid;place-items:center;transform:scale(0)}
+.bit{position:absolute;left:236px;top:55px;font-size:18px;pointer-events:none;animation:pop .95s ease-out forwards}
+@keyframes pop{0%{transform:translate(0,0) scale(.3);opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1);opacity:0}}
+#sendov.ok .plane{display:none}
+#sendov.ok .them{animation:landed .6s cubic-bezier(.3,1.6,.5,1)}
+#sendov.ok .chk{animation:chk .45s .15s cubic-bezier(.3,1.6,.5,1) forwards}
+#sendov.ok .arc path,#sendov.fail .arc path{animation:none;stroke:var(--soft)}
+#sendov.ok .me,#sendov.fail .me,#sendov.fail .them{animation:none}
+@keyframes landed{0%{transform:scale(1)}40%{transform:scale(1.25)}100%{transform:scale(1)}}
+@keyframes chk{to{transform:scale(1)}}
+#sendov.fail .plane{animation:fall .9s ease-in forwards}
+@keyframes fall{0%{transform:translate(125px,15px) rotate(0);opacity:1}100%{transform:translate(140px,110px) rotate(150deg);opacity:0}}
+.svt{font-size:18px;font-weight:700;margin-top:4px}
+.svs{color:var(--mut);font-size:14px;margin-top:4px;min-height:2.6em}
+.svq{margin:10px 0 0;font-size:14px;font-style:italic;color:var(--fg);opacity:.85;word-break:break-word}
+.svok{margin-top:14px;min-width:120px}
+@media (prefers-reduced-motion:reduce){
+  .plane{animation:none;transform:translate(125px,15px)}
+  .me,.them,.arc path{animation:none}
+  .bit{display:none}}
 #sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:flex-end}
 #sheet[hidden]{display:none}
 .shc{width:100%;background:var(--card);border-radius:18px 18px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:grid;gap:8px}
@@ -1149,6 +1191,19 @@ textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);bac
 body.loading .person{opacity:.45}
 </style></head><body>
 ${content}
+<div id="sendov" hidden role="status" aria-live="polite"><div class="sv">
+  <div class="stage">
+    <svg class="arc" viewBox="0 0 280 130" aria-hidden="true"><path d="M62 65 Q140 -5 218 65"/></svg>
+    <div class="me" aria-hidden="true">✍️</div>
+    <div class="plane" aria-hidden="true">💬</div>
+    <div class="them" aria-hidden="true"></div>
+    <div class="chk" aria-hidden="true">✓</div>
+  </div>
+  <div class="svt"></div>
+  <div class="svs"></div>
+  <p class="svq"></p>
+  <button class="svok" data-act="send-close" hidden>OK</button>
+</div></div>
 <div id="sheet" hidden><div class="shc">
   <button data-act="open-here">View here</button>
   <button class="ghost" data-act="open-app">Open in Strava app</button>
@@ -1223,6 +1278,49 @@ function kudoAll(btn){
   armed=false; btn.disabled=true; btn.textContent='Sending '+list.length+' kudos';
   list.forEach(kudo);
 }
+// ── "comment in flight" overlay: locks the screen until Strava answers ──
+function blockMove(e){ e.preventDefault(); }
+function lockScreen(on){
+  if(on){ document.addEventListener('touchmove',blockMove,{passive:false}); document.documentElement.style.overflow='hidden'; document.body.style.overflow='hidden'; }
+  else { document.removeEventListener('touchmove',blockMove,{passive:false}); document.documentElement.style.overflow=''; document.body.style.overflow=''; }
+}
+function closeSending(){ var ov=document.getElementById('sendov'); ov.hidden=true; ov.className=''; lockScreen(false); }
+function burst(stage){
+  var bits=['🎉','✨','👏','💥','⭐','🏅'];
+  for(var i=0;i<16;i++){
+    var s=document.createElement('span'); s.className='bit'; s.textContent=bits[i%bits.length];
+    var ang=(Math.PI*2*i/16)+Math.random()*0.4, dist=50+Math.random()*45;
+    s.style.setProperty('--dx',Math.round(Math.cos(ang)*dist)+'px'); s.style.setProperty('--dy',Math.round(Math.sin(ang)*dist)+'px');
+    s.style.animationDelay=(Math.random()*0.12)+'s';
+    stage.appendChild(s); setTimeout(function(x){ return function(){ x.remove(); }; }(s),1400);
+  }
+}
+function showSending(person,text){
+  var ov=document.getElementById('sendov'), them=ov.querySelector('.them');
+  var nameEl=person?person.querySelector('.pn b'):null;
+  var name=((nameEl&&nameEl.firstChild?nameEl.firstChild.textContent:'')||'').trim().split(' ').filter(Boolean)[0]||'your friend';
+  var av=person?person.querySelector('.av'):null;
+  them.innerHTML='';
+  if(av&&av.tagName==='IMG'){ var im=document.createElement('img'); im.src=av.src; im.alt=''; them.appendChild(im); }
+  else them.textContent=av?av.textContent:'?';
+  var quote=text.length>70?text.slice(0,67)+'…':text;
+  ov.querySelector('.svq').textContent='“'+quote+'”';
+  var ttl=ov.querySelector('.svt'), sub=ov.querySelector('.svs'), okb=ov.querySelector('.svok');
+  var msgs=['Folding your comment into a paper plane','Dodging runners on the bike path','Holding race pace for the last 100 m','Knocking on '+name+'’s feed','Almost there, '+name+' is still stretching','Asking the segment leaderboard for directions'];
+  var i=0; ttl.textContent='Sending to '+name+'…'; sub.textContent=msgs[0]; okb.hidden=true;
+  var timer=setInterval(function(){ i=(i+1)%msgs.length; sub.textContent=msgs[i]; },1900);
+  ov.className=''; ov.hidden=false; lockScreen(true);
+  return { finish:function(ok,msg){
+    clearInterval(timer);
+    if(ok){
+      ov.classList.add('ok'); ttl.textContent='Delivered to '+name+'!'; sub.textContent='Your comment landed right on target 🎯';
+      burst(ov.querySelector('.stage')); setTimeout(closeSending,1900);
+    } else {
+      ov.classList.add('fail'); ttl.textContent='Your comment didn’t make it'; sub.textContent=(msg||'Unknown error')+'. Check the activity in Strava before trying again.';
+      okb.hidden=false;
+    }
+  } };
+}
 var lbN=0;
 function lbCount(){ var sc=document.querySelector('#lb .lbs'); document.getElementById('lbc').textContent=lbN>1?(Math.round(sc.scrollLeft/sc.clientWidth)+1)+' / '+lbN:''; }
 function openPhotos(img){
@@ -1287,16 +1385,19 @@ document.addEventListener('click',function(e){
     var box=t.closest('.cbox'),ta=box.querySelector('textarea'),text=ta.value.trim(),id=t.dataset.comment;
     if(!text) return;
     t.disabled=true; t.textContent='…';
+    if(document.activeElement) document.activeElement.blur();
+    var flight=showSending(t.closest('section.person'), text);
     send('comment',{id:id,text:text},function(ok,msg){
       t.disabled=false; t.textContent='Post';
-      if(ok){ ta.value=''; box.hidden=true; var cc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .cc'); if(cc) cc.textContent=(+cc.textContent||0)+1; toast('Comment posted'); }
-      else toast('Comment not posted: '+(msg||'unknown error'));
+      if(ok){ ta.value=''; box.hidden=true; var cc=document.querySelector('.act[data-id="'+CSS.escape(id)+'"] .cc'); if(cc) cc.textContent=(+cc.textContent||0)+1; }
+      flight.finish(ok,msg);
     });
     return;
   }
   var act=t.dataset.act;
   if(act==='toggle-comment'){ var b=t.closest('.act').querySelector('.cbox'); b.hidden=!b.hidden; if(!b.hidden) b.querySelector('textarea').focus(); }
   if(act==='kudo-all') kudoAll(t);
+  if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
 });
