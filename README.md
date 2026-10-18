@@ -38,6 +38,7 @@ The bigger your feed, the more time it saves.
 | 🖼 **Photo viewer** | Tap a photo to view it full-screen and swipe through the rest, without leaving the digest. |
 | 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
 | ↗ **Open the full post** | View the Strava page inside the digest and come back to the same spot, or open it in the Strava app. |
+| 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
 <p align="center">
