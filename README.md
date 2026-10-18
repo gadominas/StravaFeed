@@ -36,7 +36,7 @@ The bigger your feed, the more time it saves.
 | 📊 **Key numbers up front** | Distance, pace or speed, time, elevation, heart rate, PRs and achievements, start date and time, and photos. |
 | 🌅 **Early-riser badges** | Special badges for the 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs, plus a daily count of early risers. |
 | 🖼 **Photo viewer** | Tap a photo to view it full-screen and swipe through the rest, without leaving the digest. |
-| 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. |
+| 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
 | ↗ **Open the full post** | View the Strava page inside the digest and come back to the same spot, or open it in the Strava app. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
