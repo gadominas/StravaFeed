@@ -37,7 +37,9 @@ The bigger your feed, the more time it saves.
 | 🌅 **Early-riser badges** | Special badges for the 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs, plus a daily count of early risers. |
 | 🖼 **Photo viewer** | Tap a photo to view it full-screen and swipe through the rest, without leaving the digest. |
 | 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
-| ↗ **Open the full post** | View the Strava page inside the digest and come back to the same spot, or open it in the Strava app. |
+| 🗺 **Activity details** | Tap an activity's title or **↗** for a details sheet: route map, all stats, PRs, description, larger photos, kudos and comments. From there you can also open it in the Strava app or on Strava's website. |
+| 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who. |
+| ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
@@ -73,9 +75,16 @@ Either of these works:
 - **Download the file:** download [`Strava Daily Digest.js`](Strava%20Daily%20Digest.js) and save it to **iCloud Drive › Scriptable**. It shows up in Scriptable automatically.
 - **Copy and paste:** in Scriptable, tap **+**, paste the whole script, and name it *Strava Daily Digest*.
 
-### Optional: home-screen widget
+### Optional: kudos widget
 
-Add a small **Scriptable** widget to your home screen. Long-press it, choose **Edit Widget**, and select **Strava Daily Digest** as the script. Tapping the widget then opens today's digest.
+The widget shows how many people are still waiting for your kudos today. The medium and large sizes also list their names. Tapping it opens the digest.
+
+1. Long-press your Home Screen, tap **Edit → Add Widget**, choose **Scriptable**, and pick a size.
+2. Long-press the new widget, tap **Edit Widget**, set **Script** to *Strava Daily Digest* and **When Interacting** to *Run Script*.
+
+Lock Screen widgets are added the same way under **Customize → Lock Screen**.
+
+Widgets can't use your Strava login, so the widget shows the summary the digest saves each time it loads today's feed and each time you give kudos. To update it automatically, create a Shortcuts automation, for example at 8:00 and 18:00, with Scriptable's **Run Script** action. Choose *Strava Daily Digest*, set the parameter to `refresh`, and turn **Run In App** on.
 
 ## First run
 
@@ -94,8 +103,9 @@ Add a small **Scriptable** widget to your home screen. Long-press it, choose **E
 | Comment | Tap 💬, write a comment, then tap **Post** |
 | Get comment ideas | Tap 💬 then **✨ Suggest**, tap an idea, edit it, then **Post** |
 | See photos | Tap a photo, swipe left or right, and close with ✕ or by swiping down |
-| Open the full post | Tap **↗**, then **View here** or **Open in Strava app** |
-| Reload | Tap **↻** |
+| See activity details | Tap the activity title or **↗** |
+| Open in Strava | In the details sheet, tap **Open in Strava app** or **Strava website** |
+| Reload | Pull the page down at the top, or tap **↻** |
 
 ## Configuration
 
@@ -107,11 +117,11 @@ These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`
 | `DAYS_IN_PICKER` | `7` | Number of days in the day bar |
 | `INCLUDE_ME` | `false` | Include your own activities |
 | `ENRICH_DETAILS` | `true` | Read each activity's page for heart rate, PRs, start time and extra photos |
-| `OPEN_IN` | `'ask'` | What **↗** does: `'ask'`, `'here'` (inside the digest) or `'app'` |
 | `AI.MODEL` | `'gpt-5.4-mini'` | OpenAI model used for comment ideas |
 | `AI.REASONING` | `'low'` | Higher means cleverer jokes but slower suggestions |
 | `AI.LANGUAGES` | EN, LT | Languages offered in the comment box |
 | `ATHLETE_ID` | `null` | Your Strava athlete ID. Only needed if it can't be detected automatically. |
+| `WIDGET_NAMES` | `true` | Show first names of people waiting for kudos on medium and large widgets |
 | `DEBUG_DUMP` | `false` | Saves the raw feed data to Scriptable's folder for troubleshooting |
 
 ## Privacy and security
@@ -139,7 +149,8 @@ Strava's official API doesn't provide the feed of the people you follow, and it 
 | Login keeps being asked for | Log in with email and password or the emailed code, and wait until the Strava page finishes loading |
 | A day shows nobody | Read the grey note under **Check again**: it shows how far the feed was read and why it stopped |
 | An activity shows only a date, no time | Strava didn't share a start time; it usually appears once details finish loading |
-| The Strava app says "Something went wrong" | Use **↗ → View here** instead. This is an issue in the Strava app when it's opened from a link. |
+| The Strava app says "Something went wrong" | Use the details sheet (tap the title or **↗**) instead. This is an issue in the Strava app when it's opened from a link. |
+| The widget says "Tap to load today" | Open the digest once today; the widget updates from it |
 | "Comment not posted" | Check the activity in Strava before retrying, to avoid posting twice |
 | ✨ Suggest asks for a key again | The key was rejected; paste a valid OpenAI API key |
 
