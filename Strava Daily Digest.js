@@ -63,7 +63,6 @@ async function main() {
   const sv = new WebView();          // hidden: feed, kudos (sits on a tiny strava.com page)
   const sx = makeSx(sv);
   let ev = null, ex = null;          // hidden: activity details, so kudos never wait behind them
-  let cv = null, cx = null;          // hidden: posting comments through Strava's own page
   const ui = new WebView();          // the digest you see
 
   if (Keychain.contains(KC_AI_LANG)) STATE.aiLang = Keychain.get(KC_AI_LANG);
@@ -210,9 +209,7 @@ async function main() {
         const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, 20000); ok = !!r.ok; msg = r.error || '';
         if (ok) { feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; }); saveSnapshot(feed); }
       } else if (head === 'comment') {
-        if (!cv) { cv = new WebView(); cx = makeSx(cv); }
-        await openStrava(cv, `/activities/${encodeURIComponent(p.id)}`);
-        const r = await cx(`__SD.commentViaUI(${JSON.stringify(p.text || '')})`, 30000);
+        const r = await postComment(sx, String(p.id), String(p.text || ''));
         ok = !!r.ok; msg = r.error || '';
         if (r.via) console.log('Comment sent via ' + r.via);
         if (ok) feed.update(p.id, a => { a.comments++; });
@@ -367,6 +364,51 @@ function makeFeed(sx, me, first) {
     update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
     scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
   };
+}
+
+// ─────────────── posting comments ───────────────
+// Fast path: replay the exact request Strava's own page used last time (learned once, kept in the Keychain).
+// Fallback: open the activity page in a throw-away hidden view, type into Strava's comment box, then free it.
+
+const KC_COMMENT_TPL = 'strava-digest-comment-request';
+
+function learnCommentRequest(req, id, text) {
+  if (!req || !req.url || !req.body || text.length < 6) return;
+  const forms = [['json', JSON.stringify(text).slice(1, -1)], ['plus', encodeURIComponent(text).replace(/%20/g, '+')], ['form', encodeURIComponent(text)], ['raw', text]];
+  for (const [enc, v] of forms) {
+    if (!req.body.includes(v)) continue;
+    // Mark the security token, the comment text and the activity id; keep everything else exactly as Strava sent it.
+    let body = req.body.replace(/(authenticity_token=)[^&]*/, '$1{{CSRF}}').split(v).join('{{TEXT}}');
+    const sub = str => str.replace(new RegExp(`(^|[^0-9])${id}(?![0-9])`, 'g'), '$1{{ID}}');
+    const tpl = { method: req.method || 'POST', enc, ct: req.ct || '', url: sub(String(req.url)), body: sub(body) };
+    if (!tpl.url.includes('{{ID}}') && !tpl.body.includes('{{ID}}')) return;   // can't tell which activity it targets
+    Keychain.set(KC_COMMENT_TPL, JSON.stringify(tpl));
+    console.log('Learned Strava comment request: ' + tpl.method + ' ' + tpl.url);
+    return;
+  }
+}
+
+async function postComment(sx, id, text) {
+  if (Keychain.contains(KC_COMMENT_TPL)) {
+    try {
+      const tpl = JSON.parse(Keychain.get(KC_COMMENT_TPL));
+      const r = await sx(`__SD.commentDirect(${JSON.stringify(tpl)}, ${JSON.stringify(id)}, ${JSON.stringify(text)})`, 20000);
+      if (r.ok || !r.definite) return r;                 // posted, or unclear: never risk a double post
+      Keychain.remove(KC_COMMENT_TPL);                    // Strava changed something: relearn below
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+  let cv = new WebView();
+  cv.shouldAllowRequest = req => /^(https?:|about:)/i.test((req && req.url) || '');   // never hand off to the Strava app
+  try {
+    const cx = makeSx(cv);
+    await openStrava(cv, `/activities/${encodeURIComponent(id)}`);
+    const r = await cx(`__SD.commentViaUI(${JSON.stringify(text)})`, 30000);
+    if (r.ok && r.req) learnCommentRequest(r.req, id, text);
+    return r;
+  } finally {
+    try { await cv.loadHTML('<html></html>'); } catch (e) {}  // drop Strava's heavy page right away
+    cv = null;
+  }
 }
 
 // Strava pushes iPhone browsers to the app; a desktop user agent gets the full website.
@@ -1008,6 +1050,24 @@ function stravaLib() {
 
   SD.kudo = (id) => SD.post([[`/feed/activity/${id}/kudo`, '']]);
 
+  SD.commentDirect = async (tpl, id, text) => {
+    const enc = { json: JSON.stringify(text).slice(1, -1), form: encodeURIComponent(text), plus: encodeURIComponent(text).replace(/%20/g, '+'), raw: text }[tpl.enc];
+    const token = await SD.csrf();
+    let body = tpl.body.split('{{TEXT}}').join(enc).split('{{ID}}').join(id).split('{{CSRF}}').join(encodeURIComponent(token || ''));
+    const headers = Object.assign({}, XHR, { 'X-CSRF-Token': token });
+    if (tpl.ct) headers['Content-Type'] = tpl.ct;
+    let r;
+    try { r = await fetch(tpl.url.split('{{ID}}').join(id), { method: tpl.method, credentials: 'include', headers, body }); }
+    catch (e) { return { ok: false, error: String(e), definite: false }; }
+    const t = await r.text().catch(() => '');
+    if (r.ok) {
+      try { const j = JSON.parse(t); if (j && j.errors && j.errors.length) return { ok: false, error: 'Strava rejected it', definite: true }; } catch (e) {}
+      return { ok: true, via: `direct ${r.status}` };
+    }
+    // 4xx means Strava refused it, so nothing was posted and the page-based method can be tried safely
+    return { ok: false, error: `HTTP ${r.status}`, definite: r.status >= 400 && r.status < 500 };
+  };
+
   SD.sleep = ms => new Promise(r => setTimeout(r, ms));
   SD.waitFor = async (fn, timeout) => {
     const t0 = Date.now();
@@ -1020,19 +1080,41 @@ function stravaLib() {
   const COMMENT_RX = /comment|komentar/i;
 
   // Record the page's own network calls so we can tell whether Strava accepted the comment.
+  SD.bodyStr = (b) => {
+    try {
+      if (b == null) return null;
+      if (typeof b === 'string') return b;
+      if (b instanceof URLSearchParams) return b.toString();
+      if (typeof FormData !== 'undefined' && b instanceof FormData)
+        return new URLSearchParams([...b.entries()].filter(e => typeof e[1] === 'string')).toString();
+    } catch (e) {}
+    return null;
+  };
+  SD.ctOf = (h) => {
+    try {
+      if (!h) return '';
+      if (typeof h.get === 'function') return h.get('content-type') || '';
+      for (const k of Object.keys(h)) if (k.toLowerCase() === 'content-type') return h[k];
+    } catch (e) {}
+    return '';
+  };
+
   SD.hookNet = () => {
     if (window.__SDnet) return;
     const log = window.__SDnet = [];
     const of = window.fetch;
     window.fetch = function (input, init) {
-      const rec = { url: typeof input === 'string' ? input : (input && input.url), method: ((init && init.method) || (input && input.method) || 'GET').toUpperCase() };
+      const rec = { url: typeof input === 'string' ? input : (input && input.url), method: ((init && init.method) || (input && input.method) || 'GET').toUpperCase(),
+        body: SD.bodyStr(init && init.body), ct: SD.ctOf(init && init.headers) };
       log.push(rec);
       return of.apply(this, arguments).then(r => { rec.status = r.status; return r; }, e => { rec.status = -1; throw e; });
     };
     const oo = XMLHttpRequest.prototype.open, os = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function (m, u) { this.__rec = { method: String(m).toUpperCase(), url: u }; return oo.apply(this, arguments); };
-    XMLHttpRequest.prototype.send = function () {
-      const rec = this.__rec || {}; log.push(rec);
+    const oh = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.open = function (m, u) { this.__rec = { method: String(m).toUpperCase(), url: u, ct: '' }; return oo.apply(this, arguments); };
+    XMLHttpRequest.prototype.setRequestHeader = function (k, v) { if (this.__rec && String(k).toLowerCase() === 'content-type') this.__rec.ct = v; return oh.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function (b) {
+      const rec = this.__rec || {}; rec.body = SD.bodyStr(b); log.push(rec);
       this.addEventListener('loadend', () => { rec.status = this.status || -1; });
       return os.apply(this, arguments);
     };
@@ -1074,8 +1156,11 @@ function stravaLib() {
     if (btn) btn.click();
     else box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
 
-    const req = await SD.waitFor(() => window.__SDnet.find(r => r.method !== 'GET' && r.status), 10000);
-    if (req && req.status >= 200 && req.status < 300) return { ok: true, via: `${req.method} ${req.url}` };
+    const forms = [text, encodeURIComponent(text), encodeURIComponent(text).replace(/%20/g, '+'), JSON.stringify(text).slice(1, -1)];
+    const carries = r => r.method !== 'GET' && ((r.body && forms.some(f => r.body.includes(f))) || /comment/i.test(String(r.url)));
+    const req = await SD.waitFor(() => window.__SDnet.find(r => carries(r) && r.status), 12000);
+    if (req && req.status >= 200 && req.status < 300)
+      return { ok: true, via: `${req.method} ${req.url}`, req: { method: req.method, url: String(req.url), body: req.body || null, ct: req.ct || '' } };
     await SD.sleep(800);
     const left = box.isContentEditable ? box.textContent : box.value;
     if (!String(left || '').includes(text) && document.body.innerText.includes(text)) return { ok: true, via: 'page' };
@@ -1359,7 +1444,7 @@ body.loading .loadst{display:block}
 .detf{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
 .detf button{padding:11px 8px;font-size:14px}
 .ttl{cursor:pointer}
-#sendov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);display:grid;place-items:center;touch-action:none;padding:20px}
+#sendov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.8);display:grid;place-items:center;touch-action:none;padding:20px}
 #sendov[hidden]{display:none}
 .sv{width:min(330px,100%);background:var(--card);border-radius:24px;padding:20px 18px 22px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.45)}
 .stage{position:relative;width:280px;height:130px;margin:0 auto 8px}
