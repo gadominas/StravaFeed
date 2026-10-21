@@ -19,7 +19,7 @@
 
 const CONFIG = {
   DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ...
-  DAYS_IN_PICKER: 7,       // how many days the date bar offers (today + 6 earlier)
+  DAYS_IN_PICKER: 3,       // days in the date bar: today, yesterday and the day before
   ATHLETE_ID: null,        // your id from strava.com/athletes/<ID>; set only if auto-detect fails
   INCLUDE_ME: false,       // include your own activities
   MAX_PAGES: 15,           // feed pages to scan for today (≈20 entries each)
@@ -66,7 +66,8 @@ async function main() {
   const ui = new WebView();          // the digest you see
 
   if (Keychain.contains(KC_AI_LANG)) STATE.aiLang = Keychain.get(KC_AI_LANG);
-  let feed = null, daysBack = Math.max(0, CONFIG.DAYS_BACK), viewToken = 0, closed = false;
+  const maxBack = Math.max(0, CONFIG.DAYS_IN_PICKER - 1);
+  let feed = null, daysBack = Math.min(maxBack, Math.max(0, CONFIG.DAYS_BACK)), viewToken = 0, closed = false;
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
   let viewing = false, savedScroll = 0;   // true while a Strava activity page is shown inside the digest
@@ -202,7 +203,7 @@ async function main() {
     if (head === 'retry') { await boot(); return; }
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
-    if (head === 'day') { daysBack = Math.max(0, parseInt(p.back, 10) || 0); await showDay(false); return; }
+    if (head === 'day') { daysBack = Math.min(maxBack, Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
     let ok = false, msg = '';
     try {
       if (head === 'kudo') {
@@ -1361,9 +1362,10 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .alist{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
 .desc{margin:10px 0 0;font-size:14px;white-space:pre-wrap}
 .photos{display:flex;gap:6px;overflow-x:auto;margin:12px -14px 0;padding:0 14px;scroll-snap-type:x mandatory}
-.days{display:flex;gap:6px;overflow-x:auto;margin:0 -12px 14px;padding:2px 12px;scrollbar-width:none}
+.days{display:flex;gap:6px;overflow-x:auto;margin:0 -12px 14px;padding:8px 12px;scrollbar-width:none;position:sticky;top:0;z-index:20;background:var(--bg);transition:box-shadow .2s}
+.days.stuck{box-shadow:0 8px 16px -10px rgba(0,0,0,.55);border-bottom:1px solid var(--line)}
 .days::-webkit-scrollbar{display:none}
-.day{flex:none;background:var(--card);color:var(--fg);padding:7px 14px;font-weight:600}
+.day{flex:1 0 auto;background:var(--card);color:var(--fg);padding:7px 14px;font-weight:600}
 .day.on{background:var(--fg);color:var(--bg)}
 .scan{margin:28px auto 0;max-width:34em;font-size:12px;line-height:1.5;color:var(--mut);word-break:break-word}
 .sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--mut);margin:18px 6px 10px}
@@ -1492,10 +1494,20 @@ body.loading .loadst{display:block}
 .shc button{padding:13px}
 .lbtop{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#fff;font-size:14px;font-variant-numeric:tabular-nums;min-height:58px}
 .lbx{background:rgba(255,255,255,.18);color:#fff;width:38px;height:38px;padding:0;font-size:16px}
-.lbs{flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none}
+.lbs{flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x;overscroll-behavior-x:contain}
 .lbs::-webkit-scrollbar{display:none}
-.lbi{flex:0 0 100%;height:100%;display:grid;place-items:center;scroll-snap-align:center;padding:0 6px 30px}
-.lbi img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
+.lbi{flex:0 0 100%;height:100%;display:grid;place-items:center;scroll-snap-align:center;scroll-snap-stop:always;padding:0 6px 150px;overflow:hidden}
+.lbi img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;transform-origin:center center;will-change:transform;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.lbbot{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 0 calc(18px + env(safe-area-inset-bottom,0px));pointer-events:none;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+.lbthumbs{pointer-events:auto;display:flex;gap:6px;max-width:100%;overflow-x:auto;padding:4px 16px;scrollbar-width:none;scroll-behavior:smooth}
+.lbthumbs::-webkit-scrollbar{display:none}
+.lbthumbs:empty{display:none}
+.lbthumbs button{flex:none;width:52px;height:52px;padding:0;border-radius:10px;overflow:hidden;background:#222;opacity:.5;outline:2px solid transparent;outline-offset:-2px;transition:opacity .2s,outline-color .2s,transform .2s}
+.lbthumbs button.on{opacity:1;outline-color:#fff;transform:scale(1.08)}
+.lbthumbs img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.lbclose{pointer-events:auto;background:#fff;color:#111;font-size:16px;font-weight:700;padding:12px 28px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.lbhint{color:rgba(255,255,255,.6);font-size:12px;transition:opacity .3s}
+#lb.zoomed .lbhint{opacity:0}
 .photos img{height:132px;max-width:220px;border-radius:12px;flex:none;object-fit:cover;scroll-snap-align:start;background:var(--soft)}
 .bar{display:flex;align-items:center;gap:6px;margin-top:12px}
 .counts{flex:1;color:var(--mut);font-size:13px}.counts i{font-style:normal;font-variant-numeric:tabular-nums}
@@ -1541,7 +1553,7 @@ ${content}
   <button class="ghost" data-act="open-app">Open in Strava app</button>
   <button class="ghost" data-act="sheet-close">Cancel</button>
 </div></div>
-<div id="lb" hidden><div class="lbtop"><span id="lbc"></span><button class="lbx" data-act="lb-close" aria-label="Close photos">✕</button></div><div class="lbs"></div></div>
+<div id="lb" hidden><div class="lbtop"><span id="lbc"></span><button class="lbx" data-act="lb-close" aria-label="Close photos">✕</button></div><div class="lbs"></div><div class="lbbot"><div class="lbthumbs" aria-label="All photos"></div><span class="lbhint">Swipe for more, double-tap or pinch to zoom</span><button class="lbclose" data-act="lb-close">✕ Close photo</button></div></div>
 <div id="toast"></div>
 <script>
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){ document.addEventListener(n,function(e){ e.preventDefault(); },{passive:false}); });
@@ -1736,23 +1748,94 @@ function openDetail(id){
 }
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
 document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
+(function(){
+  var days=document.querySelector('.days'); if(!days) return;
+  var start=days.offsetTop;
+  function upd(){ days.classList.toggle('stuck', window.scrollY>start-2); }
+  window.addEventListener('scroll',upd,{passive:true}); upd();
+})();
 var lbN=0;
-function lbCount(){ var sc=document.querySelector('#lb .lbs'); document.getElementById('lbc').textContent=lbN>1?(Math.round(sc.scrollLeft/sc.clientWidth)+1)+' / '+lbN:''; }
+function lbIndex(){ var sc=document.querySelector('#lb .lbs'); return Math.max(0,Math.min(lbN-1,Math.round(sc.scrollLeft/Math.max(1,sc.clientWidth)))); }
+function lbCount(){
+  var i=lbIndex(); document.getElementById('lbc').textContent=lbN>1?(i+1)+' / '+lbN:'';
+  var strip=document.querySelector('#lb .lbthumbs'), on=null;
+  [].forEach.call(strip.children,function(b,k){ b.classList.toggle('on',k===i); if(k===i) on=b; });
+  if(on){ var want=on.offsetLeft-(strip.clientWidth-on.offsetWidth)/2; if(Math.abs(strip.scrollLeft-want)>4) strip.scrollLeft=want; }
+}
+function lbGo(i){
+  var sc=document.querySelector('#lb .lbs'); zReset(false);
+  sc.scrollTo({left:i*sc.clientWidth,behavior:'smooth'});
+}
 function openPhotos(img){
   var imgs=[].slice.call(img.closest('.photos').querySelectorAll('img'));
   var i=Math.max(0,imgs.indexOf(img)), lb=document.getElementById('lb'), sc=lb.querySelector('.lbs');
   sc.innerHTML='';
   imgs.forEach(function(x){ var d=document.createElement('div'); d.className='lbi'; var im=document.createElement('img'); im.src=x.src; im.alt='Activity photo'; d.appendChild(im); sc.appendChild(d); });
+  Z.img=null; Z.s=1; Z.x=0; Z.y=0; lb.classList.remove('zoomed'); sc.style.overflowX='';
+  var strip=lb.querySelector('.lbthumbs'); strip.innerHTML='';
+  if(imgs.length>1) imgs.forEach(function(x,k){ var b=document.createElement('button'); b.dataset.lbi=k; b.setAttribute('aria-label','Photo '+(k+1)); var im=document.createElement('img'); im.src=x.src; im.alt=''; b.appendChild(im); strip.appendChild(b); });
   lbN=imgs.length; lb.hidden=false; document.body.style.overflow='hidden';
   sc.scrollLeft=i*sc.clientWidth; requestAnimationFrame(function(){ sc.scrollLeft=i*sc.clientWidth; lbCount(); });
 }
-function closePhotos(){ document.getElementById('lb').hidden=true; document.body.style.overflow=''; }
+function closePhotos(){ zReset(false); Z.img=null; document.getElementById('lb').hidden=true; document.body.style.overflow=''; }
+// ── photo zoom: pinch, double-tap, and drag while zoomed ──
+var Z={s:1,x:0,y:0,img:null};
+function zSc(){ return document.querySelector('#lb .lbs'); }
+function zCurrent(){ var sc=zSc(); var i=Math.round(sc.scrollLeft/Math.max(1,sc.clientWidth)); return sc.querySelectorAll('.lbi img')[i]||null; }
+function zApply(anim){
+  if(!Z.img) return;
+  Z.img.style.transition=anim?'transform .22s ease-out':'none';
+  Z.img.style.transform='translate('+Z.x+'px,'+Z.y+'px) scale('+Z.s+')';
+  var zoomed=Z.s>1.01; zSc().style.overflowX=zoomed?'hidden':''; document.getElementById('lb').classList.toggle('zoomed',zoomed);
+}
+function zClamp(){ if(!Z.img) return; var mx=(Z.s-1)*Z.img.clientWidth/2, my=(Z.s-1)*Z.img.clientHeight/2; Z.x=Math.max(-mx,Math.min(mx,Z.x)); Z.y=Math.max(-my,Math.min(my,Z.y)); }
+function zReset(anim){ Z.s=1; Z.x=0; Z.y=0; zApply(anim); }
+function zToggleAt(px,py){
+  Z.img=zCurrent(); if(!Z.img) return;
+  if(Z.s>1.01){ zReset(true); return; }
+  var r=Z.img.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2, s=2.5;
+  Z.s=s; Z.x=(px-cx)*(1-s); Z.y=(py-cy)*(1-s); zClamp(); zApply(true);
+}
 (function(){
-  var lb=document.getElementById('lb'), sc=lb.querySelector('.lbs'), x0=0, y0=0;
-  sc.addEventListener('scroll',lbCount,{passive:true});
-  lb.addEventListener('click',function(e){ if(e.target===lb||e.target.classList.contains('lbi')) closePhotos(); });
-  sc.addEventListener('touchstart',function(e){ x0=e.touches[0].clientX; y0=e.touches[0].clientY; },{passive:true});
-  sc.addEventListener('touchend',function(e){ var t=e.changedTouches[0]; if(t.clientY-y0>90&&Math.abs(t.clientX-x0)<60) closePhotos(); },{passive:true});
+  var lb=document.getElementById('lb'), sc=lb.querySelector('.lbs');
+  var P=null, T=null, pinched=false, lastTap=0, lastX=0, lastY=0;
+  sc.addEventListener('scroll',function(){ lbCount(); if(Z.img&&Z.s>1.01&&zCurrent()!==Z.img) zReset(false); },{passive:true});
+  sc.addEventListener('touchstart',function(e){
+    Z.img=zCurrent(); if(!Z.img) return;
+    if(e.touches.length===2){
+      var a=e.touches[0], b=e.touches[1], r=Z.img.getBoundingClientRect();
+      P={d0:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1, s0:Z.s, x0:Z.x, y0:Z.y,
+         cx:r.left+r.width/2-Z.x, cy:r.top+r.height/2-Z.y, mx:(a.clientX+b.clientX)/2, my:(a.clientY+b.clientY)/2};
+      pinched=true; T=null;
+    } else if(e.touches.length===1){
+      var t=e.touches[0]; T={x:t.clientX,y:t.clientY,x0:Z.x,y0:Z.y,moved:false}; pinched=false;
+    }
+  },{passive:true});
+  sc.addEventListener('touchmove',function(e){
+    if(P&&e.touches.length===2){
+      e.preventDefault();
+      var a=e.touches[0], b=e.touches[1], d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      var s=Math.max(1,Math.min(4,P.s0*d/P.d0)), mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2;
+      var px=(P.mx-P.cx-P.x0)/P.s0, py=(P.my-P.cy-P.y0)/P.s0;
+      Z.s=s; Z.x=mx-P.cx-s*px; Z.y=my-P.cy-s*py; zClamp(); zApply(false); return;
+    }
+    if(T&&e.touches.length===1){
+      var t=e.touches[0], dx=t.clientX-T.x, dy=t.clientY-T.y;
+      if(Math.abs(dx)>8||Math.abs(dy)>8) T.moved=true;
+      if(Z.s>1.01){ e.preventDefault(); Z.x=T.x0+dx; Z.y=T.y0+dy; zClamp(); zApply(false); }
+    }
+  },{passive:false});
+  sc.addEventListener('touchend',function(e){
+    if(P){ if(e.touches.length<2){ P=null; if(Z.s<1.05) zReset(true); } return; }
+    if(!T) return;
+    var t=e.changedTouches[0], now=Date.now(), dy=t.clientY-T.y, dx=t.clientX-T.x;
+    if(!T.moved&&!pinched){
+      if(now-lastTap<300&&Math.abs(t.clientX-lastX)<30&&Math.abs(t.clientY-lastY)<30){ zToggleAt(t.clientX,t.clientY); lastTap=0; }
+      else { lastTap=now; lastX=t.clientX; lastY=t.clientY; }
+    } else if(Z.s<=1.01&&!pinched&&dy>110&&Math.abs(dx)<60) closePhotos();   // swipe down closes when not zoomed
+    T=null;
+  },{passive:true});
+  sc.addEventListener('dblclick',function(e){ zToggleAt(e.clientX,e.clientY); });
 })();
 document.addEventListener('click',function(e){
   var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
@@ -1768,6 +1851,7 @@ document.addEventListener('click',function(e){
   }
   if(t.dataset.athlete) return send('athlete',{id:t.dataset.athlete});
   if(t.dataset.photo) return openPhotos(t);
+  if(t.dataset.lbi!==undefined) return lbGo(+t.dataset.lbi);
   if(t.dataset.day!==undefined){
     if(t.classList.contains('on')) return;
     document.querySelectorAll('.day').forEach(function(b){ b.classList.toggle('on', b===t); });
