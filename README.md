@@ -9,7 +9,7 @@ An iPhone and iPad script for [Scriptable](https://scriptable.app).
   <img src="docs/screenshots/04-ai-comment-suggestions.png" width="230" alt="AI comment suggestions">
 </p>
 
-> Screenshots use invented athletes and illustrative photos.
+> Screenshots use invented athletes and illustrative photos. In the widget screenshot, real names are pixelated.
 
 ## Why
 
@@ -78,6 +78,8 @@ Either of these works:
 ### Optional: kudos widget
 
 The widget shows how many people are still waiting for your kudos today. The medium and large sizes also list their names. Tapping it opens the digest.
+
+<p align="center"><img src="docs/screenshots/07-kudos-widget.png" width="420" alt="Medium kudos widget: 8 people waiting for kudos, with their sports and early-riser badges"></p>
 
 1. Long-press your Home Screen, tap **Edit → Add Widget**, choose **Scriptable**, and pick a size.
 2. Long-press the new widget, tap **Edit Widget**, set **Script** to *Strava Daily Digest* and **When Interacting** to *Run Script*.
