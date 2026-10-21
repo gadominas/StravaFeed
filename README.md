@@ -31,11 +31,11 @@ The bigger your feed, the more time it saves.
 | 📥 **Waiting for kudos first** | Each day is split into two sections: people still waiting for your kudos at the top, and people you've already given kudos to below, each with a count. |
 | ☝️ **One kudos per person** | When someone logs several activities, only their main one gets the kudos, so you never spam a friend's notifications. The main one is picked by most PRs first, then an early start, then achievements and distance. You can still give kudos to any activity individually. |
 | ✨ **AI comment ideas** | Get three funny, friendly comment suggestions built from the activity's real stats: distance, pace, heart rate, PRs, early start, and title. Choose English or Lithuanian, tweak the text, then post. |
-| 📅 **One day at a time** | Pick Today, Yesterday or any day in the past week. Only the day you open is loaded. |
+| 📅 **One day at a time** | Pick Today, Yesterday or the day before from a date bar that stays pinned at the top while you scroll. Only the day you open is loaded. |
 | 👥 **Grouped by athlete** | Each person gets one card holding all of their activities for that day, with totals. |
 | 📊 **Key numbers up front** | Distance, pace or speed, time, elevation, heart rate, PRs and achievements, start date and time, and photos. |
 | 🌅 **Early-riser badges** | Special badges for the 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs, plus a daily count of early risers. |
-| 🖼 **Photo viewer** | Tap a photo to view it full-screen and swipe through the rest, without leaving the digest. |
+| 🖼 **Photo viewer** | Tap a photo to view it full-screen without leaving the digest. Swipe left and right, or jump with the thumbnail strip. Double-tap or pinch to zoom, and close with the big **Close photo** button. |
 | 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
 | 🗺 **Activity details** | Tap an activity's title or **↗** for a details sheet: route map, all stats, PRs, description, larger photos, kudos and comments. From there you can also open it in the Strava app or on Strava's website. |
 | 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who. |
@@ -98,13 +98,13 @@ Widgets can't use your Strava login, so the widget shows the summary the digest 
 
 | To… | Do this |
 |---|---|
-| Switch day | Tap **Today**, **Yesterday** or a date in the day bar |
+| Switch day | Tap **Today**, **Yesterday** or the date in the day bar, which stays at the top while you scroll |
 | Give kudos to one person | Tap **👍 Kudos** on their card. Only their main activity gets it. |
 | Give kudos to everyone | Tap **Give kudos to all**, then tap again to confirm |
 | Give kudos to a specific activity | Tap 👍 on that activity |
 | Comment | Tap 💬, write a comment, then tap **Post** |
 | Get comment ideas | Tap 💬 then **✨ Suggest**, tap an idea, edit it, then **Post** |
-| See photos | Tap a photo, swipe left or right, and close with ✕ or by swiping down |
+| See photos | Tap a photo, then swipe left or right or tap a thumbnail. Double-tap or pinch to zoom, and tap **✕ Close photo** to go back. |
 | See activity details | Tap the activity title or **↗** |
 | Open in Strava | In the details sheet, tap **Open in Strava app** or **Strava website** |
 | Reload | Pull the page down at the top, or tap **↻** |
@@ -116,7 +116,7 @@ These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`
 | Setting | Default | What it does |
 |---|---|---|
 | `DAYS_BACK` | `0` | Day shown first: `0` today, `1` yesterday, and so on |
-| `DAYS_IN_PICKER` | `7` | Number of days in the day bar |
+| `DAYS_IN_PICKER` | `3` | Number of days in the day bar: today, yesterday and the day before |
 | `INCLUDE_ME` | `false` | Include your own activities |
 | `ENRICH_DETAILS` | `true` | Read each activity's page for heart rate, PRs, start time and extra photos |
 | `AI.MODEL` | `'gpt-5.4-mini'` | OpenAI model used for comment ideas |
