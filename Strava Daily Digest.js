@@ -45,7 +45,7 @@ const CONFIG = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 
@@ -235,6 +235,47 @@ async function main() {
     if (head === 'setlang') { STATE.aiLang = p.lang; Keychain.set(KC_AI_LANG, p.lang); return; }
     if (head === 'setmode') { if (CONFIG.AI.MODES.some(m => m.key === p.mode)) { STATE.aiMode = p.mode; Keychain.set(KC_AI_MODE, p.mode); } return; }
     if (head === 'setcustom') { STATE.aiCustom = cleanPrompt(p.text); Keychain.set(KC_AI_CUSTOM, STATE.aiCustom); return; }
+    if (head === 'settings-get') {
+      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(JSON.stringify(settingsForPage()))})`);
+      return;
+    }
+    if (head === 'settings-save') {
+      let ok = false, msg = '';
+      try {
+        const v = JSON.parse(p.data || '{}'), before = readSettings();
+        const key = String(v.newKey || '').trim();
+        if (key && !/^sk-/.test(key)) throw new Error('That API key does not look like an OpenAI key (it starts with sk-).');
+        if (v.athleteId && !/^\d+$/.test(String(v.athleteId).trim())) throw new Error('The athlete ID is the number from strava.com/athletes/<ID>.');
+        const st = {
+          includeMe: !!v.includeMe, enrich: !!v.enrich, widgetNames: !!v.widgetNames, checkUpdates: !!v.checkUpdates,
+          aiModel: String(v.aiModel || '').trim() || DEFAULTS.aiModel,
+          aiReasoning: REASONING_LEVELS.includes(v.aiReasoning) ? v.aiReasoning : DEFAULTS.aiReasoning,
+          athleteId: String(v.athleteId || '').trim(),
+        };
+        Keychain.set(KC_SETTINGS, JSON.stringify(st));
+        applySettings(st);
+        if (key) Keychain.set(KC_AI_KEY, key);
+        if (v.removeKey && !key && Keychain.contains(KC_AI_KEY)) Keychain.remove(KC_AI_KEY);
+        if (CONFIG.AI.LANGUAGES.some(l => l[1] === v.aiLang)) { STATE.aiLang = v.aiLang; Keychain.set(KC_AI_LANG, v.aiLang); }
+        if (CONFIG.AI.MODES.some(m => m.key === v.aiMode)) { STATE.aiMode = v.aiMode; Keychain.set(KC_AI_MODE, v.aiMode); }
+        STATE.aiCustom = cleanPrompt(v.aiCustom); Keychain.set(KC_AI_CUSTOM, STATE.aiCustom);
+        if (!st.checkUpdates) pendingUpdate = null;
+        ok = true;
+        msg = (before.includeMe !== st.includeMe || before.enrich !== st.enrich) ? 'reload' : 'render';
+        if (st.athleteId !== before.athleteId) msg = 'restart';
+      } catch (e) { msg = String(e.message || e); }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+      if (ok && feed && msg !== 'restart') await showDay(msg === 'reload');   // re-draw with the new settings
+      return;
+    }
+    if (head === 'update-check') {
+      if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE);
+      const was = CONFIG.CHECK_UPDATES; CONFIG.CHECK_UPDATES = true;
+      const u = await checkForUpdate(); CONFIG.CHECK_UPDATES = was;
+      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`)})`);
+      if (u) { pendingUpdate = u; offerUpdate(); }
+      return;
+    }
     if (head === 'retry') { await boot(); return; }
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
@@ -409,6 +450,47 @@ function makeFeed(sx, me, first) {
     update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
     scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
   };
+}
+
+// ─────────────── settings (⚙︎ in the header) ───────────────
+// The CONFIG block above holds the defaults; anything changed in Settings is saved in the iOS Keychain
+// and applied on top of it at start, so updates never wipe your choices.
+
+const KC_SETTINGS = 'strava-digest-settings';
+const DEFAULTS = {
+  includeMe: CONFIG.INCLUDE_ME, enrich: CONFIG.ENRICH_DETAILS, widgetNames: CONFIG.WIDGET_NAMES,
+  checkUpdates: CONFIG.CHECK_UPDATES, aiModel: CONFIG.AI.MODEL, aiReasoning: CONFIG.AI.REASONING,
+  athleteId: CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : '',
+};
+const REASONING_LEVELS = ['low', 'medium', 'high'];
+
+function readSettings() {
+  try { return Object.assign({}, DEFAULTS, Keychain.contains(KC_SETTINGS) ? JSON.parse(Keychain.get(KC_SETTINGS)) : {}); }
+  catch (e) { return Object.assign({}, DEFAULTS); }
+}
+
+function applySettings(st) {
+  CONFIG.INCLUDE_ME = !!st.includeMe;
+  CONFIG.ENRICH_DETAILS = !!st.enrich;
+  CONFIG.WIDGET_NAMES = !!st.widgetNames;
+  CONFIG.CHECK_UPDATES = !!st.checkUpdates;
+  CONFIG.AI.MODEL = String(st.aiModel || DEFAULTS.aiModel).trim() || DEFAULTS.aiModel;
+  CONFIG.AI.REASONING = REASONING_LEVELS.includes(st.aiReasoning) ? st.aiReasoning : DEFAULTS.aiReasoning;
+  CONFIG.ATHLETE_ID = /^\d+$/.test(String(st.athleteId || '').trim()) ? String(st.athleteId).trim() : (DEFAULTS.athleteId || null);
+}
+
+function loadSettings() { applySettings(readSettings()); }
+
+// What the Settings sheet shows. The API key itself never goes to the page: only whether one is saved.
+function settingsForPage() {
+  const st = readSettings();
+  let tail = '';
+  try { if (Keychain.contains(KC_AI_KEY)) tail = Keychain.get(KC_AI_KEY).slice(-4); } catch (e) {}
+  return Object.assign(st, {
+    version: VERSION, keySaved: !!tail, keyTail: tail,
+    aiLang: STATE.aiLang, aiMode: STATE.aiMode, aiCustom: STATE.aiCustom,
+    langs: CONFIG.AI.LANGUAGES, modes: CONFIG.AI.MODES.map(m => ({ key: m.key, label: m.label })), reasoningLevels: REASONING_LEVELS,
+  });
 }
 
 // ─────────────── updates ───────────────
@@ -1318,7 +1400,7 @@ function appHeader(daysBack, open, people) {
     : `<button class="allk done" disabled aria-label="Everyone has your kudos">✓ All</button>`;
   return `<header class="hdr">
     <div class="brand"><span class="brand-mark">${LOGO}</span><span class="brand-name">Daily Digest</span>
-      <button class="hbtn" data-act="refresh" aria-label="Refresh">↻</button></div>
+      <button class="hbtn" data-act="settings" aria-label="Settings">⚙︎</button><button class="hbtn" data-act="refresh" aria-label="Refresh">↻</button></div>
     <div class="hrow">${daysNav(daysBack)}${all}</div>
     <div id="st" class="loadst" aria-live="polite"></div>
   </header>`;
@@ -1551,6 +1633,36 @@ body.loading .loadst{display:block}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
+#set{position:fixed;inset:0;z-index:49;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+.setp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
+.seth{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--card)}
+.seth b{font-size:18px}
+.seth .lbx{background:var(--soft);color:var(--fg)}
+.setr button.small{white-space:nowrap;flex:none}
+.setb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:6px 14px 14px}
+.setg{margin-top:16px}
+.setg h3{margin:0 4px 8px;font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.04em;text-transform:uppercase}
+.setc{background:var(--card);border-radius:14px;overflow:hidden}
+.setr{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
+.setr:first-child{border-top:0}
+.setr.col{flex-direction:column;align-items:stretch;gap:8px}
+.setl{font-size:15px}
+.setl small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
+.setr input[type=text],.setr input[type=password],.setr textarea,.setr select{width:100%;font:inherit;font-size:16px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 10px}
+.setr textarea{resize:none}
+.setr select{-webkit-appearance:none;appearance:none}
+.sw{position:relative;flex:none;width:51px;height:31px}
+.sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0}
+.sw span{position:absolute;inset:0;border-radius:999px;background:var(--soft);transition:background .2s;pointer-events:none}
+.sw span::after{content:'';position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.25);transition:transform .2s}
+.sw input:checked+span{background:#34c759}
+.sw input:checked+span::after{transform:translateX(20px)}
+.keyst{font-size:13px;color:var(--mut)}
+.keyst b{color:var(--fg)}
+.setf{display:grid;grid-template-columns:1fr 2fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
+.setf button{padding:12px}
+.setmsg{color:#e5484d;font-size:13px;padding:8px 4px 0}
+.setmsg:empty{display:none}
 #upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
 .updp{width:100%;background:var(--card);border-radius:22px 22px 0 0;padding:20px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;animation:up .25s ease-out}
 .updtag{align-self:flex-start;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.02em}
@@ -1945,7 +2057,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return ['lb','sendov','sheet','det'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return ['lb','sendov','sheet','det','set','upd','kov'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -2024,6 +2136,60 @@ function updNow(btn){
     } else {
       msg.textContent=res||'Update failed'; btn.disabled=false; btn.textContent='Try again'; later.hidden=false;
     }
+  });
+}
+// ── settings sheet (⚙︎) ──
+function openSettings(){
+  if(document.getElementById('set')) return;
+  send('settings-get',{},function(ok,msg){
+    var st={}; try{ st=JSON.parse(msg); }catch(e){ toast('Settings could not be loaded'); return; }
+    var opt=function(list,cur){ return list.map(function(o){ return '<option value="'+escH(o[0])+'"'+(o[0]===cur?' selected':'')+'>'+escH(o[1])+'</option>'; }).join(''); };
+    var sw=function(id,on){ return '<label class="sw"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'><span></span></label>'; };
+    var ov=document.createElement('div'); ov.id='set';
+    ov.innerHTML='<div class="setp" role="dialog" aria-label="Settings">'+
+      '<div class="seth"><b>Settings</b><button class="lbx" data-act="set-close" aria-label="Close settings">✕</button></div>'+
+      '<div class="setb">'+
+      '<div class="setg"><h3>AI comments</h3><div class="setc">'+
+        '<div class="setr col"><div class="setl">OpenAI API key<small class="keyst">'+(st.keySaved?'Saved key ending <b>…'+escH(st.keyTail)+'</b>. Paste a new one to replace it.':'No key saved yet. Create one at platform.openai.com.')+'</small></div>'+
+          '<input type="password" id="s-key" autocomplete="off" placeholder="'+(st.keySaved?'Paste a new key to replace (sk-…)':'Paste your key (sk-…)')+'">'+
+          (st.keySaved?'<button class="ghost small" data-act="set-removekey">Remove saved key</button>':'')+'</div>'+
+        '<div class="setr col"><div class="setl">Default mood</div><select id="s-mode">'+opt(st.modes.map(function(m){ return [m.key,m.label]; }),st.aiMode)+'</select></div>'+
+        '<div class="setr col"><div class="setl">Custom prompt<small>Used when the mood is ✎ Custom</small></div><textarea id="s-custom" rows="3" maxlength="200" placeholder="e.g. tease about the rain, keep it short">'+escH(st.aiCustom||'')+'</textarea></div>'+
+        '<div class="setr col"><div class="setl">Language</div><select id="s-lang">'+opt(st.langs.map(function(l){ return [l[1],l[1]]; }),st.aiLang)+'</select></div>'+
+        '<div class="setr col"><div class="setl">Model<small>OpenAI model name</small></div><input type="text" id="s-model" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+escH(st.aiModel)+'"></div>'+
+        '<div class="setr col"><div class="setl">Thinking effort<small>Higher is cleverer but slower</small></div><select id="s-reason">'+opt(st.reasoningLevels.map(function(r){ return [r,r.charAt(0).toUpperCase()+r.slice(1)]; }),st.aiReasoning)+'</select></div>'+
+      '</div></div>'+
+      '<div class="setg"><h3>Digest</h3><div class="setc">'+
+        '<div class="setr"><div class="setl">Show my own activities</div>'+sw('s-me',st.includeMe)+'</div>'+
+        '<div class="setr"><div class="setl">Load extra details<small>Heart rate, PRs, start times, route maps</small></div>'+sw('s-enrich',st.enrich)+'</div>'+
+        '<div class="setr"><div class="setl">Names on the widget</div>'+sw('s-wnames',st.widgetNames)+'</div>'+
+      '</div></div>'+
+      '<div class="setg"><h3>Updates</h3><div class="setc">'+
+        '<div class="setr"><div class="setl">Offer new versions</div>'+sw('s-upd',st.checkUpdates)+'</div>'+
+        '<div class="setr"><div class="setl">Daily Digest v'+escH(st.version)+'<small id="s-updmsg"></small></div><button class="ghost small" data-act="set-checkupd">Check now</button></div>'+
+      '</div></div>'+
+      '<div class="setg"><h3>Advanced</h3><div class="setc">'+
+        '<div class="setr col"><div class="setl">Strava athlete ID<small>Leave empty to detect it. Takes effect next time you open the digest.</small></div><input type="text" id="s-athlete" inputmode="numeric" autocomplete="off" value="'+escH(st.athleteId||'')+'" placeholder="Detected automatically"></div>'+
+      '</div></div>'+
+      '<div class="setmsg" aria-live="polite"></div></div>'+
+      '<div class="setf"><button class="ghost" data-act="set-close">Cancel</button><button data-act="set-save">Save</button></div></div>';
+    document.body.appendChild(ov); document.body.style.overflow='hidden';
+    ov.addEventListener('click',function(e){ if(e.target===ov) closeSettings(); });
+  });
+}
+function closeSettings(){ var ov=document.getElementById('set'); if(ov) ov.remove(); document.body.style.overflow=''; }
+function saveSettings(btn){
+  var g=function(id){ return document.getElementById(id); }, ov=g('set');
+  var data={ newKey:g('s-key').value.trim(), removeKey:ov.dataset.removeKey==='1',
+    aiMode:g('s-mode').value, aiCustom:g('s-custom').value, aiLang:g('s-lang').value, aiModel:g('s-model').value, aiReasoning:g('s-reason').value,
+    includeMe:g('s-me').checked, enrich:g('s-enrich').checked, widgetNames:g('s-wnames').checked, checkUpdates:g('s-upd').checked,
+    athleteId:g('s-athlete').value.trim() };
+  btn.disabled=true; btn.textContent='Saving…';
+  send('settings-save',{data:JSON.stringify(data)},function(ok,msg){
+    btn.disabled=false; btn.textContent='Save';
+    if(!ok){ ov.querySelector('.setmsg').textContent=msg||'Could not save'; return; }
+    closeSettings();
+    toast(msg==='restart'?'Saved. The new athlete ID applies next time you open the digest.':msg==='reload'?'Saved. Reloading the feed…':'Settings saved');
   });
 }
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
@@ -2180,6 +2346,12 @@ document.addEventListener('click',function(e){
   if(act==='upd-now') updNow(t);
   if(act==='upd-later') updLater();
   if(act==='upd-close'){ var uo=document.getElementById('upd'); if(uo) uo.remove(); }
+  if(act==='settings') openSettings();
+  if(act==='set-close') closeSettings();
+  if(act==='set-save') saveSettings(t);
+  if(act==='set-removekey'){ var so=document.getElementById('set'); so.dataset.removeKey='1'; t.textContent='Key will be removed when you save'; t.disabled=true; so.querySelector('.keyst').textContent='Saved key will be removed.'; }
+  if(act==='set-checkupd'){ var um=document.getElementById('s-updmsg'); t.disabled=true; um.textContent='Checking…';
+    send('update-check',{},function(ok,res){ t.disabled=false; um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); }
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
@@ -2189,6 +2361,7 @@ document.addEventListener('click',function(e){
 
 // ───────────── entry point (last, so every const above is initialised) ─────────────
 
+loadSettings();
 const wantsRefreshOnly = !!(qp.refresh || args.shortcutParameter === 'refresh');
 if (config.runsInWidget || config.runsInAccessoryWidget) {
   await renderWidget();
