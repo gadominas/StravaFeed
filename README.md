@@ -27,11 +27,11 @@ The bigger your feed, the more time it saves.
 
 | | |
 |---|---|
-| 👍 **Kudos to everyone, in two taps** | One button gives kudos to every person in the day's digest, and asks you to confirm first. |
+| 👍 **Kudos to everyone, in two taps** | The **👍 All** button sits in the pinned header, so it's always within reach. Tap it, then tap **Send?** to give one kudos to each person in the day's digest. |
 | 📥 **Waiting for kudos first** | Each day is split into two sections: people still waiting for your kudos at the top, and people you've already given kudos to below, each with a count. |
 | ☝️ **One kudos per person** | When someone logs several activities, only their main one gets the kudos, so you never spam a friend's notifications. The main one is picked by most PRs first, then an early start, then achievements and distance. You can still give kudos to any activity individually. |
 | ✨ **AI comment ideas** | Get three funny, friendly comment suggestions built from the activity's real stats: distance, pace, heart rate, PRs, early start, and title. Choose English or Lithuanian, tweak the text, then post. |
-| 📅 **One day at a time** | Pick Today, Yesterday or the day before from a date bar that stays pinned at the top while you scroll. Only the day you open is loaded. |
+| 📅 **One day at a time** | Pick Today, Yesterday or the day before from the header that stays pinned at the top while you scroll. Only the day you open is loaded. |
 | 👥 **Grouped by athlete** | Each person gets one card holding all of their activities for that day, with totals. |
 | 📊 **Key numbers up front** | Distance, pace or speed, time, elevation, heart rate, PRs and achievements, start date and time, and photos. |
 | 🌅 **Early-riser badges** | Special badges for the 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs, plus a daily count of early risers. |
@@ -98,9 +98,9 @@ Widgets can't use your Strava login, so the widget shows the summary the digest 
 
 | To… | Do this |
 |---|---|
-| Switch day | Tap **Today**, **Yesterday** or the date in the day bar, which stays at the top while you scroll |
+| Switch day | Tap **Today**, **Yesterday** or the date in the header, which stays at the top while you scroll |
 | Give kudos to one person | Tap **👍 Kudos** on their card. Only their main activity gets it. |
-| Give kudos to everyone | Tap **Give kudos to all**, then tap again to confirm |
+| Give kudos to everyone | Tap **👍 All** in the header, then **Send?** to confirm |
 | Give kudos to a specific activity | Tap 👍 on that activity |
 | Comment | Tap 💬, write a comment, then tap **Post** |
 | Get comment ideas | Tap 💬 then **✨ Suggest**, tap an idea, edit it, then **Post** |
