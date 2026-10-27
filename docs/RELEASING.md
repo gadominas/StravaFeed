@@ -32,7 +32,7 @@ Users see the update the next time they open the digest. GitHub can take a few m
 
 The three highlights are the update pitch. They are the first thing a user reads before deciding to update.
 
-- **Exactly three**, ordered by how much a user will care.
+- **Exactly three** for a feature release, ordered by how much a user will care. A fix-only patch release (1.8.0 → 1.8.1) may have one or two; anyone who skipped versions gets the rest of the cards topped up from those.
 - **Title:** two to four words, naming the benefit rather than the implementation.
 - **Text:** one sentence, under 100 characters, saying what the user can now do.
 - **Icon:** one emoji.
