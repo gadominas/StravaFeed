@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.8.1 (2026-10-27): Tidier header
+
+- 🎯 **Matching header icons**: Settings and refresh are now the same size and easier to tap.
+
+**Changes**
+
+- Settings and refresh icons drawn as matching line icons with larger tap areas
+
+**Fixes**
+
+- Settings icon looked smaller than the refresh icon
+
 ## 1.8.0 (2026-10-27): Settings, right in the app
 
 - ⚙️ **Settings screen**: Tap the gear in the header to change how the digest works, no code editing.
