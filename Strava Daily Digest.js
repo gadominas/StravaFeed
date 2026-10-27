@@ -158,7 +158,7 @@ async function main() {
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
     } catch (e) {
       if (token !== viewToken) return;
-      await ui.loadHTML(page(`${daysNav(daysBack)}<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="refresh">Try again</button></div>`));
+      await ui.loadHTML(page(`${appHeader(daysBack, 0, 0)}<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="refresh">Try again</button></div>`));
     }
   }
 
@@ -1208,7 +1208,25 @@ function daysNav(current) {
     const label = i === 0 ? 'Today' : i === 1 ? 'Yesterday' : df.string(d);
     chips.push(`<button class="day${i === current ? ' on' : ''}" data-day="${i}"${i === current ? ' aria-current="date"' : ''}>${esc(label)}</button>`);
   }
-  return `<nav class="days" aria-label="Choose day">${chips.join('')}</nav>`;
+  return `<nav class="seg" aria-label="Choose day">${chips.join('')}</nav>`;
+}
+
+// App mark in the Go2FGym style: a plate with a ring and a hole, in Strava orange.
+const LOGO = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="var(--accent)"/>'
+  + '<circle cx="12" cy="12" r="7.6" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.3"/>'
+  + '<circle cx="12" cy="12" r="2.8" fill="var(--bg)"/></svg>';
+
+// Sticky app header: brand row, then day switcher + "kudos to all", always within reach.
+function appHeader(daysBack, open, people) {
+  const all = !people ? ''
+    : open > 0 ? `<button class="allk" data-act="kudo-all" data-label="👍 All ${open}" aria-label="Give kudos to all ${open}, one each">👍 All ${open}</button>`
+    : `<button class="allk done" disabled aria-label="Everyone has your kudos">✓ All</button>`;
+  return `<header class="hdr">
+    <div class="brand"><span class="brand-mark">${LOGO}</span><span class="brand-name">Daily Digest</span>
+      <button class="hbtn" data-act="refresh" aria-label="Refresh">↻</button></div>
+    <div class="hrow">${daysNav(daysBack)}${all}</div>
+    <div id="st" class="loadst" aria-live="polite"></div>
+  </header>`;
 }
 
 function summaryText(people, count) {
@@ -1228,13 +1246,8 @@ function renderDigest({ dayStart, daysBack, scan, people, count }) {
     ? section('Waiting for your kudos', waiting, 'todo') + section('Kudos given', given, 'given')
     : `<div class="center">Nobody you follow has posted ${daysBack ? 'on that day' : 'yet today'}.<br><br><button class="ghost" data-act="refresh">Check again</button>${scanNote(scan)}</div>`;
   return page(`
-    <div class="top">
-      <div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div>
-      <button class="ghost round" data-act="refresh" aria-label="Refresh">↻</button>
-    </div>
-    ${daysNav(daysBack)}
-    <div id="st" class="loadst" aria-live="polite"></div>
-    ${open > 1 ? `<button class="all" data-act="kudo-all" data-label="Give kudos to all ${open}, one each">Give kudos to all ${open}, one each</button>` : ''}
+    ${appHeader(daysBack, open, people.length)}
+    <div class="top"><div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div></div>
     ${body}`);
 }
 
@@ -1333,7 +1346,7 @@ html,body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}
 button,img{touch-action:manipulation}
 textarea,input{font-size:16px!important}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 -apple-system,system-ui,sans-serif;padding:max(14px,env(safe-area-inset-top)) 12px 70px;-webkit-text-size-adjust:100%}
-.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 4px 14px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 4px 14px}
 h1{font-size:24px;line-height:1.15;margin:0;letter-spacing:-.01em}
 .sub{color:var(--mut);font-size:13px;margin-top:2px}
 button{font:inherit;border:0;border-radius:999px;padding:8px 14px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
@@ -1362,11 +1375,20 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .alist{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
 .desc{margin:10px 0 0;font-size:14px;white-space:pre-wrap}
 .photos{display:flex;gap:6px;overflow-x:auto;margin:12px -14px 0;padding:0 14px;scroll-snap-type:x mandatory}
-.days{display:flex;gap:6px;overflow-x:auto;margin:0 -12px 14px;padding:8px 12px;scrollbar-width:none;position:sticky;top:0;z-index:20;background:var(--bg);transition:box-shadow .2s}
-.days.stuck{box-shadow:0 8px 16px -10px rgba(0,0,0,.55);border-bottom:1px solid var(--line)}
-.days::-webkit-scrollbar{display:none}
-.day{flex:1 0 auto;background:var(--card);color:var(--fg);padding:7px 14px;font-weight:600}
+.hdr{position:sticky;top:0;z-index:20;margin:calc(-1 * max(14px, env(safe-area-inset-top))) -12px 14px;padding:max(4px, env(safe-area-inset-top)) 12px 8px;background:var(--bg);border-bottom:1px solid var(--line);transition:box-shadow .2s}
+.hdr.stuck{box-shadow:0 8px 18px -12px rgba(0,0,0,.6)}
+.brand{display:flex;align-items:center;gap:8px;min-height:44px}
+.brand-mark svg{display:block;width:24px;height:24px}
+.brand-name{font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em;margin-right:auto}
+.hbtn{background:transparent;color:var(--fg);width:36px;height:36px;padding:0;font-size:19px;font-weight:600}
+.hrow{display:flex;align-items:center;gap:8px}
+.seg{flex:1;min-width:0;display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--card);overflow-x:auto;scrollbar-width:none}
+.seg::-webkit-scrollbar{display:none}
+.day{flex:1 0 auto;background:transparent;color:var(--mut);padding:6px 10px;font-size:13px;font-weight:600;white-space:nowrap}
 .day.on{background:var(--fg);color:var(--bg)}
+.allk{flex:none;padding:8px 13px;font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.allk.done{background:var(--card);color:var(--mut)}
+.allk.armed{background:var(--fg);color:var(--bg)}
 .scan{margin:28px auto 0;max-width:34em;font-size:12px;line-height:1.5;color:var(--mut);word-break:break-word}
 .sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--mut);margin:18px 6px 10px}
 .sec:first-of-type{margin-top:4px}
@@ -1420,7 +1442,7 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 #ptr.ready{color:var(--accent)}
 #ptr.busy{transition:transform .2s,opacity .15s}
 #ptr.busy .ptri{animation:s .8s linear infinite}
-.loadst{display:none;color:var(--mut);font-size:13px;margin:-6px 4px 12px}
+.loadst{display:none;color:var(--mut);font-size:12px;margin:6px 4px 0}
 body.loading .loadst{display:block}
 .clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
 .nb{font-size:15px}
@@ -1599,6 +1621,7 @@ function markKudo(id,pid){
   document.querySelectorAll('[data-kudo="'+CSS.escape(id)+'"]').forEach(function(b){ b.classList.add('done'); b.disabled=true; b.textContent=b.classList.contains('small')?'✓':'✓ Kudos given'; });
   document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .kc').forEach(function(kc){ kc.textContent=(+kc.textContent||0)+1; });
   var pb=document.querySelector('.person-k[data-pid="'+CSS.escape(pid)+'"]'); if(pb){ pb.classList.add('done'); pb.disabled=true; pb.textContent='✓ Kudos given'; }
+  setTimeout(updAll,0);
   var sec=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]');
   if(sec&&!sec.dataset.counted){ sec.dataset.counted='1';
     var t=document.querySelector('.sec.todo span'); if(t) t.textContent=Math.max(0,(+t.textContent||0)-1);
@@ -1609,18 +1632,26 @@ function kudo(btn){
   var id=btn.dataset.kudo,pid=btn.dataset.pid,old=btn.textContent;
   btn.disabled=true; btn.textContent='…'; btn.dataset.busy='1';
   send('kudo',{id:id},function(ok,msg){
-    delete btn.dataset.busy;
+    delete btn.dataset.busy; setTimeout(updAll,0);
     if(ok) markKudo(id,pid);
     else { btn.disabled=false; btn.textContent=old; toast('Kudos not sent: '+(msg||'unknown error')); }
   });
 }
 function kudoAll(btn){
-  var list=[].slice.call(document.querySelectorAll('.person-k:not(.done)'));
-  if(!list.length){ toast('Everyone already has kudos'); return; }
-  if(!armed){ armed=true; btn.textContent='Tap again to send '+list.length+' kudos';
-    setTimeout(function(){ armed=false; btn.textContent=btn.dataset.label; },4000); return; }
-  armed=false; btn.disabled=true; btn.textContent='Sending '+list.length+' kudos';
+  var list=[].slice.call(document.querySelectorAll('section.person .person-k:not(.done)'));
+  if(!list.length){ toast('Everyone already has kudos'); updAll(); return; }
+  if(!armed){ armed=true; btn.classList.add('armed'); btn.textContent='Send '+list.length+'?';
+    toast('Tap again to give '+list.length+' kudos, one each');
+    setTimeout(function(){ if(!armed) return; armed=false; btn.classList.remove('armed'); updAll(); },4000); return; }
+  armed=false; btn.classList.remove('armed'); btn.disabled=true; btn.textContent='Sending…';
   list.forEach(kudo);
+}
+function updAll(){
+  var btn=document.querySelector('.allk'); if(!btn||armed) return;
+  if(document.querySelector('section.person .person-k[data-busy]')) return;   // still sending
+  var n=document.querySelectorAll('section.person .person-k:not(.done)').length;
+  if(n>0){ btn.classList.remove('done'); btn.disabled=false; btn.textContent='👍 All '+n; btn.dataset.label=btn.textContent; }
+  else { btn.classList.add('done'); btn.disabled=true; btn.textContent='✓ All'; }
 }
 // ── "comment in flight" overlay: locks the screen until Strava answers ──
 function blockMove(e){ e.preventDefault(); }
@@ -1693,7 +1724,7 @@ window.setCount=function(n){
 })();
 // ── pull down at the top of the digest to refresh ──
 (function(){
-  if(!document.querySelector('.days')) return;
+  if(!document.querySelector('.hdr .seg')) return;
   var ptr=document.createElement('div'); ptr.id='ptr'; ptr.setAttribute('aria-hidden','true');
   ptr.innerHTML='<span class="ptri">↓</span><span class="ptrt">Pull to refresh</span>';
   document.body.appendChild(ptr);
@@ -1702,7 +1733,7 @@ window.setCount=function(n){
   function overlayOpen(){ return ['lb','sendov','sheet','det'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
-    if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.days,.photos,textarea,input')){ y0=null; return; }
+    if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
     y0=e.touches[0].clientY; x0=e.touches[0].clientX; dist=0;
   },{passive:true});
   document.addEventListener('touchmove',function(e){
@@ -1749,9 +1780,8 @@ function openDetail(id){
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
 document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
 (function(){
-  var days=document.querySelector('.days'); if(!days) return;
-  var start=days.offsetTop;
-  function upd(){ days.classList.toggle('stuck', window.scrollY>start-2); }
+  var hdr=document.querySelector('.hdr'); if(!hdr) return;
+  function upd(){ hdr.classList.toggle('stuck', window.scrollY>4); }
   window.addEventListener('scroll',upd,{passive:true}); upd();
 })();
 var lbN=0;
