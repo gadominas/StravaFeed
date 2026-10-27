@@ -1,0 +1,130 @@
+{
+  "name": "Strava Daily Digest",
+  "script": "Strava Daily Digest.js",
+  "releases": [
+    {
+      "version": "1.6.0",
+      "date": "2026-10-27",
+      "title": "Never miss an update",
+      "highlights": [
+        { "icon": "🔔", "title": "Update reminders", "text": "The digest tells you when a new version is out. Tap Later and it waits two days before asking again." },
+        { "icon": "⬆️", "title": "One-tap update", "text": "Update right from the digest. No need to run the installer again." },
+        { "icon": "✨", "title": "See what's new first", "text": "Every update shows its three best features before you install it." }
+      ],
+      "changes": [
+        "Update check on start, with a pitch sheet showing the top three highlights",
+        "Later snoozes update reminders for two days",
+        "Version number shown at the bottom of the digest",
+        "Release notes now live in releases.json, with a generated CHANGELOG.md"
+      ],
+      "fixes": []
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-10-27",
+      "title": "Kudos to everyone, with style",
+      "highlights": [
+        { "icon": "📌", "title": "Pinned header", "text": "Today, Yesterday and the 👍 All button stay at the top wherever you scroll." },
+        { "icon": "🎉", "title": "Kudos celebration", "text": "Thumbs fly from the centre to every athlete's photo, with a ✓ as each one lands." },
+        { "icon": "🧹", "title": "Cleaner screen", "text": "No more stuck pop-up at the bottom, and kudos counts look right again." }
+      ],
+      "changes": [
+        "Sticky header in the Go2FGym style with a compact day switcher and an always-visible 👍 All button",
+        "Celebration animation when giving kudos to everyone",
+        "Day switcher limited to Today and Yesterday"
+      ],
+      "fixes": [
+        "Pop-up message no longer peeks out at the bottom of the screen",
+        "Kudos counts were drawn as large orange circles"
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "date": "2026-10-20",
+      "title": "A proper photo viewer",
+      "highlights": [
+        { "icon": "🔍", "title": "Zoom photos", "text": "Double-tap or pinch to zoom, and drag around while zoomed in." },
+        { "icon": "🎞", "title": "Thumbnail strip", "text": "See the previous and next photos, and tap one to jump straight to it." },
+        { "icon": "✕", "title": "Big close button", "text": "An always-visible Close photo button, so you never leave the app by accident." }
+      ],
+      "changes": [
+        "Pinch and double-tap zoom in the photo viewer",
+        "Thumbnail strip with the current photo highlighted",
+        "Large Close photo button at the bottom",
+        "Date bar stays pinned while scrolling"
+      ],
+      "fixes": [
+        "Swiping between photos stopped working after zoom was added"
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-10-19",
+      "title": "Stable comments",
+      "highlights": [
+        { "icon": "💬", "title": "No more crashes", "text": "Posting a comment no longer loads Strava's heavy page every time." },
+        { "icon": "⚡", "title": "Faster comments", "text": "After the first comment, the rest are sent with one small request." },
+        { "icon": "✅", "title": "Honest confirmation", "text": "Only Strava's real reply to your comment counts as posted." }
+      ],
+      "changes": [
+        "Learns Strava's comment request once and reuses it"
+      ],
+      "fixes": [
+        "Scriptable could be closed by iOS while posting a comment",
+        "A tracking request could be mistaken for a posted comment"
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-10-18",
+      "title": "Widget and details",
+      "highlights": [
+        { "icon": "📲", "title": "Kudos widget", "text": "See how many people are waiting for your kudos on the Home or Lock Screen." },
+        { "icon": "🗺", "title": "Activity details", "text": "Route map, all stats and bigger photos, without leaving the digest." },
+        { "icon": "⬇️", "title": "Pull to refresh", "text": "Drag the digest down at the top to reload today's feed." }
+      ],
+      "changes": [
+        "Home Screen and Lock Screen widgets",
+        "Activity details sheet with route map",
+        "Pull to refresh",
+        "Loading screen with a running figure and a live post counter"
+      ],
+      "fixes": [
+        "Widget font error on Scriptable"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-10-16",
+      "title": "Who's waiting for kudos",
+      "highlights": [
+        { "icon": "📥", "title": "Waiting first", "text": "People still waiting for your kudos are grouped at the top." },
+        { "icon": "✈️", "title": "Comment animation", "text": "Watch your comment fly to your friend, with confetti when it lands." },
+        { "icon": "🏃", "title": "Fun loading screen", "text": "A runner collects posts while a counter ticks up." }
+      ],
+      "changes": [
+        "Waiting for your kudos and Kudos given sections",
+        "Screen locks with an animation while a comment is sent",
+        "Animated loading screen with post counter"
+      ],
+      "fixes": []
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-10-16",
+      "title": "First public release",
+      "highlights": [
+        { "icon": "👍", "title": "Kudos to everyone", "text": "Two taps give one kudos to each person in the day's feed." },
+        { "icon": "✨", "title": "AI comment ideas", "text": "Funny, friendly comments built from each activity's real stats." },
+        { "icon": "👥", "title": "Grouped by athlete", "text": "One card per person with the numbers that matter up front." }
+      ],
+      "changes": [
+        "Daily digest of the people you follow, grouped by athlete",
+        "One kudos per person, plus kudos to everyone",
+        "AI comment suggestions in English and Lithuanian",
+        "Early-riser badges, photo viewer, start times and PRs"
+      ],
+      "fixes": []
+    }
+  ]
+}
