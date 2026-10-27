@@ -45,7 +45,7 @@ const CONFIG = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 
@@ -1393,6 +1393,10 @@ const LOGO = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12
   + '<circle cx="12" cy="12" r="7.6" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.3"/>'
   + '<circle cx="12" cy="12" r="2.8" fill="var(--bg)"/></svg>';
 
+// Header icons: same size, same stroke, drawn in the text colour (Feather icons, MIT licence).
+const ICON_GEAR = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+const ICON_REFRESH = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+
 // Sticky app header: brand row, then day switcher + "kudos to all", always within reach.
 function appHeader(daysBack, open, people) {
   const all = !people ? ''
@@ -1400,7 +1404,7 @@ function appHeader(daysBack, open, people) {
     : `<button class="allk done" disabled aria-label="Everyone has your kudos">✓ All</button>`;
   return `<header class="hdr">
     <div class="brand"><span class="brand-mark">${LOGO}</span><span class="brand-name">Daily Digest</span>
-      <button class="hbtn" data-act="settings" aria-label="Settings">⚙︎</button><button class="hbtn" data-act="refresh" aria-label="Refresh">↻</button></div>
+      <button class="hbtn" data-act="settings" aria-label="Settings">${ICON_GEAR}</button><button class="hbtn" data-act="refresh" aria-label="Refresh">${ICON_REFRESH}</button></div>
     <div class="hrow">${daysNav(daysBack)}${all}</div>
     <div id="st" class="loadst" aria-live="polite"></div>
   </header>`;
@@ -1561,7 +1565,8 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .brand{display:flex;align-items:center;gap:8px;min-height:44px}
 .brand-mark svg{display:block;width:24px;height:24px}
 .brand-name{font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em;margin-right:auto}
-.hbtn{background:transparent;color:var(--fg);width:36px;height:36px;padding:0;font-size:19px;font-weight:600}
+.hbtn{background:transparent;color:var(--fg);width:40px;height:40px;padding:0;display:grid;place-items:center}
+.hico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
 .hrow{display:flex;align-items:center;gap:8px}
 .seg{flex:1;min-width:0;display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--card);overflow-x:auto;scrollbar-width:none}
 .seg::-webkit-scrollbar{display:none}
