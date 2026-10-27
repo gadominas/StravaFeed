@@ -19,7 +19,7 @@
 
 const CONFIG = {
   DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ...
-  DAYS_IN_PICKER: 3,       // days in the date bar: today, yesterday and the day before
+  DAYS_IN_PICKER: 2,       // days in the header: today and yesterday
   ATHLETE_ID: null,        // your id from strava.com/athletes/<ID>; set only if auto-detect fails
   INCLUDE_ME: false,       // include your own activities
   MAX_PAGES: 15,           // feed pages to scan for today (≈20 entries each)
