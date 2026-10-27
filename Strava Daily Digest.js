@@ -32,9 +32,15 @@ const CONFIG = {
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
     SUGGESTIONS: 3,
   },
-  DEBUG_DUMP: false,
-  WIDGET_NAMES: true,      // show first names of people waiting for kudos on medium/large widgets       // save raw feed JSON to Scriptable/strava-feed-debug.json
+  DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
+  WIDGET_NAMES: true,      // show first names of people waiting for kudos on medium/large widgets
+  CHECK_UPDATES: true,     // offer new versions from GitHub (asks again 2 days after "Later")
 };
+
+// This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
+const VERSION = '1.6.0';
+const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
+const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 
 const STRAVA = 'https://www.strava.com';
 const SCHEME = 'strava-digest://';
@@ -70,7 +76,10 @@ async function main() {
   let feed = null, daysBack = Math.min(maxBack, Math.max(0, CONFIG.DAYS_BACK)), viewToken = 0, closed = false;
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
-  let viewing = false, savedScroll = 0;   // true while a Strava activity page is shown inside the digest
+  let viewing = false, savedScroll = 0;
+  let pendingUpdate = null, updateChecked = false;
+  // Show the update pitch over the digest (it is re-shown after day switches until answered).
+  const offerUpdate = () => { if (pendingUpdate && !viewing && !closed) js(`window.__showUpdate && window.__showUpdate(${JSON.stringify(pendingUpdate)})`); };   // true while a Strava activity page is shown inside the digest
   ui.shouldAllowRequest = (req) => {
     const url = (req && req.url) || '';
     if (url.startsWith(SCHEME)) { handleAction(url).catch(e => console.error(e)); return false; }
@@ -155,6 +164,7 @@ async function main() {
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length }));
       saveSnapshot(feed);
+      offerUpdate();
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
     } catch (e) {
       if (token !== viewToken) return;
@@ -192,6 +202,16 @@ async function main() {
       if (i < 0) p[kv] = ''; else p[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1));
     });
     if (head === 'login') { await openStrava(ui, '/login'); return; }
+    if (head === 'update-later') {
+      Keychain.set(KC_UPDATE_SNOOZE, String(Date.now() + UPDATE_SNOOZE_MS)); pendingUpdate = null; return;
+    }
+    if (head === 'update-now') {
+      let ok = false, msg = '';
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); }
+      catch (e) { msg = String(e.message || e); }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+      return;
+    }
     if (head === 'view') { savedScroll = +p.y || 0; await viewHere(p.id); return; }
     if (head === 'back') {
       if (!feed) return;
@@ -244,6 +264,7 @@ async function main() {
       const session = await startSession();
       if (!session) return;
       feed = makeFeed(sx, session.me, session.first);
+      if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
       await count(feed.scan().entries);
       await showDay(false, true);
     } catch (e) {
@@ -365,6 +386,57 @@ function makeFeed(sx, me, first) {
     update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
     scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
   };
+}
+
+// ─────────────── updates ───────────────
+// releases.json on GitHub is the source of truth: newest release first, each with exactly
+// three "highlights" (icon, title, text) used for the update pitch, plus full change lists.
+
+const KC_UPDATE_SNOOZE = 'strava-digest-update-snooze';
+
+function cmpVer(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0), pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0 ? 1 : -1; }
+  return 0;
+}
+
+function updateSnoozed() {
+  try { return Keychain.contains(KC_UPDATE_SNOOZE) && Date.now() < +Keychain.get(KC_UPDATE_SNOOZE); } catch (e) { return false; }
+}
+
+async function checkForUpdate() {
+  if (!CONFIG.CHECK_UPDATES || updateSnoozed()) return null;
+  try {
+    const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
+    req.timeoutInterval = 10;
+    const data = await req.loadJSON();
+    if (!data || !Array.isArray(data.releases)) return null;
+    const newer = data.releases.filter(r => r && r.version && cmpVer(r.version, VERSION) > 0)
+      .sort((x, y) => cmpVer(y.version, x.version));
+    if (!newer.length) return null;
+    // Pitch: the newest release's highlights first, topped up from any other versions the user skipped.
+    const highlights = [];
+    newer.forEach(r => (r.highlights || []).forEach(h => { if (highlights.length < 3 && h && h.title) highlights.push(h); }));
+    return {
+      current: VERSION, latest: newer[0].version, title: newer[0].title || '', date: newer[0].date || '',
+      skipped: newer.length, highlights, script: data.script || 'Strava Daily Digest.js',
+    };
+  } catch (e) { console.log('Update check skipped: ' + e); return null; }
+}
+
+async function applyUpdate(info) {
+  const req = new Request(`${REPO_RAW}${encodeURI(info.script)}?t=${Date.now()}`);
+  req.timeoutInterval = 30;
+  const code = await req.loadString();
+  const code200 = req.response && req.response.statusCode === 200;
+  const m = code && code.match(/const VERSION = '([^']+)'/);
+  if (!code200 || !code.includes('function stravaLib') || !m) throw new Error("The download didn't look right. Try again later.");
+  if (cmpVer(m[1], VERSION) <= 0) throw new Error('GitHub is still serving the old version. Try again in a few minutes.');
+  const path = module.filename;
+  let fm = FileManager.local();
+  try { const ic = FileManager.iCloud(); if (path.startsWith(ic.documentsDirectory())) fm = ic; } catch (e) {}
+  fm.writeString(path, code);
+  return m[1];
 }
 
 // ─────────────── posting comments ───────────────
@@ -1248,7 +1320,8 @@ function renderDigest({ dayStart, daysBack, scan, people, count }) {
   return page(`
     ${appHeader(daysBack, open, people.length)}
     <div class="top"><div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div></div>
-    ${body}`);
+    ${body}
+    <p class="ver">Daily Digest v${VERSION}</p>`);
 }
 
 function scanNote(scan) {
@@ -1452,6 +1525,21 @@ body.loading .loadst{display:block}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
+#upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+.updp{width:100%;background:var(--card);border-radius:22px 22px 0 0;padding:20px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;animation:up .25s ease-out}
+.updtag{align-self:flex-start;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.02em}
+.updt{margin:6px 0 0;font-size:22px;line-height:1.2;letter-spacing:-.01em}
+.upds{color:var(--mut);font-size:14px}
+.updl{display:flex;flex-direction:column;gap:10px;margin:8px 0 6px}
+.updi{display:flex;gap:12px;align-items:flex-start;background:var(--soft);border-radius:14px;padding:12px}
+.updic{font-size:24px;line-height:1.1;flex:none}
+.updi b{display:block;font-size:15px}
+.updi span{display:block;color:var(--mut);font-size:13px;line-height:1.35;margin-top:2px}
+.updmsg{font-size:14px;min-height:0}
+.updmsg:empty{display:none}
+.updgo{padding:13px;font-size:16px}
+.updlater{padding:11px}
+.ver{text-align:center;color:var(--mut);font-size:12px;margin:24px 0 0;opacity:.7}
 #kov{position:fixed;inset:0;z-index:66;background:rgba(0,0,0,.86);display:grid;place-items:center;touch-action:none}
 #kov[hidden]{display:none}
 .kwrap{text-align:center;padding:20px}
@@ -1855,6 +1943,40 @@ function openDetail(id){
   body.appendChild(c);
   det.hidden=false; document.body.style.overflow='hidden'; body.scrollTop=0;
 }
+// ── update pitch ──
+window.__showUpdate=function(u){
+  if(!u||document.getElementById('upd')) return;
+  var ov=document.createElement('div'); ov.id='upd';
+  var hl=(u.highlights||[]).map(function(h){
+    return '<div class="updi"><span class="updic">'+escH(h.icon||'✨')+'</span><div><b>'+escH(h.title)+'</b><span>'+escH(h.text||'')+'</span></div></div>';
+  }).join('');
+  var since=u.skipped>1?' (and '+(u.skipped-1)+' more update'+(u.skipped>2?'s':'')+')':'';
+  ov.innerHTML='<div class="updp" role="dialog" aria-label="Update available">'+
+    '<div class="updtag">New version '+escH(u.latest)+'</div>'+
+    '<h2 class="updt">'+escH(u.title||'An update is ready')+'</h2>'+
+    '<div class="upds">You have '+escH(u.current)+since+'. Here’s what you get:</div>'+
+    '<div class="updl">'+hl+'</div>'+
+    '<div class="updmsg" aria-live="polite"></div>'+
+    '<button class="updgo" data-act="upd-now">Update now</button>'+
+    '<button class="ghost updlater" data-act="upd-later">Later, remind me in 2 days</button></div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click',function(e){ if(e.target===ov) updLater(); });
+};
+function escH(t){ var d=document.createElement('div'); d.textContent=String(t==null?'':t); return d.innerHTML; }
+function updLater(){ var ov=document.getElementById('upd'); if(!ov) return; ov.remove(); send('update-later',{}); }
+function updNow(btn){
+  var ov=document.getElementById('upd'), msg=ov.querySelector('.updmsg'), later=ov.querySelector('.updlater');
+  btn.disabled=true; btn.textContent='Updating…'; later.hidden=true; msg.textContent='';
+  send('update-now',{},function(ok,res){
+    if(ok){
+      ov.querySelector('.updtag').textContent='Updated to '+res;
+      msg.innerHTML='<b>✓ Done.</b> Close the digest and open it again to start using the new version.';
+      btn.disabled=false; btn.textContent='Got it'; btn.dataset.act='upd-close';
+    } else {
+      msg.textContent=res||'Update failed'; btn.disabled=false; btn.textContent='Try again'; later.hidden=false;
+    }
+  });
+}
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
 document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
 (function(){
@@ -2005,6 +2127,9 @@ document.addEventListener('click',function(e){
   var act=t.dataset.act;
   if(act==='toggle-comment'){ var b=t.closest('.act').querySelector('.cbox'); b.hidden=!b.hidden; if(!b.hidden) b.querySelector('textarea').focus(); }
   if(act==='kudo-all') kudoAll(t);
+  if(act==='upd-now') updNow(t);
+  if(act==='upd-later') updLater();
+  if(act==='upd-close'){ var uo=document.getElementById('upd'); if(uo) uo.remove(); }
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
