@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.7.0 (2026-10-27): Comments in your mood
+
+- 🎭 **Comment moods**: Pick Funny, Energetic, Serious or Funky and get three comments in that tone.
+- ✎ **Your own prompt**: Type how you want it, like "tease about the rain", and the AI follows.
+- 💾 **Remembers your style**: Your mood and custom prompt stay selected for next time.
+
+**Changes**
+
+- Mood chips in the comment box: Funny, Energetic, Serious, Funky and Custom
+- Custom prompt field that drives the AI suggestions
+- Mood and custom prompt are remembered between runs
+
 ## 1.6.0 (2026-10-27): Never miss an update
 
 - 🔔 **Update reminders**: The digest tells you when a new version is out. Tap Later and it waits two days before asking again.
