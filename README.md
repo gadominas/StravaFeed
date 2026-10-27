@@ -42,6 +42,7 @@ The bigger your feed, the more time it saves.
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
+| ⚙️ **Settings in the app** | Tap the gear in the header to change your API key, comment mood, custom prompt, language, AI model and more, without editing code. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
 <p align="center">
@@ -109,8 +110,13 @@ Widgets can't use your Strava login, so the widget shows the summary the digest 
 | See activity details | Tap the activity title or **↗** |
 | Open in Strava | In the details sheet, tap **Open in Strava app** or **Strava website** |
 | Reload | Pull the page down at the top, or tap **↻** |
+| Change settings | Tap **⚙︎** in the header, change what you need, then **Save** |
 
 ## Configuration
+
+Most settings can be changed in the app: tap **⚙︎** in the header to set your OpenAI API key, the default comment mood and custom prompt, language, AI model and thinking effort, whether to show your own activities, extra details, names on the widget, update offers and your Strava athlete ID. They're saved in the iOS Keychain, so updates never reset them.
+
+The values below are the defaults, in the `CONFIG` block at the top of `Strava Daily Digest.js`:
 
 These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`:
 
@@ -162,7 +168,7 @@ Strava's official API doesn't provide the feed of the people you follow, and it 
 | The Strava app says "Something went wrong" | Use the details sheet (tap the title or **↗**) instead. This is an issue in the Strava app when it's opened from a link. |
 | The widget says "Tap to load today" | Open the digest once today; the widget updates from it |
 | "Comment not posted" | Check the activity in Strava before retrying, to avoid posting twice |
-| ✨ Suggest asks for a key again | The key was rejected; paste a valid OpenAI API key |
+| ✨ Suggest asks for a key again | The key was rejected; paste a valid OpenAI API key, or replace it in **⚙︎ Settings** |
 
 If something breaks, open an issue with a screenshot of the error. Set `DEBUG_DUMP: true` to save the raw feed data, and attach it only after removing any names.
 
