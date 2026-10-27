@@ -3,6 +3,37 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.8.0",
+      "date": "2026-10-27",
+      "title": "Settings, right in the app",
+      "highlights": [
+        {
+          "icon": "⚙️",
+          "title": "Settings screen",
+          "text": "Tap the gear in the header to change how the digest works, no code editing."
+        },
+        {
+          "icon": "🔑",
+          "title": "Manage your API key",
+          "text": "Replace or remove your OpenAI key any time; only its last 4 characters are shown."
+        },
+        {
+          "icon": "🔄",
+          "title": "Check for updates now",
+          "text": "See your version and look for a new one with a single tap."
+        }
+      ],
+      "changes": [
+        "Settings sheet behind a gear icon in the header",
+        "AI settings: API key, default mood, custom prompt, language, model and thinking effort",
+        "Digest settings: own activities, extra details, names on the widget",
+        "Update settings: turn offers on or off, check now",
+        "Advanced: Strava athlete ID",
+        "Settings are kept in the iOS Keychain, so updates never reset them"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.7.0",
       "date": "2026-10-27",
       "title": "Comments in your mood",
