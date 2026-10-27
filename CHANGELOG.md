@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.8.0 (2026-10-27): Settings, right in the app
+
+- ⚙️ **Settings screen**: Tap the gear in the header to change how the digest works, no code editing.
+- 🔑 **Manage your API key**: Replace or remove your OpenAI key any time; only its last 4 characters are shown.
+- 🔄 **Check for updates now**: See your version and look for a new one with a single tap.
+
+**Changes**
+
+- Settings sheet behind a gear icon in the header
+- AI settings: API key, default mood, custom prompt, language, model and thinking effort
+- Digest settings: own activities, extra details, names on the widget
+- Update settings: turn offers on or off, check now
+- Advanced: Strava athlete ID
+- Settings are kept in the iOS Keychain, so updates never reset them
+
 ## 1.7.0 (2026-10-27): Comments in your mood
 
 - 🎭 **Comment moods**: Pick Funny, Energetic, Serious or Funky and get three comments in that tone.
