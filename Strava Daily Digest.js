@@ -1456,9 +1456,9 @@ body.loading .loadst{display:block}
 #kov[hidden]{display:none}
 .kwrap{text-align:center;padding:20px}
 .kst{position:relative;margin:0 auto}
-.kc{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:44px;animation:kpulse 1.1s ease-out infinite;z-index:2}
+.kpc{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:44px;animation:kpulse 1.1s ease-out infinite;z-index:2}
 @keyframes kpulse{0%{box-shadow:0 0 0 0 rgba(252,76,2,.6)}100%{box-shadow:0 0 0 28px rgba(252,76,2,0)}}
-#kov.fin .kc{animation:kdone .6s cubic-bezier(.3,1.6,.5,1) forwards}
+#kov.fin .kpc{animation:kdone .6s cubic-bezier(.3,1.6,.5,1) forwards}
 @keyframes kdone{40%{transform:scale(1.25) rotate(-12deg)}100%{transform:scale(1.05)}}
 .kaw{position:absolute;width:var(--A);height:var(--A);margin:calc(var(--A) / -2) 0 0 calc(var(--A) / -2);animation:kin .4s ease-out both}
 @keyframes kin{from{transform:scale(.3);opacity:0}}
@@ -1474,7 +1474,7 @@ body.loading .loadst{display:block}
 .fly{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;font-size:26px;line-height:30px;text-align:center;z-index:3;pointer-events:none;transition:transform .7s cubic-bezier(.25,.7,.35,1),opacity .25s}
 .ktitle{color:#fff;font-size:19px;font-weight:700;margin-top:22px}
 .ksub{color:rgba(255,255,255,.7);font-size:14px;margin-top:4px;min-height:1.3em}
-@media (prefers-reduced-motion:reduce){.kc,.kaw,.ka.hit{animation:none}}
+@media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
 .detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
@@ -1600,7 +1600,7 @@ ${content}
 </div></div>
 <div id="lb" hidden><div class="lbtop"><span id="lbc"></span><button class="lbx" data-act="lb-close" aria-label="Close photos">✕</button></div><div class="lbs"></div><div class="lbbot"><div class="lbthumbs" aria-label="All photos"></div><span class="lbhint">Swipe for more, double-tap or pinch to zoom</span><button class="lbclose" data-act="lb-close">✕ Close photo</button></div></div>
 <div id="kov" hidden role="status" aria-live="polite"><div class="kwrap">
-  <div class="kst"><div class="kc" aria-hidden="true">👍</div></div>
+  <div class="kst"><div class="kpc" aria-hidden="true">👍</div></div>
   <div class="ktitle"></div><div class="ksub"></div>
 </div></div>
 <div id="toast"></div>
