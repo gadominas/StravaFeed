@@ -1452,6 +1452,29 @@ body.loading .loadst{display:block}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
+#kov{position:fixed;inset:0;z-index:66;background:rgba(0,0,0,.86);display:grid;place-items:center;touch-action:none}
+#kov[hidden]{display:none}
+.kwrap{text-align:center;padding:20px}
+.kst{position:relative;margin:0 auto}
+.kc{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:44px;animation:kpulse 1.1s ease-out infinite;z-index:2}
+@keyframes kpulse{0%{box-shadow:0 0 0 0 rgba(252,76,2,.6)}100%{box-shadow:0 0 0 28px rgba(252,76,2,0)}}
+#kov.fin .kc{animation:kdone .6s cubic-bezier(.3,1.6,.5,1) forwards}
+@keyframes kdone{40%{transform:scale(1.25) rotate(-12deg)}100%{transform:scale(1.05)}}
+.kaw{position:absolute;width:var(--A);height:var(--A);margin:calc(var(--A) / -2) 0 0 calc(var(--A) / -2);animation:kin .4s ease-out both}
+@keyframes kin{from{transform:scale(.3);opacity:0}}
+.ka{width:100%;height:100%;border-radius:50%;overflow:hidden;background:#2a2a30;color:#bbb;display:grid;place-items:center;font-weight:700;font-size:13px;box-shadow:0 0 0 2px rgba(255,255,255,.18);transition:box-shadow .25s}
+.ka img{width:100%;height:100%;object-fit:cover}
+.ka.hit{animation:khit .45s cubic-bezier(.3,1.6,.5,1)}
+@keyframes khit{40%{transform:scale(1.28)}}
+.ka.ok{box-shadow:0 0 0 3px #2fb344}
+.ka.bad{box-shadow:0 0 0 3px #e5484d}
+.kk{position:absolute;right:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;display:grid;place-items:center;transform:scale(0);transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
+.kk.ok{background:#2fb344;transform:scale(1)}
+.kk.bad{background:#e5484d;transform:scale(1)}
+.fly{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;font-size:26px;line-height:30px;text-align:center;z-index:3;pointer-events:none;transition:transform .7s cubic-bezier(.25,.7,.35,1),opacity .25s}
+.ktitle{color:#fff;font-size:19px;font-weight:700;margin-top:22px}
+.ksub{color:rgba(255,255,255,.7);font-size:14px;margin-top:4px;min-height:1.3em}
+@media (prefers-reduced-motion:reduce){.kc,.kaw,.ka.hit{animation:none}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
 .detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
@@ -1547,8 +1570,8 @@ textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);bac
 .spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 14px;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
-#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translate(-50%,90px);background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;transition:transform .25s;max-width:90vw}
-#toast.on{transform:translate(-50%,0)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));z-index:80;transform:translate(-50%,calc(100% + 60px));opacity:0;visibility:hidden;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:18px;font-size:14px;text-align:center;max-width:90vw;pointer-events:none;transition:transform .25s,opacity .25s,visibility 0s linear .25s}
+#toast.on{transform:translate(-50%,0);opacity:1;visibility:visible;transition:transform .25s,opacity .25s}
 body.loading .person{opacity:.45}
 </style></head><body>
 ${content}
@@ -1576,6 +1599,10 @@ ${content}
   <button class="ghost" data-act="sheet-close">Cancel</button>
 </div></div>
 <div id="lb" hidden><div class="lbtop"><span id="lbc"></span><button class="lbx" data-act="lb-close" aria-label="Close photos">✕</button></div><div class="lbs"></div><div class="lbbot"><div class="lbthumbs" aria-label="All photos"></div><span class="lbhint">Swipe for more, double-tap or pinch to zoom</span><button class="lbclose" data-act="lb-close">✕ Close photo</button></div></div>
+<div id="kov" hidden role="status" aria-live="polite"><div class="kwrap">
+  <div class="kst"><div class="kc" aria-hidden="true">👍</div></div>
+  <div class="ktitle"></div><div class="ksub"></div>
+</div></div>
 <div id="toast"></div>
 <script>
 ['gesturestart','gesturechange','gestureend'].forEach(function(n){ document.addEventListener(n,function(e){ e.preventDefault(); },{passive:false}); });
@@ -1617,6 +1644,7 @@ window.__patchPerson=function(pid,html){
 window.__patchSummary=function(text){ var el=document.querySelector('.top .sub'); if(el) el.textContent=text; };
 window.setStatus=function(s){ var el=document.getElementById('st'); if(el) el.textContent=s; };
 function toast(t){ var el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(function(){el.classList.remove('on');},2400); }
+function hideToast(){ var el=document.getElementById('toast'); clearTimeout(el._t); el.classList.remove('on'); }
 function markKudo(id,pid){
   document.querySelectorAll('[data-kudo="'+CSS.escape(id)+'"]').forEach(function(b){ b.classList.add('done'); b.disabled=true; b.textContent=b.classList.contains('small')?'✓':'✓ Kudos given'; });
   document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .kc').forEach(function(kc){ kc.textContent=(+kc.textContent||0)+1; });
@@ -1627,14 +1655,15 @@ function markKudo(id,pid){
     var t=document.querySelector('.sec.todo span'); if(t) t.textContent=Math.max(0,(+t.textContent||0)-1);
     var g=document.querySelector('.sec.given span'); if(g) g.textContent=(+g.textContent||0)+1; }
 }
-function kudo(btn){
-  if(btn.disabled) return;
+function kudo(btn, done){
+  if(btn.disabled){ if(typeof done==='function') done(btn.classList.contains('done')); return; }
   var id=btn.dataset.kudo,pid=btn.dataset.pid,old=btn.textContent;
   btn.disabled=true; btn.textContent='…'; btn.dataset.busy='1';
   send('kudo',{id:id},function(ok,msg){
     delete btn.dataset.busy; setTimeout(updAll,0);
     if(ok) markKudo(id,pid);
-    else { btn.disabled=false; btn.textContent=old; toast('Kudos not sent: '+(msg||'unknown error')); }
+    else { btn.disabled=false; btn.textContent=old; if(typeof done!=='function') toast('Kudos not sent: '+(msg||'unknown error')); }
+    if(typeof done==='function') done(ok);
   });
 }
 function kudoAll(btn){
@@ -1644,8 +1673,57 @@ function kudoAll(btn){
     toast('Tap again to give '+list.length+' kudos, one each');
     setTimeout(function(){ if(!armed) return; armed=false; btn.classList.remove('armed'); updAll(); },4000); return; }
   armed=false; btn.classList.remove('armed'); btn.disabled=true; btn.textContent='Sending…';
-  list.forEach(kudo);
+  hideToast();
+  kudosParty(list.map(function(b){ var sec=b.closest('section.person'); return { btn:b, av:sec?sec.querySelector('.av'):null }; }));
 }
+
+// ── kudos to everyone: thumbs fly from the centre to each athlete arranged in a circle ──
+function kudosParty(items){
+  var ov=document.getElementById('kov'), st=ov.querySelector('.kst'), n=items.length;
+  var S=Math.round(Math.min(window.innerWidth*0.86,340)), A=n>16?32:n>10?40:50, R=S/2-A/2-6;
+  st.style.width=S+'px'; st.style.height=S+'px'; st.style.setProperty('--A',A+'px');
+  [].slice.call(st.querySelectorAll('.kaw,.fly')).forEach(function(x){ x.remove(); });
+  var title=ov.querySelector('.ktitle'), sub=ov.querySelector('.ksub');
+  title.textContent='Sending kudos to '+n+'…'; sub.textContent='One each, nobody gets spammed';
+  ov.classList.remove('fin'); ov.hidden=false; lockScreen(true);
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var nodes=items.map(function(it,i){
+    var ang=-Math.PI/2+i*2*Math.PI/n, x=S/2+R*Math.cos(ang), y=S/2+R*Math.sin(ang);
+    var w=document.createElement('div'); w.className='kaw'; w.style.left=x+'px'; w.style.top=y+'px';
+    w.style.animationDelay=(i*40)+'ms';
+    var a=document.createElement('div'); a.className='ka';
+    if(it.av&&it.av.tagName==='IMG'){ var im=document.createElement('img'); im.src=it.av.src; im.alt=''; a.appendChild(im); }
+    else a.textContent=it.av?it.av.textContent:'?';
+    var b=document.createElement('span'); b.className='kk';
+    w.appendChild(a); w.appendChild(b); st.appendChild(w);
+    return {a:a,b:b,x:x-S/2,y:y-S/2};
+  });
+  var done=0, okc=0, gap=Math.min(320,2600/Math.max(1,n)), t0=Date.now();
+  items.forEach(function(it,i){
+    var nd=nodes[i];
+    if(!reduce) setTimeout(function(){
+      var f=document.createElement('div'); f.className='fly'; f.textContent='👍'; st.appendChild(f);
+      requestAnimationFrame(function(){ requestAnimationFrame(function(){
+        f.style.transform='translate('+nd.x+'px,'+nd.y+'px) scale(.75) rotate('+(i%2?16:-16)+'deg)';
+      }); });
+      setTimeout(function(){ f.style.opacity='0'; nd.a.classList.remove('hit'); void nd.a.offsetWidth; nd.a.classList.add('hit'); setTimeout(function(){ f.remove(); },260); },700);
+    }, 250+i*gap);
+    kudo(it.btn,function(ok){
+      done++; if(ok) okc++;
+      nd.a.classList.add(ok?'ok':'bad'); nd.b.textContent=ok?'✓':'!'; nd.b.className='kk '+(ok?'ok':'bad');
+      if(done===n){
+        var wait=reduce?0:Math.max(0,250+n*gap+700-Date.now()+t0);
+        setTimeout(function(){
+          title.textContent=okc===n?('Kudos sent to '+n+'! 🎉'):(okc+' of '+n+' kudos sent');
+          sub.textContent=okc===n?'Everyone just got a little boost':'The rest are still waiting on their cards';
+          ov.classList.add('fin'); setTimeout(closeParty,1900);
+        },wait);
+      }
+    });
+  });
+}
+function closeParty(){ var ov=document.getElementById('kov'); if(ov.hidden) return; ov.hidden=true; ov.classList.remove('fin'); lockScreen(false); updAll(); }
+document.addEventListener('click',function(e){ if(e.target.closest&&e.target.closest('#kov')) closeParty(); });
 function updAll(){
   var btn=document.querySelector('.allk'); if(!btn||armed) return;
   if(document.querySelector('section.person .person-k[data-busy]')) return;   // still sending
