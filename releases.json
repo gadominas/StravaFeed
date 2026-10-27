@@ -3,6 +3,24 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.8.1",
+      "date": "2026-10-27",
+      "title": "Tidier header",
+      "highlights": [
+        {
+          "icon": "🎯",
+          "title": "Matching header icons",
+          "text": "Settings and refresh are now the same size and easier to tap."
+        }
+      ],
+      "changes": [
+        "Settings and refresh icons drawn as matching line icons with larger tap areas"
+      ],
+      "fixes": [
+        "Settings icon looked smaller than the refresh icon"
+      ]
+    },
+    {
       "version": "1.8.0",
       "date": "2026-10-27",
       "title": "Settings, right in the app",
