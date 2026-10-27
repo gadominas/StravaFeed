@@ -41,6 +41,7 @@ The bigger your feed, the more time it saves.
 | 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who. |
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
+| 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
 <p align="center">
@@ -124,11 +125,18 @@ These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`
 | `AI.LANGUAGES` | EN, LT | Languages offered in the comment box |
 | `ATHLETE_ID` | `null` | Your Strava athlete ID. Only needed if it can't be detected automatically. |
 | `WIDGET_NAMES` | `true` | Show first names of people waiting for kudos on medium and large widgets |
+| `CHECK_UPDATES` | `true` | Offer new versions from GitHub |
 | `DEBUG_DUMP` | `false` | Saves the raw feed data to Scriptable's folder for troubleshooting |
+
+## Updates and what's new
+
+The digest checks this repository for a newer version each time it opens. If there is one, it shows what's new and offers **Update now**. **Later**, or tapping outside, hides the reminder for two days. You can also update any time by running the installer again.
+
+See [CHANGELOG.md](CHANGELOG.md) for every release. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Privacy and security
 
-- **Everything runs on your phone.** There is no server in between and nothing is collected.
+- **Everything runs on your phone.** There is no server in between and nothing is collected. The update check only downloads `releases.json` from this repository.
 - **Your Strava login** stays in Scriptable's private browser storage, exactly as if you had logged in to strava.com.
 - **Your OpenAI key** is stored in the iOS Keychain and only ever sent to OpenAI.
 - **✨ Suggest** sends that one activity's stats and the athlete's first name to OpenAI, and only when you tap it. Nothing else leaves your phone.
