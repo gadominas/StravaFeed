@@ -31,6 +31,13 @@ const CONFIG = {
     REASONING: 'low',      // 'low' keeps it quick; raise for cleverer jokes
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
     SUGGESTIONS: 3,
+    MODES: [               // comment moods offered in the comment box; 'custom' uses your own prompt
+      { key: 'funny', label: '😂 Funny', style: 'funny and warm, like a teammate teasing with affection' },
+      { key: 'energetic', label: '⚡ Energetic', style: 'high-energy hype, like a coach cheering from the roadside: punchy, exclamation marks welcome' },
+      { key: 'serious', label: '🎯 Serious', style: 'sincere and respectful, specific praise of the effort and the numbers, no jokes' },
+      { key: 'funky', label: '🕺 Funky', style: 'playful and quirky, groovy slang and wordplay, a little absurd' },
+      { key: 'custom', label: '✎ Custom' },
+    ],
   },
   DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
   WIDGET_NAMES: true,      // show first names of people waiting for kudos on medium/large widgets
@@ -38,7 +45,7 @@ const CONFIG = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 
@@ -54,7 +61,10 @@ if (qp.days) CONFIG.DAYS_BACK = parseInt(qp.days, 10) || 0;
 const KC_ATHLETE = 'strava-digest-athlete-id';
 const KC_AI_KEY = 'strava-digest-openai-key';
 const KC_AI_LANG = 'strava-digest-ai-lang';
-const STATE = { aiLang: CONFIG.AI.LANGUAGES[0][1] };
+const KC_AI_MODE = 'strava-digest-ai-mode';
+const KC_AI_CUSTOM = 'strava-digest-ai-custom';
+const STATE = { aiLang: CONFIG.AI.LANGUAGES[0][1], aiMode: 'funny', aiCustom: '' };
+const cleanPrompt = t => String(t || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim().slice(0, 200);
 const MARGIN = 3 * 3600 * 1000;      // read a bit past midnight: uploads and edits arrive late
 const sleep = ms => new Promise(r => Timer.schedule(ms, false, r));
 
@@ -72,6 +82,9 @@ async function main() {
   const ui = new WebView();          // the digest you see
 
   if (Keychain.contains(KC_AI_LANG)) STATE.aiLang = Keychain.get(KC_AI_LANG);
+  if (Keychain.contains(KC_AI_MODE)) STATE.aiMode = Keychain.get(KC_AI_MODE);
+  if (!CONFIG.AI.MODES.some(m => m.key === STATE.aiMode)) STATE.aiMode = CONFIG.AI.MODES[0].key;
+  if (Keychain.contains(KC_AI_CUSTOM)) STATE.aiCustom = Keychain.get(KC_AI_CUSTOM);
   const maxBack = Math.max(0, CONFIG.DAYS_IN_PICKER - 1);
   let feed = null, daysBack = Math.min(maxBack, Math.max(0, CONFIG.DAYS_BACK)), viewToken = 0, closed = false;
   const details = new Map();         // activity id -> details found on its page (kept for the session)
@@ -220,6 +233,8 @@ async function main() {
       return;
     }
     if (head === 'setlang') { STATE.aiLang = p.lang; Keychain.set(KC_AI_LANG, p.lang); return; }
+    if (head === 'setmode') { if (CONFIG.AI.MODES.some(m => m.key === p.mode)) { STATE.aiMode = p.mode; Keychain.set(KC_AI_MODE, p.mode); } return; }
+    if (head === 'setcustom') { STATE.aiCustom = cleanPrompt(p.text); Keychain.set(KC_AI_CUSTOM, STATE.aiCustom); return; }
     if (head === 'retry') { await boot(); return; }
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
@@ -242,7 +257,9 @@ async function main() {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
         else {
-          const r = await aiSuggest(a, p.lang || STATE.aiLang, p.hint || '');
+          const mode = p.mode || STATE.aiMode, custom = cleanPrompt(p.custom);
+          if (mode === 'custom' && custom && custom !== STATE.aiCustom) { STATE.aiCustom = custom; Keychain.set(KC_AI_CUSTOM, custom); }
+          const r = await aiSuggest(a, p.lang || STATE.aiLang, p.hint || '', mode, custom);
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify(r.comments); }
         }
@@ -299,15 +316,21 @@ function activityFacts(a) {
   };
 }
 
-async function aiSuggest(a, language, hint) {
+async function aiSuggest(a, language, hint, mode, custom) {
   if (!Keychain.contains(KC_AI_KEY)) return { needKey: true };
   const n = CONFIG.AI.SUGGESTIONS;
+  const m = CONFIG.AI.MODES.find(x => x.key === mode && x.style) || CONFIG.AI.MODES[0];
+  const tone = mode === 'custom' && custom
+    ? `Write them the way the user asks: "${custom}".`
+    : `Tone: ${m.style}.`;
   const instructions = [
     `You write Strava comments for a friend's workout. Write ${n} different options in ${language}.`,
-    'Each one: a single short sentence (max ~18 words), funny and warm, like a teammate teasing with affection.',
-    'Build the joke on the real details: distance, pace, time, elevation, heart rate, PRs, early start, title, weather in the description.',
-    'Vary the angle between options (one about a number, one about the title or time of day, one hype).',
+    'Each one: a single short sentence (max ~18 words), written as a friend and teammate.',
+    tone,
+    'Build each comment on the real details: distance, pace, time, elevation, heart rate, PRs, early start, title, weather in the description.',
+    'Vary the angle between options (one about a number, one about the title or time of day, one about the effort).',
     'At most one emoji each. No hashtags. Never mock body, weight, age, or looks. Never invent stats that are not given.',
+    'These rules always apply, whatever the tone or the user asks for.',
     `Address the friend by first name in at most one option.${hint ? ` The user's own draft idea, keep its spirit: "${hint}".` : ''}`,
   ].join(' ');
   const req = new Request('https://api.openai.com/v1/responses');
@@ -1382,7 +1405,10 @@ function actHtml(a, p) {
     </div>
     <div class="cbox" hidden>
       <div class="crow"><textarea rows="3" placeholder="Write a comment, or tap Suggest"></textarea><button data-comment="${id}">Post</button></div>
-      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest</button>${CONFIG.AI.LANGUAGES.map(([code, name]) =>
+      <div class="modes" role="group" aria-label="Comment mood">${CONFIG.AI.MODES.map(m =>
+        `<button class="mode${m.key === STATE.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>
+      <div class="customrow"${STATE.aiMode === 'custom' ? '' : ' hidden'}><input class="aicustom" type="text" maxlength="200" placeholder="Describe the comments you want, e.g. tease about the rain" value="${esc(STATE.aiCustom)}"></div>
+      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest 3</button>${CONFIG.AI.LANGUAGES.map(([code, name]) =>
         `<button class="lng${name === STATE.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
       <div class="sugs"></div>
     </div>
@@ -1647,6 +1673,13 @@ body.loading .loadst{display:block}
 .cbox{margin-top:8px}.cbox[hidden]{display:none}
 .crow{display:flex;gap:6px;align-items:flex-end}
 .ai{display:flex;gap:6px;align-items:center;margin-top:8px}
+.modes{display:flex;gap:6px;margin:10px -14px 0;padding:0 14px;overflow-x:auto;scrollbar-width:none}
+.modes::-webkit-scrollbar{display:none}
+.mode{flex:none;background:var(--soft);color:var(--fg);padding:7px 12px;font-size:13px;font-weight:600;border:1px solid transparent}
+.mode.on{background:var(--fg);color:var(--bg)}
+.customrow{margin-top:8px}.customrow[hidden]{display:none}
+.aicustom{width:100%;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 11px}
+.aicustom:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .lng{background:transparent;color:var(--mut);padding:6px 10px;border:1px solid var(--line)}
 .lng.on{background:var(--soft);color:var(--fg);border-color:var(--soft)}
 .sugs{display:flex;flex-direction:column;gap:6px;margin-top:8px}
@@ -1707,11 +1740,27 @@ function send(action,params,cb){
 }
 function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift(); setTimeout(function(){busy=false;pump();},300); }
 var aiLang=document.querySelector('.lng.on')?document.querySelector('.lng.on').dataset.lang:'';
+var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'funny';
+function setMode(mode, from){
+  aiMode=mode;
+  document.querySelectorAll('.mode').forEach(function(b){ b.classList.toggle('on', b.dataset.mode===mode); });
+  document.querySelectorAll('.customrow').forEach(function(r){ r.hidden=(mode!=='custom'); });
+  send('setmode',{mode:mode});
+  if(mode==='custom'&&from){ var inp=from.closest('.cbox').querySelector('.aicustom'); if(inp) inp.focus(); }
+}
+document.addEventListener('change',function(e){
+  if(!e.target.classList||!e.target.classList.contains('aicustom')) return;
+  var v=e.target.value;
+  document.querySelectorAll('.aicustom').forEach(function(i){ if(i!==e.target) i.value=v; });
+  send('setcustom',{text:v});
+});
 function suggest(btn){
   if(btn.disabled) return;
   var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
+  var cin=box.querySelector('.aicustom'), custom=cin?cin.value.trim():'';
+  if(aiMode==='custom'&&!custom){ toast('Describe the comments you want first'); if(cin) cin.focus(); return; }
   btn.disabled=true; btn.dataset.busy='1'; btn.textContent='✨ Thinking…';
-  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim()},function(ok,msg){
+  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode,custom:custom},function(ok,msg){
     btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
     sugs.innerHTML='';
     if(!ok&&msg==='NEED_KEY'){
@@ -2096,6 +2145,7 @@ document.addEventListener('click',function(e){
     aiLang=t.dataset.lang; send('setlang',{lang:aiLang}); return;
   }
   if(t.dataset.suggest) return suggest(t);
+  if(t.dataset.mode) return setMode(t.dataset.mode, t);
   if(t.dataset.sug!==undefined){
     var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent; ta.focus(); return;
   }
