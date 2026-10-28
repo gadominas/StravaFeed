@@ -42,7 +42,7 @@ The bigger your feed, the more time it saves.
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
-| 🔎 **Peek, then expand** | In the Compact and Tiny layouts, every line shows distance, trophies and photo counts. Tap to open the full activity in place. |
+| 🔎 **Peek, then expand** | In the Compact and Tiny layouts, every line shows distance, pace, trophies and photo counts. Tap to open the full activity in place. |
 | ⚙️ **Settings in the app** | Tap the sliders icon in the header: colours (six palettes or Auto), layout (Comfortable, Compact with tap-to-expand cards, or one-line Tiny), text size and font, plus the digest's own choices and tunables, each with Reset. Changes apply at once. |
 | 🤖 **Claude or OpenAI** | **⚙︎ › AI settings**: add a Claude or OpenAI key, pick any model your key can use, test the connection and see your token usage per day, feature and model. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
