@@ -2,6 +2,17 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.11.1 (2026-10-28): Pace at a glance
+
+- 👟 **Pace on every line**: Runs, walks and hikes show their pace next to the distance in Compact and Tiny.
+- 📐 **Roomier Tiny lines**: A compact 👍 button leaves space for all the indicators; none is ever cut in half.
+
+**Changes**
+
+- Pace indicator after distance in the Compact and Tiny layouts
+- Tiny layout: compact round 👍 kudos button (✓ once given)
+- Tiny layout: indicators that don't fit are hidden whole instead of being cut off
+
 ## 1.11.0 (2026-10-28): Peek, then dive in
 
 - 👆 **Tap to expand**: In Compact, each activity is one tidy line; tap it to open the full card in place.
