@@ -3,6 +3,29 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.11.1",
+      "date": "2026-10-28",
+      "title": "Pace at a glance",
+      "highlights": [
+        {
+          "icon": "👟",
+          "title": "Pace on every line",
+          "text": "Runs, walks and hikes show their pace next to the distance in Compact and Tiny."
+        },
+        {
+          "icon": "📐",
+          "title": "Roomier Tiny lines",
+          "text": "A compact 👍 button leaves space for all the indicators; none is ever cut in half."
+        }
+      ],
+      "changes": [
+        "Pace indicator after distance in the Compact and Tiny layouts",
+        "Tiny layout: compact round 👍 kudos button (✓ once given)",
+        "Tiny layout: indicators that don't fit are hidden whole instead of being cut off"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.11.0",
       "date": "2026-10-28",
       "title": "Peek, then dive in",
