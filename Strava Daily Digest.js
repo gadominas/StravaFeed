@@ -36,7 +36,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.11.0';
+const VERSION = '1.11.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1733,6 +1733,8 @@ function actIndicators(a) {
   const out = [];
   if (a.km) out.push(`<span class="ic">📏 ${esc(a.km.value.toFixed(1))} ${esc(a.km.unit)}</span>`);
   else { const t = (a.stats || []).find(x => RX.time.test(x.label)); if (t) out.push(`<span class="ic">⏱ ${esc(t.value)}</span>`); }
+  const pace = (a.stats || []).find(x => RX.pace.test(x.label));
+  if (pace) out.push(`<span class="ic">👟 ${esc(pace.value)}</span>`);
   const ach = Math.max(a.ach.total || 0, a.ach.prs || 0);
   if (ach) out.push(`<span class="ic${a.ach.prs ? ' gold' : ''}">🏆 ${ach}</span>`);
   if (a.photos.length) out.push(`<span class="ic">📷 ${a.photos.length}</span>`);
@@ -1745,6 +1747,8 @@ function personIndicators(p) {
   const prs = p.acts.some(a => a.ach.prs), pics = p.acts.reduce((n, a) => n + a.photos.length, 0);
   if (p.total) out.push(`<span class="ic">📏 ${esc(p.total)}</span>`);
   else { const t = (p.primary.stats || []).find(x => RX.time.test(x.label)); if (t) out.push(`<span class="ic">⏱ ${esc(t.value)}</span>`); }
+  const pace = (p.primary.stats || []).find(x => RX.pace.test(x.label));
+  if (pace) out.push(`<span class="ic" title="${esc(pace.value)}">👟 ${esc(String(pace.value).replace(/\s*\/\s*\w+$/, ''))}</span>`);   // Tiny is tight: 4:38 rather than 4:38 /km
   if (ach) out.push(`<span class="ic${prs ? ' gold' : ''}">🏆 ${ach}</span>`);
   if (pics) out.push(`<span class="ic">📷 ${pics}</span>`);
   return out.join('');
@@ -2127,6 +2131,12 @@ body.loading .person{opacity:.45}
 .person.tiny .ic.gold{color:var(--gold)}
 .person.tiny .tline{margin-top:1px}
 .tline .more{color:var(--mut);font-weight:600}
+.person.tiny .person-k{font-size:0;width:44px;height:36px;padding:0;flex:none}
+.person.tiny .person-k::before{content:'👍';font-size:17px}
+.person.tiny .person-k.done::before{content:'✓';font-size:17px}
+.person.tiny .person-k[data-busy]::before{content:'…'}
+.person.tiny .ic{flex:none}
+.person.tiny .ic.cut{display:none}
 .tline{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 #cfgsheet{position:fixed;inset:0;z-index:49;background:var(--paper);color:var(--ink);transform:translateY(102%);visibility:hidden;transition:transform .28s ease,visibility 0s linear .28s;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;text-align:left}
@@ -2317,7 +2327,18 @@ window.__patchPerson=function(pid,html){
   var t=document.createElement('template'); t.innerHTML=html.trim(); var neu=t.content.firstElementChild; old.replaceWith(neu);
   openActs.forEach(function(id){ var a=neu.querySelector('.act[data-id="'+CSS.escape(id)+'"]'); if(a){ a.classList.add('open'); var hd=a.querySelector('.ah'); if(hd) hd.setAttribute('aria-expanded','true'); } });
   if(pOpen){ var b=neu.querySelector('.tacts'); if(b){ b.hidden=false; neu.classList.add('open'); } }
+  fitTinyChips(neu);
 };
+// Tiny lines: hide indicator chips that don't fit whole, instead of cutting one in half.
+function fitTinyChips(root){
+  (root||document).querySelectorAll('.person.tiny .pn .ind').forEach(function(box){
+    var cs=box.querySelectorAll('.ic'); cs.forEach(function(c){ c.classList.remove('cut'); });
+    var edge=box.getBoundingClientRect().right+0.5;
+    cs.forEach(function(c){ if(c.getBoundingClientRect().right>edge) c.classList.add('cut'); });
+  });
+}
+window.addEventListener('load',function(){ fitTinyChips(); });
+window.addEventListener('resize',function(){ fitTinyChips(); });
 window.__patchSummary=function(text){ var el=document.querySelector('.top .sub'); if(el) el.textContent=text; };
 window.setStatus=function(s){ var el=document.getElementById('st'); if(el) el.textContent=s; };
 function toast(t){ var el=document.getElementById('toast'); el.textContent=t; el.classList.add('on'); clearTimeout(el._t); el._t=setTimeout(function(){el.classList.remove('on');},2400); }
