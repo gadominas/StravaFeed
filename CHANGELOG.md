@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.11.0 (2026-10-28): Peek, then dive in
+
+- 👆 **Tap to expand**: In Compact, each activity is one tidy line; tap it to open the full card in place.
+- 🔎 **See what's inside**: Distance, trophies and photo counts on every line, so you know what's worth opening.
+- 📋 **Tiny opens in place**: Tap an athlete in Tiny to expand their activities right there, no sheet.
+
+**Changes**
+
+- Compact layout folds each activity to its title, time and indicators; tap to expand or collapse
+- Indicators for distance (or time), achievements and photos, with PRs highlighted in gold
+- Tiny layout shows the same indicators and expands an athlete's activities in place
+- Expanded cards stay open while details load in the background
+- The details sheet always shows the full card
+
 ## 1.10.0 (2026-10-28): Make it yours
 
 - 🎨 **Colours and layout**: Six colour palettes or Auto, plus Comfortable, Compact or a one-line Tiny layout.
