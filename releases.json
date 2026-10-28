@@ -3,6 +3,36 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.11.0",
+      "date": "2026-10-28",
+      "title": "Peek, then dive in",
+      "highlights": [
+        {
+          "icon": "👆",
+          "title": "Tap to expand",
+          "text": "In Compact, each activity is one tidy line; tap it to open the full card in place."
+        },
+        {
+          "icon": "🔎",
+          "title": "See what's inside",
+          "text": "Distance, trophies and photo counts on every line, so you know what's worth opening."
+        },
+        {
+          "icon": "📋",
+          "title": "Tiny opens in place",
+          "text": "Tap an athlete in Tiny to expand their activities right there, no sheet."
+        }
+      ],
+      "changes": [
+        "Compact layout folds each activity to its title, time and indicators; tap to expand or collapse",
+        "Indicators for distance (or time), achievements and photos, with PRs highlighted in gold",
+        "Tiny layout shows the same indicators and expands an athlete's activities in place",
+        "Expanded cards stay open while details load in the background",
+        "The details sheet always shows the full card"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.10.0",
       "date": "2026-10-28",
       "title": "Make it yours",
