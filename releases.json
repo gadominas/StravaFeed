@@ -3,6 +3,38 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.9.0",
+      "date": "2026-10-28",
+      "title": "Claude or OpenAI, your choice",
+      "highlights": [
+        {
+          "icon": "🤖",
+          "title": "Claude or OpenAI",
+          "text": "✨ Comment ideas now work with either provider. Switch any time in AI settings."
+        },
+        {
+          "icon": "🧠",
+          "title": "Pick any model",
+          "text": "Load the models your own key can use, choose one and test the connection."
+        },
+        {
+          "icon": "📊",
+          "title": "See your token usage",
+          "text": "Tokens per day, feature and model, so you always know what AI costs you."
+        }
+      ],
+      "changes": [
+        "New AI settings sheet (⚙︎ › AI settings): Claude and OpenAI keys, model picker loaded from your key, connection test, token usage per day, feature and model",
+        "Keys are entered in a native secure prompt and stored in the iOS Keychain; the page only ever sees them masked",
+        "Comment ideas go through one shared AI call, following the app-blueprints AI configuration",
+        "✨ Suggest, moods and language buttons stay hidden until a key is saved",
+        "Comment ideas are labelled with the provider that wrote them",
+        "Your existing OpenAI key and model move over automatically",
+        "The thinking-effort setting is gone: choose a model instead"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.8.1",
       "date": "2026-10-27",
       "title": "Tidier header",
