@@ -3,36 +3,20 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
-      "version": "1.9.0",
+      "version": "1.8.2",
       "date": "2026-10-28",
-      "title": "Claude or OpenAI, your choice",
+      "title": "Clearer settings errors",
       "highlights": [
         {
-          "icon": "🤖",
-          "title": "Claude or OpenAI",
-          "text": "✨ Comment ideas now work with either provider. Switch any time in AI settings."
-        },
-        {
-          "icon": "🧠",
-          "title": "Pick any model",
-          "text": "Load the models your own key can use, choose one and test the connection."
-        },
-        {
-          "icon": "📊",
-          "title": "See your token usage",
-          "text": "Tokens per day, feature and model, so you always know what AI costs you."
+          "icon": "⚠️",
+          "title": "Errors you can see",
+          "text": "If a setting can't be saved, the settings sheet now scrolls to the message."
         }
       ],
-      "changes": [
-        "New AI settings sheet (⚙︎ › AI settings): Claude and OpenAI keys, model picker loaded from your key, connection test, token usage per day, feature and model",
-        "Keys are entered in a native secure prompt and stored in the iOS Keychain; the page only ever sees them masked",
-        "Comment ideas go through one shared AI call, following the app-blueprints AI configuration",
-        "✨ Suggest, moods and language buttons stay hidden until a key is saved",
-        "Comment ideas are labelled with the provider that wrote them",
-        "Your existing OpenAI key and model move over automatically",
-        "The thinking-effort setting is gone: choose a model instead"
-      ],
-      "fixes": []
+      "changes": [],
+      "fixes": [
+        "A settings error could appear below the visible area, so a failed save looked like nothing happened"
+      ]
     },
     {
       "version": "1.8.1",
