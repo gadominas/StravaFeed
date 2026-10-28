@@ -16,6 +16,11 @@
           "icon": "📐",
           "title": "Roomier Tiny lines",
           "text": "A compact 👍 button leaves space for all the indicators; none is ever cut in half."
+        },
+        {
+          "icon": "✅",
+          "title": "See who you've cheered",
+          "text": "In Tiny, the 👍 turns into ✓ once you've given kudos, so you never tap twice."
         }
       ],
       "changes": [

@@ -6,6 +6,7 @@ All notable changes to Strava Daily Digest. Generated from `releases.json`; edit
 
 - 👟 **Pace on every line**: Runs, walks and hikes show their pace next to the distance in Compact and Tiny.
 - 📐 **Roomier Tiny lines**: A compact 👍 button leaves space for all the indicators; none is ever cut in half.
+- ✅ **See who you've cheered**: In Tiny, the 👍 turns into ✓ once you've given kudos, so you never tap twice.
 
 **Changes**
 
