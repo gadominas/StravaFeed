@@ -42,7 +42,7 @@ The bigger your feed, the more time it saves.
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
-| ⚙️ **Settings in the app** | Tap the gear in the header to change comment mood, custom prompt, language and more, without editing code. |
+| ⚙️ **Settings in the app** | Tap the sliders icon in the header: colours (six palettes or Auto), layout (Comfortable, Compact or one-line Tiny), text size and font, plus the digest's own choices and tunables, each with Reset. Changes apply at once. |
 | 🤖 **Claude or OpenAI** | **⚙︎ › AI settings**: add a Claude or OpenAI key, pick any model your key can use, test the connection and see your token usage per day, feature and model. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
@@ -111,27 +111,23 @@ Widgets can't use your Strava login, so the widget shows the summary the digest 
 | See activity details | Tap the activity title or **↗** |
 | Open in Strava | In the details sheet, tap **Open in Strava app** or **Strava website** |
 | Reload | Pull the page down at the top, or tap **↻** |
-| Change settings | Tap **⚙︎** in the header, change what you need, then **Save** |
+| Change settings | Tap the sliders icon in the header and change what you need; it applies at once. Tap **Done** to close |
 
 ## Configuration
 
-Most settings can be changed in the app: tap **⚙︎** in the header to set the default comment mood and custom prompt, language, whether to show your own activities, extra details, names on the widget, update offers and your Strava athlete ID. They're saved in the iOS Keychain, so updates never reset them. AI keys, models and token usage have their own screen: **⚙︎ › AI settings**.
+Everything you might want different is in the app: tap the sliders icon in the header. Settings are saved in `settings.json` in iCloud Drive › Scriptable › StravaFeed, so updates never reset them; AI keys stay in the iOS Keychain.
 
-The values below are the defaults, in the `CONFIG` block at the top of `Strava Daily Digest.js`:
+| Section | What you can change |
+|---|---|
+| Appearance | Colours (Auto or Ink, Sepia, Mint, Contrast, Slate, Night), Layout (Comfortable, Compact, Tiny), Text size (Small to Larger), Headline font (Sans serif or Serif) |
+| Digest | Show my own activities, load extra details, names on the widget |
+| AI comments | AI settings (keys, models, token usage), default mood, custom prompt, language |
+| Updates | Offer new versions, check now |
+| Reading the feed | Feed pages read for today, extra pages per earlier day, activities opened at once, time limits |
+| Digest, Comments, Widget, Account | Days in the header, comment ideas per tap, widget refresh, your Strava athlete ID |
+| Built with | The shared blueprints this app follows, with links (read-only) |
 
-These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`:
-
-| Setting | Default | What it does |
-|---|---|---|
-| `DAYS_BACK` | `0` | Day shown first: `0` today, `1` yesterday, and so on |
-| `DAYS_IN_PICKER` | `2` | Number of days in the header: today and yesterday |
-| `INCLUDE_ME` | `false` | Include your own activities |
-| `ENRICH_DETAILS` | `true` | Read each activity's page for heart rate, PRs, start time and extra photos |
-| `AI.LANGUAGES` | EN, LT | Languages offered in the comment box |
-| `ATHLETE_ID` | `null` | Your Strava athlete ID. Only needed if it can't be detected automatically. |
-| `WIDGET_NAMES` | `true` | Show first names of people waiting for kudos on medium and large widgets |
-| `CHECK_UPDATES` | `true` | Offer new versions from GitHub |
-| `DEBUG_DUMP` | `false` | Saves the raw feed data to Scriptable's folder for troubleshooting |
+Two values stay in code, in the `DIGEST` block at the top of `Strava Daily Digest.js`: `DAYS_BACK` (the day shown first; you can also run the script with `?days=1`) and `DEBUG_DUMP` (saves the raw feed for troubleshooting).
 
 ## Updates and what's new
 

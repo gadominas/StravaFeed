@@ -17,18 +17,14 @@
  * Run with ?days=1 (URL scheme / Shortcuts) to see yesterday.
  */
 
-const CONFIG = {
-  DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ...
-  DAYS_IN_PICKER: 2,       // days in the header: today and yesterday
-  ATHLETE_ID: null,        // your id from strava.com/athletes/<ID>; set only if auto-detect fails
-  INCLUDE_ME: false,       // include your own activities
-  MAX_PAGES: 15,           // feed pages to scan for today (≈20 entries each)
-  EXTRA_PAGES_PER_DAY: 10, // added for every day further back
-  ENRICH_DETAILS: true,    // open each activity page to find HR / PRs / photos the feed omits
-  ENRICH_CONCURRENCY: 4,
-  AI: {                    // ✨ comment ideas from Claude or OpenAI (your own key, in the iOS Keychain; set it in ⚙︎ › AI settings)
+// Fixed choices. Everything a user may want different lives in Settings (the sliders icon in the header):
+// see the CONFIG registry and the settings defaults further down (github.com/gadominas/app-blueprints · settings).
+const APP = 'StravaFeed';   // the app's folder in Scriptable's documents (settings.json lives there)
+const DIGEST = {
+  DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ... (or run with ?days=1)
+  DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
+  AI: {                    // ✨ comment ideas from Claude or OpenAI (your own key; Settings › AI settings)
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
-    SUGGESTIONS: 3,
     MODES: [               // comment moods offered in the comment box; 'custom' uses your own prompt
       { key: 'funny', label: '😂 Funny', style: 'funny and warm, like a teammate teasing with affection' },
       { key: 'energetic', label: '⚡ Energetic', style: 'high-energy hype, like a coach cheering from the roadside: punchy, exclamation marks welcome' },
@@ -37,13 +33,21 @@ const CONFIG = {
       { key: 'custom', label: '✎ Custom' },
     ],
   },
-  DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
-  WIDGET_NAMES: true,      // show first names of people waiting for kudos on medium/large widgets
-  CHECK_UPDATES: true,     // offer new versions from GitHub (asks again 2 days after "Later")
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.9.1';
+const VERSION = '1.10.0';
+const APP_ID = 'stravafeed';   // unique per app, never changes
+
+// ───────── Blueprints ─────────
+// Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
+// inventory tools read it without running the script, and Settings › Built with shows it.
+const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
+const BLUEPRINTS = [
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.10.0' },
+  { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.10.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
+];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 
@@ -51,16 +55,16 @@ const STRAVA = 'https://www.strava.com';
 const SCHEME = 'strava-digest://';
 
 const qp = (args && args.queryParameters) || {};
-if (qp.days) CONFIG.DAYS_BACK = parseInt(qp.days, 10) || 0;
+if (qp.days) DIGEST.DAYS_BACK = parseInt(qp.days, 10) || 0;
 
 
 // ───────────────────────────── main flow ─────────────────────────────
 
 const KC_ATHLETE = 'strava-digest-athlete-id';
+// 1.9.x and earlier kept settings and remembered picks in these Keychain entries; moved to settings.json on first run.
 const KC_AI_LANG = 'strava-digest-ai-lang';
 const KC_AI_MODE = 'strava-digest-ai-mode';
 const KC_AI_CUSTOM = 'strava-digest-ai-custom';
-const STATE = { aiLang: CONFIG.AI.LANGUAGES[0][1], aiMode: 'funny', aiCustom: '' };
 const cleanPrompt = t => String(t || '').replace(/[\r\n]+/g, ' ').replace(/"/g, "'").trim().slice(0, 200);
 const MARGIN = 3 * 3600 * 1000;      // read a bit past midnight: uploads and edits arrive late
 const sleep = ms => new Promise(r => Timer.schedule(ms, false, r));
@@ -78,12 +82,9 @@ async function main() {
   let ev = null, ex = null;          // hidden: activity details, so kudos never wait behind them
   const ui = new WebView();          // the digest you see
 
-  if (Keychain.contains(KC_AI_LANG)) STATE.aiLang = Keychain.get(KC_AI_LANG);
-  if (Keychain.contains(KC_AI_MODE)) STATE.aiMode = Keychain.get(KC_AI_MODE);
-  if (!CONFIG.AI.MODES.some(m => m.key === STATE.aiMode)) STATE.aiMode = CONFIG.AI.MODES[0].key;
-  if (Keychain.contains(KC_AI_CUSTOM)) STATE.aiCustom = Keychain.get(KC_AI_CUSTOM);
-  const maxBack = Math.max(0, CONFIG.DAYS_IN_PICKER - 1);
-  let feed = null, daysBack = Math.min(maxBack, Math.max(0, CONFIG.DAYS_BACK)), viewToken = 0, closed = false;
+  let settingsEffect = '';   // what closing Settings must do: '', 'render' or 'reload'
+  const maxBack = () => Math.max(0, cfg('daysInPicker') - 1);
+  let feed = null, daysBack = Math.min(maxBack(), Math.max(0, DIGEST.DAYS_BACK)), viewToken = 0, closed = false;
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
   let viewing = false, savedScroll = 0;
@@ -136,7 +137,7 @@ async function main() {
   async function startSession() {
     await sv.loadURL(`${STRAVA}/robots.txt`);
     // Fast path: remembered athlete id + one feed request (also proves we're logged in).
-    let me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
+    let me = athleteId() || (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
     let first = me ? await firstPage(me) : null;
     if (first) return { me, first };
 
@@ -147,16 +148,16 @@ async function main() {
       if (closed) return null;
       await ui.loadHTML(bootScreen('Logged in. Loading your feed'));
     }
-    me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : await sx('__SD.athleteId()');
-    if (!me) throw new Error('Could not detect your athlete ID. Open your Strava profile, copy the number from strava.com/athletes/<ID>, and set CONFIG.ATHLETE_ID at the top of the script.');
+    me = athleteId() || await sx('__SD.athleteId()');
+    if (!me) throw new Error('Could not detect your athlete ID. Open your Strava profile, copy the number from strava.com/athletes/<ID>, and enter it in Settings › Account › Strava athlete ID.');
     first = await firstPage(me);
     if (!first) throw new Error("You're logged in, but Strava's feed didn't answer. Tap Try again.");
-    if (!CONFIG.ATHLETE_ID) Keychain.set(KC_ATHLETE, me);
+    if (!athleteId()) Keychain.set(KC_ATHLETE, me);
     return { me, first };
   }
 
   async function firstPage(me) {
-    try { return await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000); }
+    try { return await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${DIGEST.DEBUG_DUMP})`, cfg('pageWait') * 1000); }
     catch (e) { console.log('Feed request failed: ' + e.message); return null; }
   }
 
@@ -183,15 +184,15 @@ async function main() {
   }
 
   async function enrich(acts, token, dayStart, dayEnd) {
-    if (!CONFIG.ENRICH_DETAILS) return;
+    if (!settings.enrich) return;
     const todo = acts.filter(a => !details.has(a.id)).map(a => a.id);
     if (!todo.length) return;
     if (!ev) { ev = new WebView(); await ev.loadURL(`${STRAVA}/robots.txt`); ex = makeSx(ev); }
-    for (let i = 0; i < todo.length; i += CONFIG.ENRICH_CONCURRENCY) {
+    for (let i = 0; i < todo.length; i += cfg('enrichConcurrency')) {
       if (token !== viewToken || closed) return;
-      const chunk = todo.slice(i, i + CONFIG.ENRICH_CONCURRENCY);
+      const chunk = todo.slice(i, i + cfg('enrichConcurrency'));
       let det = {};
-      try { det = await ex(`__SD.enrich(${JSON.stringify(chunk)}, ${chunk.length})`, 30000); } catch (e) { console.warn(e.message); }
+      try { det = await ex(`__SD.enrich(${JSON.stringify(chunk)}, ${chunk.length})`, cfg('detailsWait') * 1000); } catch (e) { console.warn(e.message); }
       chunk.forEach(id => details.set(id, det[id] || {}));
       if (token !== viewToken || closed) return;
       const touched = new Set();
@@ -236,40 +237,44 @@ async function main() {
       await js(`window.scrollTo(0, ${savedScroll})`);
       return;
     }
-    if (head === 'setlang') { STATE.aiLang = p.lang; Keychain.set(KC_AI_LANG, p.lang); return; }
-    if (head === 'setmode') { if (CONFIG.AI.MODES.some(m => m.key === p.mode)) { STATE.aiMode = p.mode; Keychain.set(KC_AI_MODE, p.mode); } return; }
-    if (head === 'setcustom') { STATE.aiCustom = cleanPrompt(p.text); Keychain.set(KC_AI_CUSTOM, STATE.aiCustom); return; }
-    if (head === 'settings-get') {
-      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(JSON.stringify(settingsForPage()))})`);
+    if (head === 'setlang') { if (setSetting('aiLang', p.lang) !== null) saveSettings(); return; }
+    if (head === 'setmode') { if (setSetting('aiMode', p.mode) !== null) saveSettings(); return; }
+    if (head === 'setcustom') { setSetting('aiCustom', p.text); saveSettings(); return; }
+    // Settings (app-blueprints · settings): every change is applied and saved at once; the reply is the fresh state.
+    if (head === 'settings-get' || head === 'set' || head === 'cfg') {
+      let ok = true, msg = '';
+      try {
+        if (head === 'set') {
+          const effect = setSetting(p.k, p.v);
+          if (effect === null) throw new Error('That setting can’t be changed here.');
+          if (effect && effect !== settingsEffect) settingsEffect = settingsEffect === 'reload' ? 'reload' : effect;
+          saveSettings();
+        } else if (head === 'cfg') {
+          const before = cfg('daysInPicker');
+          if (p.k === '*') settings.cfg = {};
+          else if (p.reset) setCfg(p.k, null);
+          else { const err = setCfg(p.k, p.v); if (err) throw new Error(err); }
+          if (cfg('daysInPicker') !== before) { settingsEffect = settingsEffect || 'render'; daysBack = Math.min(daysBack, Math.max(0, cfg('daysInPicker') - 1)); }
+          saveSettings();
+        }
+        msg = JSON.stringify(settingsState());
+      } catch (e) { ok = false; msg = String(e.message || e); }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
       return;
     }
-    if (head === 'settings-save') {
-      let ok = false, msg = '';
-      try {
-        const v = JSON.parse(p.data || '{}'), before = readSettings();
-        if (v.athleteId && !/^\d+$/.test(String(v.athleteId).trim())) throw new Error('The athlete ID is the number from strava.com/athletes/<ID>.');
-        const st = {
-          includeMe: !!v.includeMe, enrich: !!v.enrich, widgetNames: !!v.widgetNames, checkUpdates: !!v.checkUpdates,
-          athleteId: String(v.athleteId || '').trim(),
-        };
-        Keychain.set(KC_SETTINGS, JSON.stringify(st));
-        applySettings(st);
-        if (CONFIG.AI.LANGUAGES.some(l => l[1] === v.aiLang)) { STATE.aiLang = v.aiLang; Keychain.set(KC_AI_LANG, v.aiLang); }
-        if (CONFIG.AI.MODES.some(m => m.key === v.aiMode)) { STATE.aiMode = v.aiMode; Keychain.set(KC_AI_MODE, v.aiMode); }
-        STATE.aiCustom = cleanPrompt(v.aiCustom); Keychain.set(KC_AI_CUSTOM, STATE.aiCustom);
-        if (!st.checkUpdates) pendingUpdate = null;
-        ok = true;
-        msg = (before.includeMe !== st.includeMe || before.enrich !== st.enrich) ? 'reload' : 'render';
-        if (st.athleteId !== before.athleteId) msg = 'restart';
-      } catch (e) { msg = String(e.message || e); }
-      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
-      if (ok && feed && msg !== 'restart') await showDay(msg === 'reload');   // re-draw with the new settings
+    if (head === 'settings-done') {   // the sheet closed: redraw or reload once for everything that needs it
+      const effect = settingsEffect; settingsEffect = '';
+      if (feed && effect) await showDay(effect === 'reload');
+      return;
+    }
+    if (head === 'openurl') {   // Built with: only the blueprints repository opens from here
+      if (p.v === BLUEPRINTS_REPO || String(p.v).startsWith(BLUEPRINTS_REPO + '/')) await Safari.openInApp(p.v, false);
       return;
     }
     if (head === 'update-check') {
       if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE);
-      const was = CONFIG.CHECK_UPDATES; CONFIG.CHECK_UPDATES = true;
-      const u = await checkForUpdate(); CONFIG.CHECK_UPDATES = was;
+      const was = settings.checkUpdates; settings.checkUpdates = true;
+      const u = await checkForUpdate(); settings.checkUpdates = was;
       await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(u ? `Version ${u.latest} is available` : `You're on the latest version (${VERSION})`)})`);
       if (u) { pendingUpdate = u; offerUpdate(); }
       return;
@@ -277,11 +282,11 @@ async function main() {
     if (head === 'retry') { await boot(); return; }
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
-    if (head === 'day') { daysBack = Math.min(maxBack, Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
+    if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
     let ok = false, msg = '';
     try {
       if (head === 'kudo') {
-        const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, 20000); ok = !!r.ok; msg = r.error || '';
+        const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, cfg('pageWait') * 1000); ok = !!r.ok; msg = r.error || '';
         if (ok) { feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; }); saveSnapshot(feed); }
       } else if (head === 'comment') {
         const r = await postComment(sx, String(p.id), String(p.text || ''));
@@ -292,9 +297,9 @@ async function main() {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
         else {
-          const mode = p.mode || STATE.aiMode, custom = cleanPrompt(p.custom);
-          if (mode === 'custom' && custom && custom !== STATE.aiCustom) { STATE.aiCustom = custom; Keychain.set(KC_AI_CUSTOM, custom); }
-          const r = await aiSuggest(a, p.lang || STATE.aiLang, p.hint || '', mode, custom);
+          const mode = p.mode || settings.aiMode, custom = cleanPrompt(p.custom);
+          if (mode === 'custom' && custom && custom !== settings.aiCustom) { settings.aiCustom = custom; saveSettings(); }
+          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', mode, custom);
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
         }
@@ -556,8 +561,8 @@ function activityFacts(a) {
 
 async function aiSuggest(a, language, hint, mode, custom) {
   if (!aiKey()) return { needKey: true };
-  const n = CONFIG.AI.SUGGESTIONS;
-  const m = CONFIG.AI.MODES.find(x => x.key === mode && x.style) || CONFIG.AI.MODES[0];
+  const n = cfg('suggestions');
+  const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style) || DIGEST.AI.MODES[0];
   const tone = mode === 'custom' && custom
     ? `Write them the way the user asks: "${custom}".`
     : `Tone: ${m.style}.`;
@@ -593,7 +598,7 @@ function makeFeed(sx, me, first) {
     if (r.firstId != null) st.seenFirst.add(r.firstId);
     for (const a of r.items) {
       if (!a.id || a.id === 'undefined') continue;
-      if (!CONFIG.INCLUDE_ME && a.athleteId === me) continue;
+      if (!settings.includeMe && a.athleteId === me) continue;
       derive(a);
       st.items.set(a.id, a);
       if (a.ts && (st.oldest == null || a.ts < st.oldest)) st.oldest = a.ts;
@@ -607,20 +612,20 @@ function makeFeed(sx, me, first) {
   return {
     covers: (dayStart) => st.done || (st.position != null && st.position < dayStart - MARGIN),
     async readBackTo(dayStart, status, cancelled, onCount) {
-      const limit = st.pages + CONFIG.MAX_PAGES + CONFIG.EXTRA_PAGES_PER_DAY * 3;
+      const limit = st.pages + cfg('maxPages') + cfg('extraPagesPerDay') * 3;
       while (!this.covers(dayStart) && st.pages < limit) {
         if (cancelled()) return;
         await status(`Reading feed${st.position ? `, back to ${dayLabel(st.position)}` : ''}`);
-        const r = await sx(`__SD.page(${JSON.stringify(me)}, ${JSON.stringify(st.next.before)}, ${JSON.stringify(st.next.cursor)}, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000);
+        const r = await sx(`__SD.page(${JSON.stringify(me)}, ${JSON.stringify(st.next.before)}, ${JSON.stringify(st.next.cursor)}, 0, 1e15, ${DIGEST.DEBUG_DUMP})`, cfg('pageWait') * 1000);
         absorb(r);
         if (onCount) await onCount(st.entries);
       }
       if (!this.covers(dayStart)) st.stop = 'page limit reached';
-      if (CONFIG.DEBUG_DUMP) dump(st.raws);
+      if (DIGEST.DEBUG_DUMP) dump(st.raws);
     },
     async restart(status) {
       await status('Refreshing');
-      const r = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${CONFIG.DEBUG_DUMP})`, 20000);
+      const r = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, ${DIGEST.DEBUG_DUMP})`, cfg('pageWait') * 1000);
       reset(); absorb(r);
     },
     day: (from, to) => [...st.items.values()].filter(a => a.ts != null && a.ts >= from && a.ts < to),
@@ -634,37 +639,147 @@ function makeFeed(sx, me, first) {
 // The CONFIG block above holds the defaults; anything changed in Settings is saved in the iOS Keychain
 // and applied on top of it at start, so updates never wipe your choices.
 
-const KC_SETTINGS = 'strava-digest-settings';
-const DEFAULTS = {
-  includeMe: CONFIG.INCLUDE_ME, enrich: CONFIG.ENRICH_DETAILS, widgetNames: CONFIG.WIDGET_NAMES,
-  checkUpdates: CONFIG.CHECK_UPDATES,
-  athleteId: CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : '',
+// ---------- storage ----------
+const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+const DIR = fm.joinPath(fm.documentsDirectory(), APP);
+if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
+const P = n => fm.joinPath(DIR, n + ".json");
+async function load(n, def) {
+  const p = P(n);
+  if (!fm.fileExists(p)) return def;
+  try {
+    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) await fm.downloadFileFromiCloud(p);
+    return JSON.parse(fm.readString(p));
+  } catch (e) { return def; }   // a broken file falls back to defaults, never crashes
+}
+const write = (n, v) => { try { fm.writeString(P(n), JSON.stringify(v)); return true; } catch (e) { console.warn("Couldn't save " + n + ": " + e); return false; } };
+
+// Defaults first, saved choices on top (loadSettings, at the entry point, before any branch).
+const settings = {
+  includeMe: false, enrich: true, widgetNames: true,
+  checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+  theme: "auto", density: "comfortable", font: "sans", textSize: 1,
+  aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, aiCustom: "",   // remembered picks, also set inline
+  cfg: {},
 };
+const saveSettings = () => write("settings", settings);
 
-function readSettings() {
-  try { return Object.assign({}, DEFAULTS, Keychain.contains(KC_SETTINGS) ? JSON.parse(Keychain.get(KC_SETTINGS)) : {}); }
-  catch (e) { return Object.assign({}, DEFAULTS); }
+// Every key the page may change, with its check and what closing Settings must then do.
+const SET_KEYS = {
+  includeMe: ["bool", "reload"], enrich: ["bool", "reload"], widgetNames: ["bool", ""], checkUpdates: ["bool", ""],
+  theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
+  font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
+  aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
+  aiCustom: ["text", "render"],
+};
+// Returns the effect ('', 'render', 'reload'), or null when the key or value isn't allowed.
+function setSetting(k, v) {
+  const s = SET_KEYS[k];
+  if (!s) return null;
+  if (s[0] === "bool") v = v === true || v === "true";
+  else if (s[0] === "text") v = cleanPrompt(v);
+  else if (!s[0](v)) return null;
+  if (k === "textSize") v = +v;
+  settings[k] = v;
+  return s[1];
 }
 
-function applySettings(st) {
-  CONFIG.INCLUDE_ME = !!st.includeMe;
-  CONFIG.ENRICH_DETAILS = !!st.enrich;
-  CONFIG.WIDGET_NAMES = !!st.widgetNames;
-  CONFIG.CHECK_UPDATES = !!st.checkUpdates;
-  CONFIG.ATHLETE_ID = /^\d+$/.test(String(st.athleteId || '').trim()) ? String(st.athleteId).trim() : (DEFAULTS.athleteId || null);
+async function loadSettings() {
+  const saved = await load("settings", null);
+  if (saved) Object.assign(settings, saved);
+  else {   // first run of 1.10: move the choices 1.9.x kept in the Keychain into settings.json
+    try {
+      if (Keychain.contains(KC_SETTINGS_OLD)) {
+        const o = JSON.parse(Keychain.get(KC_SETTINGS_OLD));
+        LEGACY_AI_MODEL = o.aiModel || null;
+        for (const k of ["includeMe", "enrich", "widgetNames", "checkUpdates"]) if (k in o) settings[k] = !!o[k];
+        if (/^\d+$/.test(String(o.athleteId || "").trim())) settings.cfg.athleteId = String(o.athleteId).trim();
+      }
+    } catch (e) {}
+    for (const [k, kc] of [["aiLang", KC_AI_LANG], ["aiMode", KC_AI_MODE], ["aiCustom", KC_AI_CUSTOM]]) if (Keychain.contains(kc)) settings[k] = Keychain.get(kc);
+    if (saveSettings()) for (const kc of [KC_SETTINGS_OLD, KC_AI_LANG, KC_AI_MODE, KC_AI_CUSTOM]) if (Keychain.contains(kc)) Keychain.remove(kc);
+  }
+  // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
+  const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key };
+  for (const k of Object.keys(d)) if (setSetting(k, settings[k]) === null) settings[k] = d[k];
+  settings.cfg = settings.cfg && typeof settings.cfg === "object" ? settings.cfg : {};
 }
+const KC_SETTINGS_OLD = 'strava-digest-settings';
+let LEGACY_AI_MODEL = null;   // the OpenAI model 1.8.x kept with the settings; handed to aiMigrate once
 
-function loadSettings() { applySettings(readSettings()); }
+// Everything tunable lives here; the Settings screen edits these (stored in settings.cfg, defaults below).
+const CONFIG = [
+  ["Reading the feed", [
+    { k: "maxPages", label: "Feed pages read for today", help: "About 20 posts each; more finds late posts but takes longer", unit: "pages", def: 15, min: 5, max: 40, step: 1 },
+    { k: "extraPagesPerDay", label: "Extra pages per earlier day", help: "Added for each day further back", unit: "pages", def: 10, min: 0, max: 30, step: 1 },
+    { k: "enrichConcurrency", label: "Activities opened at once for details", help: "Higher fills in heart rate and PRs faster but is heavier on the network", unit: "", def: 4, min: 1, max: 8, step: 1 },
+    { k: "pageWait", label: "Time limit per feed page", help: "Also used for kudos and comments", unit: "s", def: 20, min: 10, max: 60, step: 5 },
+    { k: "detailsWait", label: "Time limit per activity page", unit: "s", def: 30, min: 10, max: 60, step: 5 },
+  ]],
+  ["Digest", [
+    { k: "daysInPicker", label: "Days in the header", help: "Today, yesterday and further back", unit: "days", def: 2, min: 1, max: 7, step: 1 },
+  ]],
+  ["Comments", [
+    { k: "suggestions", label: "✨ Comment ideas per tap", unit: "", def: 3, min: 1, max: 5, step: 1 },
+  ]],
+  ["Widget", [
+    { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 15, min: 15, max: 120, step: 15 },
+  ]],
+  ["Account", [
+    { k: "athleteId", label: "Strava athlete ID", help: "The number from strava.com/athletes/<ID>. Leave empty to detect it. Applies next time you open the digest.", type: "text", def: "", pattern: "^\\d*$", bad: "The athlete ID is the number from strava.com/athletes/<ID>." },
+  ]],
+];
+const CFG_FLAT = CONFIG.flatMap(([, items]) => items);
+const cfgDef = k => CFG_FLAT.find(x => x.k === k);
+const cfg = k => { const v = settings.cfg && settings.cfg[k]; return v === undefined ? cfgDef(k).def : v; };
+// Validates and stores one tunable; returns an error message only for a text value that doesn't match its pattern.
+function setCfg(k, v) {
+  const d = cfgDef(k);
+  if (!d) return "Unknown setting";
+  settings.cfg = settings.cfg || {};
+  if (v === null) { delete settings.cfg[k]; return ""; }   // Reset
+  if (d.type === "text") { v = String(v || "").trim(); if (d.pattern && !new RegExp(d.pattern).test(v)) return d.bad || "That value isn't valid."; if (!v) v = d.def; }
+  else if (d.type === "lines") { v = String(Array.isArray(v) ? v.join("\n") : v || "").split("\n").map(x => x.trim()).filter(Boolean).slice(0, 20); if (!v.length) v = d.def; }
+  else {
+    v = Number(String(v).replace(",", "."));   // accept a decimal comma
+    if (!isFinite(v)) v = d.def;
+    v = Math.min(d.max, Math.max(d.min, v));
+    v = d.step < 1 ? Math.round(v / d.step) * d.step : Math.round(v);
+    v = Number(v.toFixed(2));
+  }
+  if (JSON.stringify(v) === JSON.stringify(d.def)) delete settings.cfg[k]; else settings.cfg[k] = v;   // store only what differs
+  return "";
+}
+const athleteId = () => /^\d+$/.test(String(cfg("athleteId"))) ? String(cfg("athleteId")) : null;
+
+// Six palettes on the shared colour tokens. Strava orange is the accent in all of them; hr (heart rate) is this app's own extra colour.
+const PALETTES = {
+  ink:      { paper: "#f2f1ee", sheet: "#ffffff", ink: "#17171a", ink2: "#3a3a40", muted: "#6d6c72", rule: "#e3e1dc", signal: "#fc4c02", signalWash: "#ffe7dc", amber: "#9a6200", amberWash: "#fdf0d2", danger: "#c42b2b", hr: "#c92a5c", scheme: "light" },
+  sepia:    { paper: "#f3ead6", sheet: "#fbf5e6", ink: "#2a1f14", ink2: "#4b3b2a", muted: "#73604a", rule: "#e1d3b5", signal: "#e8470a", signalWash: "#f8dcc8", amber: "#8a5a06", amberWash: "#f6e5bf", danger: "#9f1239", hr: "#b0294f", scheme: "light" },
+  mint:     { paper: "#f1f6f3", sheet: "#ffffff", ink: "#0d2318", ink2: "#2c4a3b", muted: "#556d60", rule: "#d3e2d9", signal: "#f04a06", signalWash: "#fde3d6", amber: "#9a6200", amberWash: "#fbeed8", danger: "#b91c1c", hr: "#c92a5c", scheme: "light" },
+  contrast: { paper: "#ffffff", sheet: "#ffffff", ink: "#000000", ink2: "#111111", muted: "#333333", rule: "#9a9a9a", signal: "#c43c00", signalWash: "#ffe2d3", amber: "#7a4b00", amberWash: "#ffeec2", danger: "#a30000", hr: "#a3123f", scheme: "light" },
+  slate:    { paper: "#1c2128", sheet: "#22272e", ink: "#e6edf3", ink2: "#c5ced8", muted: "#9aa5b1", rule: "#373e47", signal: "#fc5c1a", signalWash: "#3a2216", amber: "#e3b341", amberWash: "#3a2f12", danger: "#ff8a7a", hr: "#ff7aa2", scheme: "dark" },
+  night:    { paper: "#121214", sheet: "#1c1c20", ink: "#f1f0ee", ink2: "#d4d3d0", muted: "#9b9aa2", rule: "#2c2c31", signal: "#fc4c02", signalWash: "#3a1a0c", amber: "#f3c15c", amberWash: "#3b2d0f", danger: "#ff8f7a", hr: "#ff7aa2", scheme: "dark" },
+};
+const PALETTE_CSS = Object.entries(PALETTES).map(([k, p]) => `[data-theme=${k}]{--paper:${p.paper};--sheet:${p.sheet};--ink:${p.ink};--ink-2:${p.ink2};--muted:${p.muted};--rule:${p.rule};--signal:${p.signal};--signal-wash:${p.signalWash};--amber:${p.amber};--amber-wash:${p.amberWash};--danger:${p.danger};--hr:${p.hr};color-scheme:${p.scheme}}`).join("\n");
+
+// The look for the first paint, so the page never flashes the default palette (the page keeps Auto live afterwards).
+function lookState() {
+  return { theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
+           shown: settings.theme === "auto" ? (Device.isUsingDarkAppearance() ? "night" : "ink") : settings.theme };
+}
 
 // What the Settings sheet shows. Keys never go to the page: AI settings has its own sheet.
-function settingsForPage() {
-  const st = readSettings();
-  delete st.aiModel; delete st.aiReasoning;   // older versions kept these here; models now live in AI settings
-  return Object.assign(st, {
-    version: VERSION, hasKey: !!aiKey(), aiStatus: aiStatusLine(),
-    aiLang: STATE.aiLang, aiMode: STATE.aiMode, aiCustom: STATE.aiCustom,
-    langs: CONFIG.AI.LANGUAGES, modes: CONFIG.AI.MODES.map(m => ({ key: m.key, label: m.label })),
-  });
+function settingsState() {
+  return {
+    settings: Object.fromEntries(Object.keys(SET_KEYS).map(k => [k, settings[k]])),
+    cfg: Object.fromEntries(CFG_FLAT.map(d => [d.k, cfg(d.k)])),
+    cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
+    palettes: PALETTES, version: VERSION, appName: "Daily Digest",
+    blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
+    hasKey: !!aiKey(), aiStatus: aiStatusLine(),
+    langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
+  };
 }
 
 // ─────────────── updates ───────────────
@@ -684,7 +799,7 @@ function updateSnoozed() {
 }
 
 async function checkForUpdate() {
-  if (!CONFIG.CHECK_UPDATES || updateSnoozed()) return null;
+  if (!settings.checkUpdates || updateSnoozed()) return null;
   try {
     const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
     req.timeoutInterval = 10;
@@ -709,7 +824,7 @@ async function applyUpdate(info) {
   const code = await req.loadString();
   const code200 = req.response && req.response.statusCode === 200;
   const m = code && code.match(/const VERSION = '([^']+)'/);
-  if (!code200 || !code.includes('function stravaLib') || !m) throw new Error("The download didn't look right. Try again later.");
+  if (!code200 || !code.includes(`const APP_ID = '${APP_ID}'`) || !m) throw new Error("The download didn't look right. Try again later.");
   if (cmpVer(m[1], VERSION) <= 0) throw new Error('GitHub is still serving the old version. Try again in a few minutes.');
   const path = module.filename;
   let fm = FileManager.local();
@@ -744,7 +859,7 @@ async function postComment(sx, id, text) {
   if (Keychain.contains(KC_COMMENT_TPL)) {
     try {
       const tpl = JSON.parse(Keychain.get(KC_COMMENT_TPL));
-      const r = await sx(`__SD.commentDirect(${JSON.stringify(tpl)}, ${JSON.stringify(id)}, ${JSON.stringify(text)})`, 20000);
+      const r = await sx(`__SD.commentDirect(${JSON.stringify(tpl)}, ${JSON.stringify(id)}, ${JSON.stringify(text)})`, cfg('pageWait') * 1000);
       if (r.ok || !r.definite) return r;                 // posted, or unclear: never risk a double post
       Keychain.remove(KC_COMMENT_TPL);                    // Strava changed something: relearn below
     } catch (e) { return { ok: false, error: e.message }; }
@@ -754,7 +869,7 @@ async function postComment(sx, id, text) {
   try {
     const cx = makeSx(cv);
     await openStrava(cv, `/activities/${encodeURIComponent(id)}`);
-    const r = await cx(`__SD.commentViaUI(${JSON.stringify(text)})`, 30000);
+    const r = await cx(`__SD.commentViaUI(${JSON.stringify(text)})`, cfg('detailsWait') * 1000);
     if (r.ok && r.req) learnCommentRequest(r.req, id, text);
     return r;
   } finally {
@@ -777,7 +892,7 @@ async function openStrava(wv, path) {
 }
 
 async function authInfo(sx) {
-  try { return await sx('__SD.auth()', 20000); }
+  try { return await sx('__SD.auth()', cfg('pageWait') * 1000); }
   catch (e) { return { loggedIn: false, error: String(e.message || e) }; }
 }
 
@@ -935,7 +1050,7 @@ async function renderWidget() {
   const updated = snap ? tf.string(new Date(snap.updated)) : '';
   const w = new ListWidget();
   w.url = URLScheme.forRunningScript();
-  w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+  w.refreshAfterDate = new Date(Date.now() + cfg('widgetRefreshMin') * 60 * 1000);
 
   const txt = (stack, s, size, weight, opacity = 1, color = Color.white()) => {
     const t = stack.addText(s);
@@ -982,7 +1097,7 @@ async function renderWidget() {
     row.addSpacer(14);
     const right = row.addStack(); right.layoutVertically();
     const max = fam === 'large' ? 9 : 4;
-    const names = CONFIG.WIDGET_NAMES ? snap.list : [];
+    const names = settings.widgetNames ? snap.list : [];
     if (!names.length) {
       txt(right, snap.waiting ? 'Open the digest' : 'Nothing waiting', 13, 'semi', 0.9);
       txt(right, snap.waiting ? 'to give kudos' : 'Enjoy your day', 12, 'reg', 0.8);
@@ -1007,9 +1122,9 @@ async function renderWidget() {
 async function refreshOnly() {
   const sv = new WebView(); const sx = makeSx(sv);
   await sv.loadURL(`${STRAVA}/robots.txt`);
-  const me = CONFIG.ATHLETE_ID ? String(CONFIG.ATHLETE_ID) : (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
+  const me = athleteId() || (Keychain.contains(KC_ATHLETE) ? Keychain.get(KC_ATHLETE) : null);
   if (!me) throw new Error('Open the digest once first so it can log in.');
-  const first = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, false)`, 20000);
+  const first = await sx(`__SD.page(${JSON.stringify(me)}, null, null, 0, 1e15, false)`, cfg('pageWait') * 1000);
   const feed = makeFeed(sx, me, first);
   await feed.readBackTo(+dayBounds(0).dayStart, async () => {}, () => false);
   saveSnapshot(feed);
@@ -1554,7 +1669,7 @@ function dayLabel(t) {
 function daysNav(current) {
   const df = new DateFormatter(); df.dateFormat = 'EEE d';
   const chips = [];
-  for (let i = 0; i < CONFIG.DAYS_IN_PICKER; i++) {
+  for (let i = 0; i < cfg('daysInPicker'); i++) {
     const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - i);
     const label = i === 0 ? 'Today' : i === 1 ? 'Yesterday' : df.string(d);
     chips.push(`<button class="day${i === current ? ' on' : ''}" data-day="${i}"${i === current ? ' aria-current="date"' : ''}>${esc(label)}</button>`);
@@ -1568,7 +1683,7 @@ const LOGO = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12
   + '<circle cx="12" cy="12" r="2.8" fill="var(--bg)"/></svg>';
 
 // Header icons: same size, same stroke, drawn in the text colour (Feather icons, MIT licence).
-const ICON_GEAR = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+const ICON_GEAR = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>';   // Settings (sliders)
 const ICON_REFRESH = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 
 // Sticky app header: brand row, then day switcher + "kudos to all", always within reach.
@@ -1623,6 +1738,14 @@ function personHtml(p) {
   const btn = p.primary.canKudo
     ? `<button class="kudo person-k${p.kudoed ? ' done' : ''}" data-kudo="${esc(p.primary.id)}" data-pid="${pid}"${p.kudoed ? ' disabled' : ''}>${p.kudoed ? '✓ Kudos given' : '👍 Kudos'}</button>`
     : '';
+  if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
+    const a = p.primary, top = (a.stats && a.stats[0]) || {};
+    const more = p.acts.length > 1 ? ` · ${p.acts.length} activities` : '';
+    return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
+    <header>${avatar}<div class="pn" data-detail="${esc(a.id)}"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(top.value || a.name || a.type || '')}${more}</span></div>${btn}</header>
+    <div hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
+  </section>`;
+  }
   return `<section class="person" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
     <header>${avatar}<div class="pn"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span>${sub}</span></div>${btn}</header>
     ${p.acts.map(a => actHtml(a, p)).join('')}
@@ -1665,11 +1788,11 @@ function actHtml(a, p) {
     </div>
     <div class="cbox" hidden>
       <div class="crow"><textarea rows="3" placeholder="${aiKey() ? 'Write a comment, or tap Suggest' : 'Write a comment'}"></textarea><button data-comment="${id}">Post</button></div>
-      <div class="modes" role="group" aria-label="Comment mood">${CONFIG.AI.MODES.map(m =>
-        `<button class="mode${m.key === STATE.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>
-      <div class="customrow"${STATE.aiMode === 'custom' ? '' : ' hidden'}><input class="aicustom" type="text" maxlength="200" placeholder="Describe the comments you want, e.g. tease about the rain" value="${esc(STATE.aiCustom)}"></div>
-      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest 3</button>${CONFIG.AI.LANGUAGES.map(([code, name]) =>
-        `<button class="lng${name === STATE.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
+      <div class="modes" role="group" aria-label="Comment mood">${DIGEST.AI.MODES.map(m =>
+        `<button class="mode${m.key === settings.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>
+      <div class="customrow"${settings.aiMode === 'custom' ? '' : ' hidden'}><input class="aicustom" type="text" maxlength="200" placeholder="Describe the comments you want, e.g. tease about the rain" value="${esc(settings.aiCustom)}"></div>
+      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest 3</button>${DIGEST.AI.LANGUAGES.map(([code, name]) =>
+        `<button class="lng${name === settings.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
       <div class="sugs"></div>
     </div>
   </article>`;
@@ -1695,64 +1818,73 @@ function shell(msg, isError) {
 }
 
 function page(content) {
-  return `<!doctype html><html><head><meta charset="utf-8">
+  const look = lookState();
+  return `<!doctype html><html data-theme="${look.shown}" data-font="${look.font}" style="--ts:${look.textSize}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <style>
-:root{--bg:#f2f1ee;--card:#fff;--fg:#17171a;--mut:#6d6c72;--line:#e3e1dc;--soft:#efeeea;--accent:#fc4c02;--gold:#9a6200;--goldbg:#fdf0d2;--hr:#c92a5c}
-@media (prefers-color-scheme:dark){:root{--bg:#121214;--card:#1c1c20;--fg:#f1f0ee;--mut:#9b9aa2;--line:#2c2c31;--soft:#26262b;--gold:#f3c15c;--goldbg:#3b2d0f;--hr:#ff7aa2}}
+:root{
+  --ts:1; --serif: ui-serif, "New York", Georgia, serif; --sans: -apple-system, system-ui, "SF Pro Text", sans-serif; --display: var(--sans);
+  --pad:14px; --gap:12px; --av:44px; --ph:132px;
+}
+html[data-font=serif]{--display:var(--serif)}
+${PALETTE_CSS}
+:root{--bg:var(--paper);--card:var(--sheet);--fg:var(--ink);--mut:var(--muted);--line:var(--rule);--accent:var(--signal);--gold:var(--amber);--goldbg:var(--amber-wash);--soft:color-mix(in srgb,var(--ink) 7%,var(--sheet))}
+body.d-compact{--pad:10px;--gap:8px;--av:36px;--ph:96px}
+body.d-tiny{--pad:9px;--gap:6px;--av:32px;--ph:96px}
 *{box-sizing:border-box}
 html,body{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}
 button,img{touch-action:manipulation}
 textarea,input{font-size:16px!important}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 -apple-system,system-ui,sans-serif;padding:max(14px,env(safe-area-inset-top)) 12px 70px;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:calc(15px * var(--ts))/1.4 var(--sans);padding:max(14px,env(safe-area-inset-top)) 12px 70px;-webkit-text-size-adjust:100%}
 .top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 4px 14px}
-h1{font-size:24px;line-height:1.15;margin:0;letter-spacing:-.01em}
-.sub{color:var(--mut);font-size:13px;margin-top:2px}
+h1{font-family:var(--display);font-size:calc(24px * var(--ts));line-height:1.15;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mut);font-size:calc(13px * var(--ts));margin-top:2px}
 button{font:inherit;border:0;border-radius:999px;padding:8px 14px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button.ghost{background:var(--soft);color:var(--fg)}
-button.round{width:40px;height:40px;padding:0;font-size:18px;flex:none}
+button.round{width:40px;height:40px;padding:0;font-size:calc(18px * var(--ts));flex:none}
 button.small{background:var(--soft);color:var(--fg);padding:6px 12px}
 button.done,button:disabled{background:var(--soft);color:var(--mut)}
 button.all{width:100%;margin:0 0 14px;padding:12px}
-.person{background:var(--card);border-radius:18px;padding:14px;margin-bottom:12px}
+.person{background:var(--card);border-radius:18px;padding:var(--pad);margin-bottom:var(--gap)}
 .person header{display:flex;align-items:center;gap:10px}
-.av{width:44px;height:44px;border-radius:50%;object-fit:cover;flex:none;background:var(--soft)}
+.av{width:var(--av);height:var(--av);border-radius:50%;object-fit:cover;flex:none;background:var(--soft)}
 .av.ph{display:grid;place-items:center;font-weight:700;color:var(--mut)}
-.pn{flex:1;min-width:0}.pn b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:16px}.pn span{color:var(--mut);font-size:13px}
-.act{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
-.ah{display:flex;gap:10px;align-items:flex-start}.emo{font-size:22px;line-height:1.1}
-.at b{font-size:16px}.at small{display:block;color:var(--mut);font-size:12px}
-.main{font-size:11px;color:var(--accent);font-weight:700;margin-left:6px}
+.pn{flex:1;min-width:0}.pn b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--display);font-size:calc(16px * var(--ts))}.pn span{color:var(--mut);font-size:calc(13px * var(--ts))}
+.act{border-top:1px solid var(--line);margin-top:var(--pad);padding-top:var(--pad)}
+.ah{display:flex;gap:10px;align-items:flex-start}.emo{font-size:calc(22px * var(--ts));line-height:1.1}
+.at b{font-family:var(--display);font-size:calc(16px * var(--ts))}.at small{display:block;color:var(--mut);font-size:calc(12px * var(--ts))}
+.main{font-size:calc(11px * var(--ts));color:var(--accent);font-weight:700;margin-left:6px}
 .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:12px 10px;margin-top:12px}
-.st b{display:block;font-size:19px;font-weight:650;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.15}
-.st small{color:var(--mut);font-size:12px}
+.st b{display:block;font-size:calc(19px * var(--ts));font-weight:650;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.15}
+.st small{color:var(--mut);font-size:calc(12px * var(--ts))}
 .st.hr b{color:var(--hr)}
 .badges{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.pr{background:var(--goldbg);color:var(--gold);border-radius:999px;padding:3px 10px;font-weight:700;font-size:13px}
+.pr{background:var(--goldbg);color:var(--gold);border-radius:999px;padding:3px 10px;font-weight:700;font-size:calc(13px * var(--ts))}
 .pr.soft{font-weight:600}
-.alist{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:13px}
-.desc{margin:10px 0 0;font-size:14px;white-space:pre-wrap}
-.photos{display:flex;gap:6px;overflow-x:auto;margin:12px -14px 0;padding:0 14px;scroll-snap-type:x mandatory}
+.alist{margin:6px 0 0;padding-left:18px;color:var(--mut);font-size:calc(13px * var(--ts))}
+.desc{margin:10px 0 0;font-size:calc(14px * var(--ts));white-space:pre-wrap}
+.photos{display:flex;gap:6px;overflow-x:auto;margin:var(--gap) calc(-1 * var(--pad)) 0;padding:0 var(--pad);scroll-snap-type:x mandatory}
 .hdr{position:sticky;top:0;z-index:20;margin:calc(-1 * max(14px, env(safe-area-inset-top))) -12px 14px;padding:max(4px, env(safe-area-inset-top)) 12px 8px;background:var(--bg);border-bottom:1px solid var(--line);transition:box-shadow .2s}
 .hdr.stuck{box-shadow:0 8px 18px -12px rgba(0,0,0,.6)}
 .brand{display:flex;align-items:center;gap:8px;min-height:44px}
 .brand-mark svg{display:block;width:24px;height:24px}
-.brand-name{font-weight:800;font-size:19px;line-height:1;letter-spacing:-.01em;margin-right:auto}
-.hbtn{background:transparent;color:var(--fg);width:40px;height:40px;padding:0;display:grid;place-items:center}
+.brand-name{font-family:var(--display);font-weight:800;font-size:calc(19px * var(--ts));line-height:1;letter-spacing:-.01em;margin-right:auto}
+.hbtn{background:var(--card);border:1px solid var(--line);color:var(--fg);width:40px;height:40px;border-radius:20px;padding:0;display:grid;place-items:center}
+.hbtn .hico{width:20px;height:20px}
 .hico{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
 .hrow{display:flex;align-items:center;gap:8px}
 .seg{flex:1;min-width:0;display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--card);overflow-x:auto;scrollbar-width:none}
 .seg::-webkit-scrollbar{display:none}
-.day{flex:1 0 auto;background:transparent;color:var(--mut);padding:6px 10px;font-size:13px;font-weight:600;white-space:nowrap}
+.day{flex:1 0 auto;background:transparent;color:var(--mut);padding:6px 10px;font-size:calc(13px * var(--ts));font-weight:600;white-space:nowrap}
 .day.on{background:var(--fg);color:var(--bg)}
-.allk{flex:none;padding:8px 13px;font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.allk{flex:none;padding:8px 13px;font-size:calc(13px * var(--ts));white-space:nowrap;font-variant-numeric:tabular-nums}
 .allk.done{background:var(--card);color:var(--mut)}
 .allk.armed{background:var(--fg);color:var(--bg)}
-.scan{margin:28px auto 0;max-width:34em;font-size:12px;line-height:1.5;color:var(--mut);word-break:break-word}
-.sec{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--mut);margin:18px 6px 10px}
+.scan{margin:28px auto 0;max-width:34em;font-size:calc(12px * var(--ts));line-height:1.5;color:var(--mut);word-break:break-word}
+.sec{display:flex;align-items:center;gap:8px;font-size:calc(13px * var(--ts));font-weight:700;color:var(--mut);margin:18px 6px 10px}
 .sec:first-of-type{margin-top:4px}
-.sec span{background:var(--soft);color:var(--fg);border-radius:999px;padding:1px 9px;font-size:12px;font-variant-numeric:tabular-nums}
+.sec span{background:var(--soft);color:var(--fg);border-radius:999px;padding:1px 9px;font-size:calc(12px * var(--ts));font-variant-numeric:tabular-nums}
 .sec.todo span{background:var(--accent);color:#fff}
 .boot{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px 0}
 .scene{position:relative;width:300px;height:150px;overflow:hidden}
@@ -1790,95 +1922,65 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
   50%{transform:translate(126px,-6px) rotate(12deg) scale(1.1)}
   85%{opacity:1}
   100%{transform:translate(254px,104px) rotate(0) scale(.6);opacity:0}}
-.cnt b{display:block;font-size:56px;line-height:1;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px}
-.cnt span{color:var(--mut);font-size:13px}
+.cnt b{display:block;font-size:calc(56px * var(--ts));line-height:1;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px}
+.cnt span{color:var(--mut);font-size:calc(13px * var(--ts))}
 .cnt.tick b{animation:tick .3s ease-out}
 @keyframes tick{40%{transform:scale(1.12);color:var(--accent)}}
-.quip{font-size:16px;font-weight:600;margin-top:16px;min-height:1.4em;transition:opacity .25s}
-.bootst{color:var(--mut);font-size:13px;margin-top:4px}
+.quip{font-size:calc(16px * var(--ts));font-weight:600;margin-top:16px;min-height:1.4em;transition:opacity .25s}
+.bootst{color:var(--mut);font-size:calc(13px * var(--ts));margin-top:4px}
 @media (prefers-reduced-motion:reduce){.track,.sunb,.post,.cnt.tick b,.runner .body,.thigh,.shin,.uarm{animation:none}.post{display:none}}
-#ptr{position:fixed;left:50%;top:env(safe-area-inset-top,0px);transform:translate(-50%,-60px);opacity:0;z-index:30;display:flex;align-items:center;gap:8px;background:var(--card);color:var(--fg);padding:9px 15px;border-radius:999px;font-size:13px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.28);pointer-events:none;transition:opacity .15s}
-#ptr .ptri{display:inline-block;font-size:16px;line-height:1}
+#ptr{position:fixed;left:50%;top:env(safe-area-inset-top,0px);transform:translate(-50%,-60px);opacity:0;z-index:30;display:flex;align-items:center;gap:8px;background:var(--card);color:var(--fg);padding:9px 15px;border-radius:999px;font-size:calc(13px * var(--ts));font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.28);pointer-events:none;transition:opacity .15s}
+#ptr .ptri{display:inline-block;font-size:calc(16px * var(--ts));line-height:1}
 #ptr.ready{color:var(--accent)}
 #ptr.busy{transition:transform .2s,opacity .15s}
 #ptr.busy .ptri{animation:s .8s linear infinite}
-.loadst{display:none;color:var(--mut);font-size:12px;margin:6px 4px 0}
+.loadst{display:none;color:var(--mut);font-size:calc(12px * var(--ts));margin:6px 4px 0}
 body.loading .loadst{display:block}
 .clk{font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums}
-.nb{font-size:15px}
-.early{border-radius:999px;padding:3px 11px;font-weight:700;font-size:13px;color:#fff}
+.nb{font-size:calc(15px * var(--ts))}
+.early{border-radius:999px;padding:3px 11px;font-weight:700;font-size:calc(13px * var(--ts));color:#fff}
 .early.e4{background:linear-gradient(135deg,#070b1f,#2a1d5e);box-shadow:inset 0 0 0 1px #6c5ce7}
 .early.e5{background:linear-gradient(135deg,#1c2a6e,#8a3f8f)}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
-#set{position:fixed;inset:0;z-index:49;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
-.setp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
-.seth{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--card)}
-.seth b{font-size:18px}
-.seth .lbx{background:var(--soft);color:var(--fg)}
-.setr button.small{white-space:nowrap;flex:none}
-.setb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:6px 14px 14px}
-.setg{margin-top:16px}
-.setg h3{margin:0 4px 8px;font-size:12px;font-weight:700;color:var(--mut);letter-spacing:.04em;text-transform:uppercase}
-.setc{background:var(--card);border-radius:14px;overflow:hidden}
-.setr{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid var(--line)}
-.setr:first-child{border-top:0}
-.setr.col{flex-direction:column;align-items:stretch;gap:8px}
-.setl{font-size:15px}
-.setl small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
-.setr input[type=text],.setr input[type=password],.setr textarea,.setr select{width:100%;font:inherit;font-size:16px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 10px}
-.setr textarea{resize:none}
-.setr select{-webkit-appearance:none;appearance:none}
-.sw{position:relative;flex:none;width:51px;height:31px}
-.sw input{position:absolute;opacity:0;width:100%;height:100%;margin:0}
-.sw span{position:absolute;inset:0;border-radius:999px;background:var(--soft);transition:background .2s;pointer-events:none}
-.sw span::after{content:'';position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.25);transition:transform .2s}
-.sw input:checked+span{background:#34c759}
-.sw input:checked+span::after{transform:translateX(20px)}
-.keyst{font-size:13px;color:var(--mut)}
-.keyst b{color:var(--fg)}
-.setf{display:grid;grid-template-columns:1fr 2fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
-.setf button{padding:12px}
-.setmsg{color:#e5484d;font-size:13px;padding:8px 4px 0}
-.setmsg:empty{display:none}
 #upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
 .updp{width:100%;background:var(--card);border-radius:22px 22px 0 0;padding:20px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;animation:up .25s ease-out}
-.updtag{align-self:flex-start;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.02em}
-.updt{margin:6px 0 0;font-size:22px;line-height:1.2;letter-spacing:-.01em}
-.upds{color:var(--mut);font-size:14px}
+.updtag{align-self:flex-start;background:var(--accent);color:#fff;font-size:calc(12px * var(--ts));font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.02em}
+.updt{margin:6px 0 0;font-family:var(--display);font-size:calc(22px * var(--ts));line-height:1.2;letter-spacing:-.01em}
+.upds{color:var(--mut);font-size:calc(14px * var(--ts))}
 .updl{display:flex;flex-direction:column;gap:10px;margin:8px 0 6px}
 .updi{display:flex;gap:12px;align-items:flex-start;background:var(--soft);border-radius:14px;padding:12px}
-.updic{font-size:24px;line-height:1.1;flex:none}
-.updi b{display:block;font-size:15px}
-.updi span{display:block;color:var(--mut);font-size:13px;line-height:1.35;margin-top:2px}
-.updmsg{font-size:14px;min-height:0}
+.updic{font-size:calc(24px * var(--ts));line-height:1.1;flex:none}
+.updi b{display:block;font-size:calc(15px * var(--ts))}
+.updi span{display:block;color:var(--mut);font-size:calc(13px * var(--ts));line-height:1.35;margin-top:2px}
+.updmsg{font-size:calc(14px * var(--ts));min-height:0}
 .updmsg:empty{display:none}
-.updgo{padding:13px;font-size:16px}
+.updgo{padding:13px;font-size:calc(16px * var(--ts))}
 .updlater{padding:11px}
-.ver{text-align:center;color:var(--mut);font-size:12px;margin:24px 0 0;opacity:.7}
+.ver{text-align:center;color:var(--mut);font-size:calc(12px * var(--ts));margin:24px 0 0;opacity:.7}
 #kov{position:fixed;inset:0;z-index:66;background:rgba(0,0,0,.86);display:grid;place-items:center;touch-action:none}
 #kov[hidden]{display:none}
 .kwrap{text-align:center;padding:20px}
 .kst{position:relative;margin:0 auto}
-.kpc{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:44px;animation:kpulse 1.1s ease-out infinite;z-index:2}
+.kpc{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:calc(44px * var(--ts));animation:kpulse 1.1s ease-out infinite;z-index:2}
 @keyframes kpulse{0%{box-shadow:0 0 0 0 rgba(252,76,2,.6)}100%{box-shadow:0 0 0 28px rgba(252,76,2,0)}}
 #kov.fin .kpc{animation:kdone .6s cubic-bezier(.3,1.6,.5,1) forwards}
 @keyframes kdone{40%{transform:scale(1.25) rotate(-12deg)}100%{transform:scale(1.05)}}
 .kaw{position:absolute;width:var(--A);height:var(--A);margin:calc(var(--A) / -2) 0 0 calc(var(--A) / -2);animation:kin .4s ease-out both}
 @keyframes kin{from{transform:scale(.3);opacity:0}}
-.ka{width:100%;height:100%;border-radius:50%;overflow:hidden;background:#2a2a30;color:#bbb;display:grid;place-items:center;font-weight:700;font-size:13px;box-shadow:0 0 0 2px rgba(255,255,255,.18);transition:box-shadow .25s}
+.ka{width:100%;height:100%;border-radius:50%;overflow:hidden;background:#2a2a30;color:#bbb;display:grid;place-items:center;font-weight:700;font-size:calc(13px * var(--ts));box-shadow:0 0 0 2px rgba(255,255,255,.18);transition:box-shadow .25s}
 .ka img{width:100%;height:100%;object-fit:cover}
 .ka.hit{animation:khit .45s cubic-bezier(.3,1.6,.5,1)}
 @keyframes khit{40%{transform:scale(1.28)}}
 .ka.ok{box-shadow:0 0 0 3px #2fb344}
 .ka.bad{box-shadow:0 0 0 3px #e5484d}
-.kk{position:absolute;right:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;display:grid;place-items:center;transform:scale(0);transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
+.kk{position:absolute;right:-4px;bottom:-4px;width:18px;height:18px;border-radius:50%;font-size:calc(11px * var(--ts));font-weight:800;color:#fff;display:grid;place-items:center;transform:scale(0);transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
 .kk.ok{background:#2fb344;transform:scale(1)}
 .kk.bad{background:#e5484d;transform:scale(1)}
-.fly{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;font-size:26px;line-height:30px;text-align:center;z-index:3;pointer-events:none;transition:transform .7s cubic-bezier(.25,.7,.35,1),opacity .25s}
-.ktitle{color:#fff;font-size:19px;font-weight:700;margin-top:22px}
-.ksub{color:rgba(255,255,255,.7);font-size:14px;margin-top:4px;min-height:1.3em}
+.fly{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;font-size:calc(26px * var(--ts));line-height:30px;text-align:center;z-index:3;pointer-events:none;transition:transform .7s cubic-bezier(.25,.7,.35,1),opacity .25s}
+.ktitle{color:#fff;font-size:calc(19px * var(--ts));font-weight:700;margin-top:22px}
+.ksub{color:rgba(255,255,255,.7);font-size:calc(14px * var(--ts));margin-top:4px;min-height:1.3em}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
@@ -1894,7 +1996,7 @@ body.loading .loadst{display:block}
 .detb .act{border-top:0;margin-top:0;padding:4px 2px 0}
 .detb .photos img{height:170px;max-width:260px}
 .detf{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
-.detf button{padding:11px 8px;font-size:14px}
+.detf button{padding:11px 8px;font-size:calc(14px * var(--ts))}
 .ttl{cursor:pointer}
 #sendov{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.8);display:grid;place-items:center;touch-action:none;padding:20px}
 #sendov[hidden]{display:none}
@@ -1904,10 +2006,10 @@ body.loading .loadst{display:block}
 .arc path{fill:none;stroke:var(--line);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:3 8;animation:ants .7s linear infinite}
 @keyframes ants{to{stroke-dashoffset:-22}}
 .me,.them{position:absolute;top:37px;width:56px;height:56px;border-radius:50%;background:var(--soft);display:grid;place-items:center;overflow:hidden}
-.me{left:6px;font-size:26px;animation:scribble 1.9s ease-in-out infinite}
-.them{left:218px;font-weight:700;color:var(--mut);font-size:18px;box-shadow:0 0 0 3px var(--card),0 0 0 5px var(--accent);animation:catch 1.9s ease-in-out infinite}
+.me{left:6px;font-size:calc(26px * var(--ts));animation:scribble 1.9s ease-in-out infinite}
+.them{left:218px;font-weight:700;color:var(--mut);font-size:calc(18px * var(--ts));box-shadow:0 0 0 3px var(--card),0 0 0 5px var(--accent);animation:catch 1.9s ease-in-out infinite}
 .them img{width:100%;height:100%;object-fit:cover}
-.plane{position:absolute;left:0;top:0;width:30px;height:30px;font-size:26px;line-height:30px;animation:fly 1.9s ease-in-out infinite;will-change:transform}
+.plane{position:absolute;left:0;top:0;width:30px;height:30px;font-size:calc(26px * var(--ts));line-height:30px;animation:fly 1.9s ease-in-out infinite;will-change:transform}
 @keyframes fly{
   0%{transform:translate(47px,50px) rotate(-35deg) scale(.5);opacity:0}
   10%{opacity:1}
@@ -1918,8 +2020,8 @@ body.loading .loadst{display:block}
   100%{transform:translate(203px,50px) rotate(35deg) scale(.4);opacity:0}}
 @keyframes catch{0%,82%{transform:scale(1)}90%{transform:scale(1.14)}100%{transform:scale(1)}}
 @keyframes scribble{0%,100%{transform:rotate(0)}10%{transform:rotate(-12deg)}20%{transform:rotate(8deg)}30%{transform:rotate(0)}}
-.chk{position:absolute;left:252px;top:28px;width:28px;height:28px;border-radius:50%;background:#2fb344;color:#fff;font-weight:800;font-size:16px;display:grid;place-items:center;transform:scale(0)}
-.bit{position:absolute;left:236px;top:55px;font-size:18px;pointer-events:none;animation:pop .95s ease-out forwards}
+.chk{position:absolute;left:252px;top:28px;width:28px;height:28px;border-radius:50%;background:#2fb344;color:#fff;font-weight:800;font-size:calc(16px * var(--ts));display:grid;place-items:center;transform:scale(0)}
+.bit{position:absolute;left:236px;top:55px;font-size:calc(18px * var(--ts));pointer-events:none;animation:pop .95s ease-out forwards}
 @keyframes pop{0%{transform:translate(0,0) scale(.3);opacity:1}100%{transform:translate(var(--dx),var(--dy)) scale(1.1);opacity:0}}
 #sendov.ok .plane{display:none}
 #sendov.ok .them{animation:landed .6s cubic-bezier(.3,1.6,.5,1)}
@@ -1930,9 +2032,9 @@ body.loading .loadst{display:block}
 @keyframes chk{to{transform:scale(1)}}
 #sendov.fail .plane{animation:fall .9s ease-in forwards}
 @keyframes fall{0%{transform:translate(125px,15px) rotate(0);opacity:1}100%{transform:translate(140px,110px) rotate(150deg);opacity:0}}
-.svt{font-size:18px;font-weight:700;margin-top:4px}
-.svs{color:var(--mut);font-size:14px;margin-top:4px;min-height:2.6em}
-.svq{margin:10px 0 0;font-size:14px;font-style:italic;color:var(--fg);opacity:.85;word-break:break-word}
+.svt{font-size:calc(18px * var(--ts));font-weight:700;margin-top:4px}
+.svs{color:var(--mut);font-size:calc(14px * var(--ts));margin-top:4px;min-height:2.6em}
+.svq{margin:10px 0 0;font-size:calc(14px * var(--ts));font-style:italic;color:var(--fg);opacity:.85;word-break:break-word}
 .svok{margin-top:14px;min-width:120px}
 @media (prefers-reduced-motion:reduce){
   .plane{animation:none;transform:translate(125px,15px)}
@@ -1942,8 +2044,8 @@ body.loading .loadst{display:block}
 #sheet[hidden]{display:none}
 .shc{width:100%;background:var(--card);border-radius:18px 18px 0 0;padding:14px 14px calc(14px + env(safe-area-inset-bottom));display:grid;gap:8px}
 .shc button{padding:13px}
-.lbtop{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#fff;font-size:14px;font-variant-numeric:tabular-nums;min-height:58px}
-.lbx{background:rgba(255,255,255,.18);color:#fff;width:38px;height:38px;padding:0;font-size:16px}
+.lbtop{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#fff;font-size:calc(14px * var(--ts));font-variant-numeric:tabular-nums;min-height:58px}
+.lbx{background:rgba(255,255,255,.18);color:#fff;width:38px;height:38px;padding:0;font-size:calc(16px * var(--ts))}
 .lbs{flex:1;min-height:0;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;touch-action:pan-x;overscroll-behavior-x:contain}
 .lbs::-webkit-scrollbar{display:none}
 .lbi{flex:0 0 100%;height:100%;display:grid;place-items:center;scroll-snap-align:center;scroll-snap-stop:always;padding:0 6px 150px;overflow:hidden}
@@ -1955,18 +2057,18 @@ body.loading .loadst{display:block}
 .lbthumbs button{flex:none;width:52px;height:52px;padding:0;border-radius:10px;overflow:hidden;background:#222;opacity:.5;outline:2px solid transparent;outline-offset:-2px;transition:opacity .2s,outline-color .2s,transform .2s}
 .lbthumbs button.on{opacity:1;outline-color:#fff;transform:scale(1.08)}
 .lbthumbs img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.lbclose{pointer-events:auto;background:#fff;color:#111;font-size:16px;font-weight:700;padding:12px 28px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
-.lbhint{color:rgba(255,255,255,.6);font-size:12px;transition:opacity .3s}
+.lbclose{pointer-events:auto;background:#fff;color:#111;font-size:calc(16px * var(--ts));font-weight:700;padding:12px 28px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.lbhint{color:rgba(255,255,255,.6);font-size:calc(12px * var(--ts));transition:opacity .3s}
 #lb.zoomed .lbhint{opacity:0}
-.photos img{height:132px;max-width:220px;border-radius:12px;flex:none;object-fit:cover;scroll-snap-align:start;background:var(--soft)}
+.photos img{height:var(--ph);max-width:220px;border-radius:12px;flex:none;object-fit:cover;scroll-snap-align:start;background:var(--soft)}
 .bar{display:flex;align-items:center;gap:6px;margin-top:12px}
-.counts{flex:1;color:var(--mut);font-size:13px}.counts i{font-style:normal;font-variant-numeric:tabular-nums}
+.counts{flex:1;color:var(--mut);font-size:calc(13px * var(--ts))}.counts i{font-style:normal;font-variant-numeric:tabular-nums}
 .cbox{margin-top:8px}.cbox[hidden]{display:none}
 .crow{display:flex;gap:6px;align-items:flex-end}
 .ai{display:flex;gap:6px;align-items:center;margin-top:8px}
 .modes{display:flex;gap:6px;margin:10px -14px 0;padding:0 14px;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
-.mode{flex:none;background:var(--soft);color:var(--fg);padding:7px 12px;font-size:13px;font-weight:600;border:1px solid transparent}
+.mode{flex:none;background:var(--soft);color:var(--fg);padding:7px 12px;font-size:calc(13px * var(--ts));font-weight:600;border:1px solid transparent}
 .mode.on{background:var(--fg);color:var(--bg)}
 .customrow{margin-top:8px}.customrow[hidden]{display:none}
 .aicustom{width:100%;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 11px}
@@ -1976,15 +2078,73 @@ body.loading .loadst{display:block}
 .sugs{display:flex;flex-direction:column;gap:6px;margin-top:8px}
 .sug{background:var(--soft);color:var(--fg);font-weight:500;text-align:left;border-radius:14px;padding:9px 12px;line-height:1.35}
 .keyrow{display:flex;gap:6px}.keyrow input{flex:1;min-width:0;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px}
-.keyhelp{font-size:12px;color:var(--mut);margin:0}
+.keyhelp{font-size:calc(12px * var(--ts));color:var(--mut);margin:0}
 textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px;resize:none}
 .center{text-align:center;color:var(--mut);padding:80px 20px}
 .spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 14px;animation:s 1s linear infinite}
 @keyframes s{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
-#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));z-index:80;transform:translate(-50%,calc(100% + 60px));opacity:0;visibility:hidden;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:18px;font-size:14px;text-align:center;max-width:90vw;pointer-events:none;transition:transform .25s,opacity .25s,visibility 0s linear .25s}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));z-index:80;transform:translate(-50%,calc(100% + 60px));opacity:0;visibility:hidden;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:18px;font-size:calc(14px * var(--ts));text-align:center;max-width:90vw;pointer-events:none;transition:transform .25s,opacity .25s,visibility 0s linear .25s}
 #toast.on{transform:translate(-50%,0);opacity:1;visibility:visible;transition:transform .25s,opacity .25s}
 body.loading .person{opacity:.45}
+.person.tiny header{gap:9px}
+.person.tiny .pn{cursor:pointer}
+.tline{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
+#cfgsheet{position:fixed;inset:0;z-index:49;background:var(--paper);color:var(--ink);transform:translateY(102%);visibility:hidden;transition:transform .28s ease,visibility 0s linear .28s;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;text-align:left}
+#cfgsheet.open{transform:none;visibility:visible;transition:transform .28s ease}
+#cfgsheet button{font:inherit;color:inherit;background:none;border:0;border-radius:0;padding:0;font-weight:inherit;cursor:pointer;text-align:inherit}
+#cfgsheet .sh-head{position:sticky;top:0;z-index:2;background:var(--paper);display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 14px) 18px 12px;border-bottom:1px solid var(--rule)}
+#cfgsheet .sh-head h2{font:700 calc(24px * var(--ts))/1 var(--display);margin:0}
+#cfgsheet .sh-body{padding:16px 18px calc(env(safe-area-inset-bottom) + 40px);max-width:680px;margin:0 auto}
+#cfgsheet .link{color:var(--signal);font-weight:600;font-size:16px}
+#cfgsheet .link.small{font-size:calc(14px * var(--ts))}
+#cfgsheet .hint{font-size:calc(13px * var(--ts));color:var(--muted);margin:8px 2px 0}
+#cfgsheet .muted{color:var(--muted)}
+#cfgsheet .sec{display:block;font:700 calc(17px * var(--ts))/1.2 var(--display);color:var(--ink);margin:26px 0 6px}
+#cfgsheet .srow{display:flex;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--rule)}
+#cfgsheet .grow{flex:1;min-width:0}
+#cfgsheet .grow b{display:block;font-weight:600}
+#cfgsheet .grow small{display:block;font-size:calc(13px * var(--ts));color:var(--ink-2)}
+#cfgsheet .switch{width:46px;height:28px;border-radius:14px;background:var(--rule);position:relative;flex:none;transition:background .2s}
+#cfgsheet .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .2s}
+#cfgsheet .switch.on{background:var(--signal)}
+#cfgsheet .switch.on::after{transform:translateX(18px)}
+#cfgsheet .sm{font-size:calc(13px * var(--ts));padding:6px 11px;border-radius:8px;border:1px solid var(--rule);background:var(--sheet);white-space:nowrap;flex:none}
+#cfgsheet .danger{color:var(--danger)}
+#cfgsheet .danger.armed{background:var(--danger);color:#fff;border-color:var(--danger)}
+#cfgsheet .seg{display:flex;flex:none;gap:0;padding:0;border:1px solid var(--rule);border-radius:9px;overflow:hidden;background:var(--sheet)}
+#cfgsheet .seg button{font-size:calc(12.5px * var(--ts));padding:6px 10px;color:var(--ink-2);white-space:nowrap}
+#cfgsheet .seg button.on{background:var(--ink);color:var(--paper);font-weight:600}
+#cfgsheet .seg.wide button{flex:1;text-align:center;padding:9px 4px;font-size:calc(13.5px * var(--ts))}
+#cfgsheet .lk-row{margin:10px 0 14px}
+#cfgsheet .lk-l{display:block;font-size:calc(13px * var(--ts));font-weight:600;color:var(--ink-2);margin-bottom:6px}
+#cfgsheet .sws{display:flex;gap:12px;overflow-x:auto;scrollbar-width:none;padding:3px 3px 2px}
+#cfgsheet .sws::-webkit-scrollbar{display:none}
+#cfgsheet .sw{display:flex;flex-direction:column;align-items:center;gap:5px;flex:none}
+#cfgsheet .sw .prev{position:relative;width:50px;height:50px;border-radius:13px;display:grid;place-items:center;border:1px solid rgba(127,127,127,.35);font:700 18px/1 var(--display)}
+#cfgsheet .sw .prev i{position:absolute;right:6px;bottom:6px;width:9px;height:9px;border-radius:5px}
+#cfgsheet .sw.on .prev{outline:2.5px solid var(--signal);outline-offset:2px}
+#cfgsheet .sw small{font-size:12px;color:var(--ink-2)}
+#cfgsheet .sw.on small{color:var(--ink);font-weight:600}
+#cfgsheet .cfg{padding:12px 0;border-bottom:1px solid var(--rule)}
+#cfgsheet .cfg.ch .cfg-h b::after{content:"";display:inline-block;width:7px;height:7px;border-radius:4px;background:var(--signal);margin-left:7px;vertical-align:2px}
+#cfgsheet .cfg-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+#cfgsheet .cfg-h b{font-weight:600}
+#cfgsheet .cfg small{display:block;font-size:calc(13px * var(--ts));margin-top:2px}
+#cfgsheet .stepper{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
+#cfgsheet .stepper button{width:38px;height:36px;border-radius:9px;border:1px solid var(--rule);background:var(--sheet);font-size:20px;font-weight:600;text-align:center}
+#cfgsheet .stepper button[disabled]{opacity:.35}
+#cfgsheet .stepper input{width:86px;text-align:center;font:600 16px var(--sans);padding:7px 6px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
+#cfgsheet .stepper .unit{font-size:calc(14px * var(--ts));color:var(--ink-2);min-width:2.5em}
+#cfgsheet .stepper .range{flex-basis:100%;font-size:calc(12px * var(--ts));color:var(--muted)}
+#cfgsheet .cfgin.wide,#cfgsheet .cfgsel{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-appearance:none;appearance:none}
+#cfgsheet textarea.cfgsel{resize:none}
+#cfgsheet .cfgin:focus,#cfgsheet .cfgsel:focus{outline:2px solid var(--signal);outline-offset:-1px}
+#cfgsheet .cfg-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:18px}
+#cfgsheet .note{font-size:12.5px;color:var(--muted)}
+#cfgsheet .srow.bp{width:100%;text-align:left}
+#cfgsheet .chev{flex:none;color:var(--muted);font-size:calc(20px * var(--ts));line-height:1}
 #aisheet{--ai-paper:var(--bg);--ai-sheet:var(--card);--ai-rule:var(--line);--ai-ink:var(--fg);--ai-muted:var(--mut);--ai-signal:var(--accent);--ai-wash:color-mix(in srgb,var(--ai-signal) 14%,transparent);--ai-danger:#d93636;
   position:fixed;inset:0;z-index:56;background:var(--ai-paper);color:var(--ai-ink);transform:translateY(102%);visibility:hidden;transition:transform .28s ease,visibility 0s linear .28s;overflow-y:auto;-webkit-overflow-scrolling:touch;font:15px/1.4 -apple-system,system-ui,sans-serif;text-align:left}
 #aisheet.open{transform:none;visibility:visible;transition:transform .28s ease}
@@ -2031,7 +2191,7 @@ body.loading .person{opacity:.45}
 .badge-ex{display:inline-block;font-size:12px;font-weight:600;color:var(--mut);border:1px dashed var(--mut);border-radius:6px;padding:1px 8px}
 body.nokey .ai,body.nokey .modes,body.nokey .customrow{display:none!important}
 .sugs .badge-ai{align-self:flex-start}
-</style></head><body class="${aiKey() ? '' : 'nokey'}">
+</style></head><body class="d-${look.density}${aiKey() ? '' : ' nokey'}">
 ${content}
 <div id="sendov" hidden role="status" aria-live="polite"><div class="sv">
   <div class="stage">
@@ -2284,7 +2444,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return ['lb','sendov','sheet','det','set','upd','kov'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -2365,56 +2525,103 @@ function updNow(btn){
     }
   });
 }
-// ── settings sheet (⚙︎) ──
+// ── Settings (app-blueprints · settings): every change applies at once and is saved; Done closes ──
+var LOOK=${JSON.stringify(lookState())};
+var SET=null, cfgOpen=false, cfgArmed=false;
+var darkMQ=window.matchMedia?matchMedia('(prefers-color-scheme: dark)'):{matches:false};
+function applyLook(){
+  var root=document.documentElement;
+  root.dataset.theme=LOOK.theme==='auto'?(darkMQ.matches?'night':'ink'):LOOK.theme;
+  root.dataset.font=LOOK.font;
+  root.style.setProperty('--ts',LOOK.textSize);
+  document.body.classList.remove('d-comfortable','d-compact','d-tiny');
+  document.body.classList.add('d-'+LOOK.density);
+}
+if(darkMQ.addEventListener) darkMQ.addEventListener('change',function(){ if(LOOK.theme==='auto') applyLook(); }); else if(darkMQ.addListener) darkMQ.addListener(function(){ if(LOOK.theme==='auto') applyLook(); });
+function cfgSheet(){ var el=document.getElementById('cfgsheet'); if(!el){ el=document.createElement('div'); el.id='cfgsheet'; el.setAttribute('role','dialog'); el.setAttribute('aria-label','Settings'); document.body.appendChild(el); } return el; }
+function cfgItem(k){ for(var i=0;i<SET.cfgSchema.length;i++){ var it=SET.cfgSchema[i].items; for(var j=0;j<it.length;j++) if(it[j].k===k) return it[j]; } return null; }
+function cfgChanged(k){ var d=cfgItem(k); return !!d&&JSON.stringify(SET.cfg[k])!==JSON.stringify(d.def); }
+function fmtCfg(d,v){ return d.step&&d.step<1?Number(v).toFixed(String(d.step).split('.')[1].length):String(v); }
+function segRow(k,opts){ return '<div class="seg wide">'+opts.map(function(o){ return '<button class="'+(String(LOOK[k])===String(o[0])?'on':'')+'" data-act="look" data-k="'+k+'" data-v="'+o[0]+'">'+o[1]+'</button>'; }).join('')+'</div>'; }
+function lookHTML(){
+  var P=SET.palettes, themes=[['auto','Auto']].concat(Object.keys(P).map(function(k){ return [k,k.charAt(0).toUpperCase()+k.slice(1)]; }));
+  return '<div class="lk-row"><span class="lk-l">Colours</span><div class="sws">'+themes.map(function(t){
+      var st=t[0]==='auto'?'background:linear-gradient(135deg,'+P.ink.paper+' 50%,'+P.night.sheet+' 50%);color:'+P.night.signal:'background:'+P[t[0]].paper+';color:'+P[t[0]].ink;
+      return '<button class="sw '+(LOOK.theme===t[0]?'on':'')+'" data-act="look" data-k="theme" data-v="'+t[0]+'" aria-label="'+t[1]+' colours"><span class="prev" style="'+st+'">Aa<i style="background:'+(P[t[0]]||P.night).signal+'"></i></span><small>'+t[1]+'</small></button>';
+    }).join('')+'</div></div>'+
+    '<div class="lk-row"><span class="lk-l">Layout</span>'+segRow('density',[['comfortable','Comfortable'],['compact','Compact'],['tiny','Tiny']])+'</div>'+
+    '<div class="lk-row"><span class="lk-l">Text size</span>'+segRow('textSize',[[0.92,'Small'],[1,'Default'],[1.12,'Large'],[1.25,'Larger']])+'</div>'+
+    '<div class="lk-row"><span class="lk-l">Headline font</span>'+segRow('font',[['sans','Sans serif'],['serif','Serif']])+'</div>';
+}
+function swRow(k,label,help){ return '<div class="srow"><div class="grow"><b>'+label+'</b><small>'+help+'</small></div><button class="switch '+(SET.settings[k]?'on':'')+'" data-act="toggle" data-v="'+k+'" aria-label="'+label+'"></button></div>'; }
+function pickRow(k,label,opts){ return '<div class="cfg"><div class="cfg-h"><b>'+label+'</b></div><select class="cfgsel" data-k="'+k+'">'+opts.map(function(o){ return '<option value="'+escH(o[0])+'"'+(String(o[0])===String(SET.settings[k])?' selected':'')+'>'+escH(o[1])+'</option>'; }).join('')+'</select></div>'; }
+function fieldHTML(d){
+  var v=SET.cfg[d.k], ch=cfgChanged(d.k);
+  var reset=ch?'<button class="link small" data-act="cfgreset" data-k="'+d.k+'">Reset</button>':'';
+  var head='<div class="cfg-h"><b>'+escH(d.label)+'</b>'+reset+'</div>'+(d.help?'<small class="muted">'+escH(d.help)+'</small>':'');
+  if(d.type==='text') return '<div class="cfg '+(ch?'ch':'')+'">'+head+'<input class="cfgin wide" data-k="'+d.k+'" value="'+escH(v)+'" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="'+(d.pattern?'numeric':'text')+'"></div>';
+  return '<div class="cfg '+(ch?'ch':'')+'">'+head+
+    '<div class="stepper"><button data-act="cfgstep" data-k="'+d.k+'" data-v="-1" aria-label="Decrease" '+(v<=d.min?'disabled':'')+'>−</button>'+
+    '<input class="cfgin" data-k="'+d.k+'" value="'+fmtCfg(d,v)+'" inputmode="decimal" aria-label="'+escH(d.label)+'">'+
+    '<button data-act="cfgstep" data-k="'+d.k+'" data-v="1" aria-label="Increase" '+(v>=d.max?'disabled':'')+'>+</button>'+
+    '<span class="unit">'+escH(d.unit||'')+'</span><span class="range">'+fmtCfg(d,d.min)+'–'+fmtCfg(d,d.max)+(ch?' — original '+fmtCfg(d,d.def):'')+'</span></div></div>';
+}
+function bpLink(b){ return SET.blueprintsRepo+'/blob/'+b.id+'-v'+b.version+'/blueprints/'+b.id+'.md'; }
+function builtWithHTML(){
+  return '<h3 class="sec">Built with</h3><p class="hint">'+escH(SET.appName)+' is built from shared blueprints that the other apps use too. Tap one to read how that part works.</p>'+
+    SET.blueprints.map(function(b){ return '<button class="srow bp" data-act="openurl" data-v="'+escH(bpLink(b))+'"><div class="grow"><b>'+escH(b.name)+'</b><small class="muted">Blueprint '+escH(b.version)+' · since '+escH(SET.appName)+' '+escH(b.since)+'</small></div><span class="chev" aria-hidden="true">›</span></button>'; }).join('')+
+    '<button class="srow bp" data-act="openurl" data-v="'+escH(SET.blueprintsRepo)+'"><div class="grow"><b>All blueprints</b><small class="muted">'+escH(SET.blueprintsRepo.replace('https://',''))+'</small></div><span class="chev" aria-hidden="true">›</span></button>';
+}
+function renderCfg(){
+  var el=cfgSheet(), keep=el.scrollTop;
+  el.classList.toggle('open',cfgOpen); document.body.style.overflow=cfgOpen?'hidden':'';
+  if(!cfgOpen||!SET) return;
+  var changed=Object.keys(SET.cfg).filter(cfgChanged).length;
+  el.innerHTML='<div class="sh-head"><h2>Settings</h2><button class="link" data-act="cfgclose">Done</button></div><div class="sh-body">'+
+    '<p class="hint">Changes apply right away and are kept on this iPhone.</p>'+
+    '<h3 class="sec">Appearance</h3>'+lookHTML()+
+    '<h3 class="sec">Digest</h3>'+
+      swRow('includeMe','Show my own activities','The feed reloads when you close Settings')+
+      swRow('enrich','Load extra details','Heart rate, PRs, start times, route maps')+
+      swRow('widgetNames','Names on the widget','First names of people waiting for your kudos')+
+    '<h3 class="sec">AI comments</h3>'+
+      '<div class="srow"><div class="grow"><b>Keys, models and token usage</b><small id="s-aistatus">'+(SET.hasKey?escH(SET.aiStatus):'Add a Claude or OpenAI key for ✨ comment ideas')+'</small></div><button class="sm" data-act="ai-open">AI settings</button></div>'+
+      pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
+      '<div class="cfg"><div class="cfg-h"><b>Custom prompt</b></div><small class="muted">Used when the mood is ✎ Custom</small><textarea class="cfgsel" data-k="aiCustom" rows="3" maxlength="200" placeholder="e.g. tease about the rain, keep it short">'+escH(SET.settings.aiCustom||'')+'</textarea></div>'+
+      pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
+    '<h3 class="sec">Updates</h3>'+
+      swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
+      '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
+    SET.cfgSchema.map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join(''); }).join('')+
+    '<div class="cfg-foot"><span class="note">'+(changed?changed+' setting'+(changed===1?'':'s')+' changed':'All settings are at their original values')+'</span>'+
+      (changed?'<button class="sm danger '+(cfgArmed?'armed':'')+'" data-act="cfgall">'+(cfgArmed?'Confirm reset':'Reset all')+'</button>':'')+'</div>'+
+    builtWithHTML()+'</div>';
+  el.scrollTop=keep;   // re-renders must not jump back to the top
+}
+function setState(ok,msg){ if(!ok){ toast(msg||'Could not save'); } else { try{ SET=JSON.parse(msg); }catch(e){} } renderCfg(); }
 function openSettings(){
-  if(document.getElementById('set')) return;
-  send('settings-get',{},function(ok,msg){
-    var st={}; try{ st=JSON.parse(msg); }catch(e){ toast('Settings could not be loaded'); return; }
-    var opt=function(list,cur){ return list.map(function(o){ return '<option value="'+escH(o[0])+'"'+(o[0]===cur?' selected':'')+'>'+escH(o[1])+'</option>'; }).join(''); };
-    var sw=function(id,on){ return '<label class="sw"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'><span></span></label>'; };
-    var ov=document.createElement('div'); ov.id='set';
-    ov.innerHTML='<div class="setp" role="dialog" aria-label="Settings">'+
-      '<div class="seth"><b>Settings</b><button class="lbx" data-act="set-close" aria-label="Close settings">✕</button></div>'+
-      '<div class="setb">'+
-      '<div class="setg"><h3>AI comments</h3><div class="setc">'+
-        '<div class="setr"><div class="setl">Keys, models and token usage<small id="s-aistatus">'+(st.hasKey?escH(st.aiStatus):'Add a Claude or OpenAI key for ✨ comment ideas')+'</small></div><button class="small'+(st.hasKey?' ghost':'')+'" data-act="ai-open">AI settings</button></div>'+
-        '<div class="setr col"><div class="setl">Default mood</div><select id="s-mode">'+opt(st.modes.map(function(m){ return [m.key,m.label]; }),st.aiMode)+'</select></div>'+
-        '<div class="setr col"><div class="setl">Custom prompt<small>Used when the mood is ✎ Custom</small></div><textarea id="s-custom" rows="3" maxlength="200" placeholder="e.g. tease about the rain, keep it short">'+escH(st.aiCustom||'')+'</textarea></div>'+
-        '<div class="setr col"><div class="setl">Language</div><select id="s-lang">'+opt(st.langs.map(function(l){ return [l[1],l[1]]; }),st.aiLang)+'</select></div>'+
-      '</div></div>'+
-      '<div class="setg"><h3>Digest</h3><div class="setc">'+
-        '<div class="setr"><div class="setl">Show my own activities</div>'+sw('s-me',st.includeMe)+'</div>'+
-        '<div class="setr"><div class="setl">Load extra details<small>Heart rate, PRs, start times, route maps</small></div>'+sw('s-enrich',st.enrich)+'</div>'+
-        '<div class="setr"><div class="setl">Names on the widget</div>'+sw('s-wnames',st.widgetNames)+'</div>'+
-      '</div></div>'+
-      '<div class="setg"><h3>Updates</h3><div class="setc">'+
-        '<div class="setr"><div class="setl">Offer new versions</div>'+sw('s-upd',st.checkUpdates)+'</div>'+
-        '<div class="setr"><div class="setl">Daily Digest v'+escH(st.version)+'<small id="s-updmsg"></small></div><button class="ghost small" data-act="set-checkupd">Check now</button></div>'+
-      '</div></div>'+
-      '<div class="setg"><h3>Advanced</h3><div class="setc">'+
-        '<div class="setr col"><div class="setl">Strava athlete ID<small>Leave empty to detect it. Takes effect next time you open the digest.</small></div><input type="text" id="s-athlete" inputmode="numeric" autocomplete="off" value="'+escH(st.athleteId||'')+'" placeholder="Detected automatically"></div>'+
-      '</div></div>'+
-      '<div class="setmsg" aria-live="polite"></div></div>'+
-      '<div class="setf"><button class="ghost" data-act="set-close">Cancel</button><button data-act="set-save">Save</button></div></div>';
-    document.body.appendChild(ov); document.body.style.overflow='hidden';
-    ov.addEventListener('click',function(e){ if(e.target===ov) closeSettings(); });
-  });
+  if(cfgOpen) return;
+  send('settings-get',{},function(ok,msg){ if(!ok){ toast('Settings could not be loaded'); return; } cfgOpen=true; setState(ok,msg); cfgSheet().scrollTop=0; });
 }
-function closeSettings(){ var ov=document.getElementById('set'); if(ov) ov.remove(); document.body.style.overflow=''; }
-function saveSettings(btn){
-  var g=function(id){ return document.getElementById(id); }, ov=g('set');
-  var data={
-    aiMode:g('s-mode').value, aiCustom:g('s-custom').value, aiLang:g('s-lang').value,
-    includeMe:g('s-me').checked, enrich:g('s-enrich').checked, widgetNames:g('s-wnames').checked, checkUpdates:g('s-upd').checked,
-    athleteId:g('s-athlete').value.trim() };
-  btn.disabled=true; btn.textContent='Saving…';
-  send('settings-save',{data:JSON.stringify(data)},function(ok,msg){
-    btn.disabled=false; btn.textContent='Save';
-    if(!ok){ var em=ov.querySelector('.setmsg'); em.textContent=msg||'Could not save'; em.scrollIntoView({block:'nearest'}); return; }
-    closeSettings();
-    toast(msg==='restart'?'Saved. The new athlete ID applies next time you open the digest.':msg==='reload'?'Saved. Reloading the feed…':'Settings saved');
-  });
+function closeSettings(){ cfgOpen=false; cfgArmed=false; renderCfg(); send('settings-done',{}); }
+function cfgAction(t,act){
+  var v=t.dataset.v, k=t.dataset.k;
+  if(act==='look'){ var val=k==='textSize'?+v:v; LOOK[k]=val; applyLook(); renderCfg(); send('set',{k:k,v:val},setState); return; }
+  if(act==='toggle'){ SET.settings[v]=!SET.settings[v]; renderCfg(); send('set',{k:v,v:SET.settings[v]},setState); return; }
+  if(act==='cfgreset'){ send('cfg',{k:k,reset:1},setState); return; }
+  if(act==='cfgstep'){ var d=cfgItem(k), step=d.step||1; SET.cfg[k]=Number(Math.min(d.max,Math.max(d.min,Number(SET.cfg[k])+step*(+v))).toFixed(2)); renderCfg(); send('cfg',{k:k,v:SET.cfg[k]},setState); return; }
+  if(act==='cfgall'){ if(cfgArmed){ cfgArmed=false; send('cfg',{k:'*'},setState); } else { cfgArmed=true; renderCfg(); setTimeout(function(){ if(cfgArmed){ cfgArmed=false; renderCfg(); } },3500); } return; }
+  if(act==='updcheck'){ var um=document.getElementById('updmsg'); t.disabled=true; if(um) um.textContent='Checking…';
+    send('update-check',{},function(ok,res){ t.disabled=false; if(um) um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); return; }
+  if(act==='openurl'){ send('openurl',{v:v}); return; }
 }
+// Typed and picked values arrive through "change".
+document.addEventListener('change',function(e){
+  var el=e.target; if(!el.closest||!el.closest('#cfgsheet')) return;
+  if(el.classList.contains('cfgin')) send('cfg',{k:el.dataset.k,v:el.value},setState);
+  if(el.classList.contains('cfgsel')) send('set',{k:el.dataset.k,v:el.value},setState);
+});
+applyLook();
 // ── AI settings sheet (app-blueprints · ai-configuration) ──
 // Opened with window.__aiOpen(); the Scriptable side pushes state with window.__aiState(state).
 var AIS=null, aiIsOpen=false, aiArmed=null, aiLoading={};
@@ -2655,11 +2862,9 @@ document.addEventListener('click',function(e){
   if(act==='upd-later') updLater();
   if(act==='upd-close'){ var uo=document.getElementById('upd'); if(uo) uo.remove(); }
   if(act==='settings') openSettings();
-  if(act==='set-close') closeSettings();
-  if(act==='set-save') saveSettings(t);
+  if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(act==='set-checkupd'){ var um=document.getElementById('s-updmsg'); t.disabled=true; um.textContent='Checking…';
-    send('update-check',{},function(ok,res){ t.disabled=false; um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); }
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
@@ -2669,8 +2874,8 @@ document.addEventListener('click',function(e){
 
 // ───────────── entry point (last, so every const above is initialised) ─────────────
 
-loadSettings();
-aiMigrate(['strava-digest-openai-key'], readSettings().aiModel);   // 1.8.x kept one OpenAI key and model elsewhere
+await loadSettings();   // before every branch: app, widget and Shortcuts runs all use the saved choices
+aiMigrate(['strava-digest-openai-key'], LEGACY_AI_MODEL);   // 1.8.x kept one OpenAI key and model elsewhere
 const wantsRefreshOnly = !!(qp.refresh || args.shortcutParameter === 'refresh');
 if (config.runsInWidget || config.runsInAccessoryWidget) {
   await renderWidget();
