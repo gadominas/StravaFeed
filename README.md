@@ -53,6 +53,19 @@ The bigger your feed, the more time it saves.
   <img src="docs/screenshots/05-photo-viewer.png" width="230" alt="Full-screen photo viewer">
 </p>
 
+### More screens
+
+<p align="center">
+  <img src="docs/screenshots/08-compact-layout.png" width="230" alt="Compact layout: one line per activity with distance, pace, trophy and photo indicators; one activity expanded">
+  <img src="docs/screenshots/09-tiny-layout.png" width="230" alt="Tiny layout: one line per athlete with indicators and a round kudos button">
+  <img src="docs/screenshots/10-activity-details.png" width="230" alt="Activity details sheet with route map, stats and photos">
+</p>
+<p align="center">
+  <img src="docs/screenshots/11-kudos-celebration.png" width="230" alt="Kudos to everyone: thumbs flying from the centre to each athlete's photo">
+  <img src="docs/screenshots/12-settings.png" width="230" alt="Settings: colours, layout, text size, font and digest options">
+  <img src="docs/screenshots/13-update-offer.png" width="230" alt="Update offer showing the new version's three best features">
+</p>
+
 ## Requirements
 
 - **iPhone or iPad** with the free **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** app from the App Store.
