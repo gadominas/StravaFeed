@@ -42,7 +42,8 @@ The bigger your feed, the more time it saves.
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
-| ⚙️ **Settings in the app** | Tap the gear in the header to change your API key, comment mood, custom prompt, language, AI model and more, without editing code. |
+| ⚙️ **Settings in the app** | Tap the gear in the header to change comment mood, custom prompt, language and more, without editing code. |
+| 🤖 **Claude or OpenAI** | **⚙︎ › AI settings**: add a Claude or OpenAI key, pick any model your key can use, test the connection and see your token usage per day, feature and model. |
 | ⚡ **Fast** | The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read. |
 
 <p align="center">
@@ -56,7 +57,7 @@ The bigger your feed, the more time it saves.
 - **iPhone or iPad** with the free **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** app from the App Store.
 - **A Strava account** that follows other athletes. A free account is enough; no Strava subscription is needed.
 - **Optional: the Strava app**, if you want to open posts there.
-- **Optional: an OpenAI API key**, for ✨ comment suggestions. You create one at [platform.openai.com](https://platform.openai.com/api-keys). API usage is billed separately from a ChatGPT subscription, and each suggestion costs a tiny fraction of a cent.
+- **Optional: a Claude or OpenAI API key**, for ✨ comment suggestions. Create one at [console.anthropic.com](https://console.anthropic.com/settings/keys) or [platform.openai.com](https://platform.openai.com/api-keys). API usage is billed separately from a chat subscription, and each suggestion costs a tiny fraction of a cent. Without a key the digest works as usual and the ✨ buttons stay hidden.
 
 You don't need a computer, developer account, or Strava API application.
 
@@ -114,7 +115,7 @@ Widgets can't use your Strava login, so the widget shows the summary the digest 
 
 ## Configuration
 
-Most settings can be changed in the app: tap **⚙︎** in the header to set your OpenAI API key, the default comment mood and custom prompt, language, AI model and thinking effort, whether to show your own activities, extra details, names on the widget, update offers and your Strava athlete ID. They're saved in the iOS Keychain, so updates never reset them.
+Most settings can be changed in the app: tap **⚙︎** in the header to set the default comment mood and custom prompt, language, whether to show your own activities, extra details, names on the widget, update offers and your Strava athlete ID. They're saved in the iOS Keychain, so updates never reset them. AI keys, models and token usage have their own screen: **⚙︎ › AI settings**.
 
 The values below are the defaults, in the `CONFIG` block at the top of `Strava Daily Digest.js`:
 
@@ -126,8 +127,6 @@ These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`
 | `DAYS_IN_PICKER` | `2` | Number of days in the header: today and yesterday |
 | `INCLUDE_ME` | `false` | Include your own activities |
 | `ENRICH_DETAILS` | `true` | Read each activity's page for heart rate, PRs, start time and extra photos |
-| `AI.MODEL` | `'gpt-5.4-mini'` | OpenAI model used for comment ideas |
-| `AI.REASONING` | `'low'` | Higher means cleverer jokes but slower suggestions |
 | `AI.LANGUAGES` | EN, LT | Languages offered in the comment box |
 | `ATHLETE_ID` | `null` | Your Strava athlete ID. Only needed if it can't be detected automatically. |
 | `WIDGET_NAMES` | `true` | Show first names of people waiting for kudos on medium and large widgets |
@@ -138,14 +137,14 @@ These settings live in the `CONFIG` block at the top of `Strava Daily Digest.js`
 
 The digest checks this repository for a newer version each time it opens. If there is one, it shows what's new and offers **Update now**. **Later**, or tapping outside, hides the reminder for two days. You can also update any time by running the installer again.
 
-See [CHANGELOG.md](CHANGELOG.md) for every release. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
+See [CHANGELOG.md](CHANGELOG.md) for every release. This app follows the shared [app blueprints](https://github.com/gadominas/app-blueprints) (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Privacy and security
 
 - **Everything runs on your phone.** There is no server in between and nothing is collected. The update check only downloads `releases.json` from this repository.
 - **Your Strava login** stays in Scriptable's private browser storage, exactly as if you had logged in to strava.com.
-- **Your OpenAI key** is stored in the iOS Keychain and only ever sent to OpenAI.
-- **✨ Suggest** sends that one activity's stats and the athlete's first name to OpenAI, and only when you tap it. Nothing else leaves your phone.
+- **Your Claude or OpenAI key** is typed into a native iOS prompt, stored in the iOS Keychain and only ever sent to its own provider. The digest page only sees it masked.
+- **✨ Suggest** sends that one activity's stats and the athlete's first name to the provider marked “In use”, and only when you tap it. Nothing else leaves your phone.
 
 ## How it works
 
@@ -168,7 +167,7 @@ Strava's official API doesn't provide the feed of the people you follow, and it 
 | The Strava app says "Something went wrong" | Use the details sheet (tap the title or **↗**) instead. This is an issue in the Strava app when it's opened from a link. |
 | The widget says "Tap to load today" | Open the digest once today; the widget updates from it |
 | "Comment not posted" | Check the activity in Strava before retrying, to avoid posting twice |
-| ✨ Suggest asks for a key again | The key was rejected; paste a valid OpenAI API key, or replace it in **⚙︎ Settings** |
+| ✨ Suggest fails or asks for a key | Open **⚙︎ › AI settings**, tap **Test connection**, and replace the key with **Change key** if it was rejected |
 
 If something breaks, open an issue with a screenshot of the error. Set `DEBUG_DUMP: true` to save the raw feed data, and attach it only after removing any names.
 
