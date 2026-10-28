@@ -36,7 +36,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1728,6 +1728,28 @@ function scanNote(scan) {
   return `<p class="scan">Read ${scan.pages} feed page${scan.pages === 1 ? '' : 's'} (${scan.entries} posts), feed reached ${esc(at(scan.position))}, oldest activity ${esc(at(scan.oldest))}. Stopped because ${esc(scan.stop)}.</p>`;
 }
 
+// What's inside an activity, as small chips: distance (or time), achievements, photos.
+function actIndicators(a) {
+  const out = [];
+  if (a.km) out.push(`<span class="ic">📏 ${esc(a.km.value.toFixed(1))} ${esc(a.km.unit)}</span>`);
+  else { const t = (a.stats || []).find(x => RX.time.test(x.label)); if (t) out.push(`<span class="ic">⏱ ${esc(t.value)}</span>`); }
+  const ach = Math.max(a.ach.total || 0, a.ach.prs || 0);
+  if (ach) out.push(`<span class="ic${a.ach.prs ? ' gold' : ''}">🏆 ${ach}</span>`);
+  if (a.photos.length) out.push(`<span class="ic">📷 ${a.photos.length}</span>`);
+  return out.join('');
+}
+
+// The same, totalled for one athlete's day (Tiny layout).
+function personIndicators(p) {
+  const out = [], ach = p.acts.reduce((n, a) => n + Math.max(a.ach.total || 0, a.ach.prs || 0), 0);
+  const prs = p.acts.some(a => a.ach.prs), pics = p.acts.reduce((n, a) => n + a.photos.length, 0);
+  if (p.total) out.push(`<span class="ic">📏 ${esc(p.total)}</span>`);
+  else { const t = (p.primary.stats || []).find(x => RX.time.test(x.label)); if (t) out.push(`<span class="ic">⏱ ${esc(t.value)}</span>`); }
+  if (ach) out.push(`<span class="ic${prs ? ' gold' : ''}">🏆 ${ach}</span>`);
+  if (pics) out.push(`<span class="ic">📷 ${pics}</span>`);
+  return out.join('');
+}
+
 function personHtml(p) {
   const pid = esc(p.id);
   const profile = /^\d+$/.test(p.id) ? ` data-athlete="${pid}"` : '';
@@ -1739,11 +1761,10 @@ function personHtml(p) {
     ? `<button class="kudo person-k${p.kudoed ? ' done' : ''}" data-kudo="${esc(p.primary.id)}" data-pid="${pid}"${p.kudoed ? ' disabled' : ''}>${p.kudoed ? '✓ Kudos given' : '👍 Kudos'}</button>`
     : '';
   if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
-    const a = p.primary, top = (a.stats && a.stats[0]) || {};
-    const more = p.acts.length > 1 ? ` · ${p.acts.length} activities` : '';
+    const a = p.primary;
     return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
-    <header>${avatar}<div class="pn" data-detail="${esc(a.id)}"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(top.value || a.name || a.type || '')}${more}</span></div>${btn}</header>
-    <div hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
+    <header>${avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span><span class="ind">${personIndicators(p)}</span></div><span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
+    <div class="tacts" hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
   </section>`;
   }
   return `<section class="person" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
@@ -1773,8 +1794,10 @@ function actHtml(a, p) {
   const photos = a.photos.length
     ? `<div class="photos">${a.photos.map(u => `<img loading="lazy" src="${esc(u)}" data-photo="1" alt="Activity photo" onerror="this.remove()">`).join('')}</div>` : '';
   const main = p.acts.length > 1 && p.primary.id === a.id ? `<span class="main">gets the kudos</span>` : '';
-  return `<article class="act" data-id="${id}" data-map="${esc(a.map || '')}">
-    <div class="ah"><span class="emo">${emoji(a.type)}</span><div class="at"><b class="ttl" data-detail="${id}">${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div></div>
+  const fold = settings.density === 'compact';
+  return `<article class="act${fold ? ' fold' : ''}" data-id="${id}" data-map="${esc(a.map || '')}">
+    <div class="ah"${fold ? ` data-expand="${id}" role="button" aria-expanded="false"` : ''}><span class="emo">${emoji(a.type)}</span><div class="at"><b class="ttl"${fold ? '' : ` data-detail="${id}"`}>${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div>${fold ? '<span class="chev" aria-hidden="true">⌄</span>' : ''}</div>
+    ${fold ? `<div class="ind" data-expand="${id}">${actIndicators(a)}</div>` : ''}
     ${stats ? `<div class="stats">${stats}</div>` : ''}
     ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
     ${achList ? `<ul class="alist">${achList}</ul>` : ''}
@@ -2088,7 +2111,22 @@ textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);bac
 #toast.on{transform:translate(-50%,0);opacity:1;visibility:visible;transition:transform .25s,opacity .25s}
 body.loading .person{opacity:.45}
 .person.tiny header{gap:9px}
-.person.tiny .pn{cursor:pointer}
+.person.tiny .pn{cursor:pointer;flex:1;min-width:0}
+.ind{display:flex;flex-wrap:wrap;gap:6px}
+.ic{background:var(--soft);color:var(--fg);border-radius:999px;padding:2px 9px;font-size:calc(12px * var(--ts));font-weight:600;line-height:1.5;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ic.gold{background:var(--goldbg);color:var(--gold)}
+.chev{flex:none;align-self:center;color:var(--mut);font-size:calc(18px * var(--ts));line-height:1;padding:4px;cursor:pointer;transition:transform .2s}
+.act.fold .ah{cursor:pointer}
+.act.fold > .ind{margin:8px 0 0 calc(22px * var(--ts) + 10px);cursor:pointer}
+.act.fold:not(.open) > *:not(.ah):not(.ind){display:none}
+.act.fold.open > .ind{display:none}
+.act.fold.open .chev,.person.tiny.open .chev{transform:rotate(180deg)}
+.act.fold .at{flex:1;min-width:0}
+.person.tiny .pn .ind{margin-top:3px;flex-wrap:nowrap;overflow:hidden;gap:10px}
+.person.tiny .ic{background:none;padding:0;color:var(--mut)}
+.person.tiny .ic.gold{color:var(--gold)}
+.person.tiny .tline{margin-top:1px}
+.tline .more{color:var(--mut);font-weight:600}
 .tline{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 #cfgsheet{position:fixed;inset:0;z-index:49;background:var(--paper);color:var(--ink);transform:translateY(102%);visibility:hidden;transition:transform .28s ease,visibility 0s linear .28s;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;text-align:left}
@@ -2275,7 +2313,10 @@ window.__done=function(req,ok,msg){ var cb=pending[req]; delete pending[req]; if
 window.__patchPerson=function(pid,html){
   var old=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]'); if(!old) return;
   if(old.querySelector('.cbox:not([hidden])')||old.querySelector('[data-busy]')||old.contains(document.activeElement)) return;
-  var t=document.createElement('template'); t.innerHTML=html.trim(); old.replaceWith(t.content.firstElementChild);
+  var openActs=[].map.call(old.querySelectorAll('.act.open'),function(a){ return a.dataset.id; }), pOpen=old.classList.contains('open');
+  var t=document.createElement('template'); t.innerHTML=html.trim(); var neu=t.content.firstElementChild; old.replaceWith(neu);
+  openActs.forEach(function(id){ var a=neu.querySelector('.act[data-id="'+CSS.escape(id)+'"]'); if(a){ a.classList.add('open'); var hd=a.querySelector('.ah'); if(hd) hd.setAttribute('aria-expanded','true'); } });
+  if(pOpen){ var b=neu.querySelector('.tacts'); if(b){ b.hidden=false; neu.classList.add('open'); } }
 };
 window.__patchSummary=function(text){ var el=document.querySelector('.top .sub'); if(el) el.textContent=text; };
 window.setStatus=function(s){ var el=document.getElementById('st'); if(el) el.textContent=s; };
@@ -2486,7 +2527,7 @@ function openDetail(id){
   }
   body.innerHTML='';
   if(art.dataset.map){ var m=document.createElement('img'); m.className='detmap'; m.src=art.dataset.map; m.alt='Route map'; m.onerror=function(){ m.remove(); }; body.appendChild(m); }
-  var c=art.cloneNode(true); c.querySelectorAll('[data-detail]').forEach(function(x){ if(x.tagName==='BUTTON') x.remove(); else x.removeAttribute('data-detail'); });
+  var c=art.cloneNode(true); c.classList.remove('fold'); c.querySelectorAll('.chev,.act > .ind').forEach(function(x){ x.remove(); }); c.querySelectorAll('[data-expand]').forEach(function(x){ x.removeAttribute('data-expand'); x.removeAttribute('role'); }); c.querySelectorAll('[data-detail]').forEach(function(x){ if(x.tagName==='BUTTON') x.remove(); else x.removeAttribute('data-detail'); });
   var cb=c.querySelector('.cbox'); if(cb){ cb.hidden=true; var ta=cb.querySelector('textarea'); if(ta) ta.value=''; var sg=cb.querySelector('.sugs'); if(sg) sg.innerHTML=''; }
   body.appendChild(c);
   det.hidden=false; document.body.style.overflow='hidden'; body.scrollTop=0;
@@ -2808,6 +2849,12 @@ function zToggleAt(px,py){
   sc.addEventListener('dblclick',function(e){ zToggleAt(e.clientX,e.clientY); });
 })();
 document.addEventListener('click',function(e){
+  var fx=e.target.closest('[data-expand],[data-expandp]');
+  if(fx&&!e.target.closest('button,[data-photo],[data-athlete],input,textarea,select')){
+    if(fx.dataset.expand!==undefined){ var art=fx.closest('.act'); var on=art.classList.toggle('open'); var hd=art.querySelector('.ah'); if(hd) hd.setAttribute('aria-expanded',on); }
+    else { var sec=fx.closest('section.person'), box=sec.querySelector('.tacts'); box.hidden=!box.hidden; sec.classList.toggle('open',!box.hidden); var pn=sec.querySelector('.pn'); if(pn) pn.setAttribute('aria-expanded',!box.hidden); }
+    return;
+  }
   var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
   if(t.dataset.detail) return openDetail(t.dataset.detail);
   if(t.dataset.act==='det-close') return closeDetail();
