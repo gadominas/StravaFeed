@@ -2,21 +2,13 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
-## 1.9.0 (2026-10-28): Claude or OpenAI, your choice
+## 1.8.2 (2026-10-28): Clearer settings errors
 
-- 🤖 **Claude or OpenAI**: ✨ Comment ideas now work with either provider. Switch any time in AI settings.
-- 🧠 **Pick any model**: Load the models your own key can use, choose one and test the connection.
-- 📊 **See your token usage**: Tokens per day, feature and model, so you always know what AI costs you.
+- ⚠️ **Errors you can see**: If a setting can't be saved, the settings sheet now scrolls to the message.
 
-**Changes**
+**Fixes**
 
-- New AI settings sheet (⚙︎ › AI settings): Claude and OpenAI keys, model picker loaded from your key, connection test, token usage per day, feature and model
-- Keys are entered in a native secure prompt and stored in the iOS Keychain; the page only ever sees them masked
-- Comment ideas go through one shared AI call, following the app-blueprints AI configuration
-- ✨ Suggest, moods and language buttons stay hidden until a key is saved
-- Comment ideas are labelled with the provider that wrote them
-- Your existing OpenAI key and model move over automatically
-- The thinking-effort setting is gone: choose a model instead
+- A settings error could appear below the visible area, so a failed save looked like nothing happened
 
 ## 1.8.1 (2026-10-27): Tidier header
 
