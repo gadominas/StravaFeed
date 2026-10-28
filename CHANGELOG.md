@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.10.0 (2026-10-28): Make it yours
+
+- 🎨 **Colours and layout**: Six colour palettes or Auto, plus Comfortable, Compact or a one-line Tiny layout.
+- 🔠 **Text size and font**: Pick Small to Larger text and a sans or serif font for names and titles.
+- 🎛 **Tune everything**: Feed depth, time limits, widget refresh and more, each with Reset.
+
+**Changes**
+
+- New Settings sheet (sliders icon): Appearance, Digest, AI comments, Updates, tunables and Built with; changes apply at once, no Save button
+- Appearance shared with the other apps: Auto plus six palettes (Strava orange in all), Comfortable, Compact or Tiny layout, four text sizes, sans or serif headline font
+- Tiny layout: one line per athlete with their main stat and kudos; tap a name for the full activity
+- Tunables with ranges and Reset: feed pages, extra pages per day, details opened at once, time limits, days in the header, comment ideas per tap, widget refresh, athlete ID
+- Settings move from the Keychain to settings.json in iCloud Drive › Scriptable › StravaFeed; your choices move over automatically
+- Built with: the blueprints this app follows, with links to read them
+- Updates identify the app by its APP_ID line, as the in-app updates blueprint describes
+
 ## 1.9.1 (2026-10-28): Claude or OpenAI, plus a settings fix
 
 - 🤖 **Claude or OpenAI**: ✨ Comment ideas now work with either provider. Switch any time in AI settings.

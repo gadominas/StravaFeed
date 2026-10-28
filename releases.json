@@ -3,6 +3,38 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.10.0",
+      "date": "2026-10-28",
+      "title": "Make it yours",
+      "highlights": [
+        {
+          "icon": "🎨",
+          "title": "Colours and layout",
+          "text": "Six colour palettes or Auto, plus Comfortable, Compact or a one-line Tiny layout."
+        },
+        {
+          "icon": "🔠",
+          "title": "Text size and font",
+          "text": "Pick Small to Larger text and a sans or serif font for names and titles."
+        },
+        {
+          "icon": "🎛",
+          "title": "Tune everything",
+          "text": "Feed depth, time limits, widget refresh and more, each with Reset."
+        }
+      ],
+      "changes": [
+        "New Settings sheet (sliders icon): Appearance, Digest, AI comments, Updates, tunables and Built with; changes apply at once, no Save button",
+        "Appearance shared with the other apps: Auto plus six palettes (Strava orange in all), Comfortable, Compact or Tiny layout, four text sizes, sans or serif headline font",
+        "Tiny layout: one line per athlete with their main stat and kudos; tap a name for the full activity",
+        "Tunables with ranges and Reset: feed pages, extra pages per day, details opened at once, time limits, days in the header, comment ideas per tap, widget refresh, athlete ID",
+        "Settings move from the Keychain to settings.json in iCloud Drive › Scriptable › StravaFeed; your choices move over automatically",
+        "Built with: the blueprints this app follows, with links to read them",
+        "Updates identify the app by its APP_ID line, as the in-app updates blueprint describes"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.9.1",
       "date": "2026-10-28",
       "title": "Claude or OpenAI, plus a settings fix",
