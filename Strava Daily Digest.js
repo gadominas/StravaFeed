@@ -23,7 +23,7 @@
 // Fixed choices. Everything a user may want different lives in Settings (the sliders icon in the header):
 // see the CONFIG registry and the settings defaults further down (github.com/gadominas/app-blueprints · settings).
 const APP = 'StravaFeed';   // the app's folder in Scriptable's documents (settings.json lives there)
-// Applied to every AI comment and rewrite (Settings › Comment writing); the person can change it there.
+// Applied to every AI comment (Settings › Comment writing); the person can change it there.
 const DEFAULT_COMMENT_RULES = `Role & Tone: Act as an encouraging, witty, and intelligent British running mate, using natural, conversational British phrasing.
 Task: Write exactly one short, punchy, and funny sentence to congratulate a runner on their workout.
 Content Requirements:
@@ -37,19 +37,18 @@ const DIGEST = {
   DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
   AI: {                    // ✨ comment ideas from Claude or OpenAI (your own key; Settings › AI settings)
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
-    MODES: [               // comment moods offered in the comment box; 'custom' uses your own prompt
+    MODES: [               // comment moods offered in the comment composer
       { key: 'mystyle', label: '✨ My style' },   // your instructions plus the style learned from your comments
       { key: 'funny', label: '😂 Funny', style: 'funny and warm, like a teammate teasing with affection' },
       { key: 'energetic', label: '⚡ Energetic', style: 'high-energy hype, like a coach cheering from the roadside: punchy, exclamation marks welcome' },
       { key: 'serious', label: '🎯 Serious', style: 'sincere and respectful, specific praise of the effort and the numbers, no jokes' },
       { key: 'funky', label: '🕺 Funky', style: 'playful and quirky, groovy slang and wordplay, a little absurd' },
-      { key: 'custom', label: '✎ Custom' },
     ],
   },
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.15.0';
+const VERSION = '1.15.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -270,7 +269,6 @@ async function main() {
     }
     if (head === 'setlang') { if (setSetting('aiLang', p.lang) !== null) saveSettings(); return; }
     if (head === 'setmode') { if (setSetting('aiMode', p.mode) !== null) saveSettings(); return; }
-    if (head === 'setcustom') { setSetting('aiCustom', p.text); saveSettings(); return; }
     // Settings (app-blueprints · settings): every change is applied and saved at once; the reply is the fresh state.
     if (head === 'settings-get' || head === 'set' || head === 'cfg') {
       let ok = true, msg = '';
@@ -368,17 +366,7 @@ async function main() {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
         else {
-          const mode = p.mode || settings.aiMode, custom = cleanPrompt(p.custom);
-          if (mode === 'custom' && custom && custom !== settings.aiCustom) { settings.aiCustom = custom; saveSettings(); }
-          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', mode, custom);
-          if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
-        }
-      } else if (head === 'improve') {
-        const a = feed.get(p.id) || feed.mineGet(p.id);
-        if (!a) msg = 'Activity not found.';
-        else {
-          const r = await aiImprove(a, p.lang || settings.aiLang, String(p.draft || '').trim().slice(0, 600), String(p.kind || 'rephrase'));
+          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode);
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
         }
@@ -668,36 +656,15 @@ async function aiComments(a, system) {
   return { comments, by: PROVIDERS[provider] };
 }
 
-async function aiSuggest(a, language, hint, mode, custom) {
+async function aiSuggest(a, language, hint, mode) {
   if (!aiKey()) return { needKey: true };
   const parts = [commentBrief(language, cfg('suggestions'))];
   if (mode === 'mystyle') parts.push(styleBlock());
-  else if (mode === 'custom' && custom) parts.push(`For these options, also: "${custom}".`);
   else {
     const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style);
     if (m) parts.push(`Mood for these options: ${m.style}. Where this mood clashes with the user's instructions about tone, use the mood; every other instruction still applies.`);
   }
   if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
-  parts.push(COMMENT_SAFETY, COMMENT_JSON);
-  return aiComments(a, parts.join('\n'));
-}
-
-// Rewrites a draft you already have: punchier, funnier, shorter, warmer, in your style, or reworded.
-const IMPROVE_KINDS = {
-  punchier: 'punchier: tighter, stronger words, more impact',
-  funnier: 'funnier: add wit or a clever sports joke',
-  shorter: 'shorter: as few words as possible with the same message',
-  warmer: 'warmer: more heartfelt and encouraging',
-  mystyle: "written in the user's own style (described below)",
-  rephrase: 'reworded: the same message in fresh words',
-};
-async function aiImprove(a, language, draft, kind) {
-  if (!aiKey()) return { needKey: true };
-  const how = IMPROVE_KINDS[kind] || IMPROVE_KINDS.rephrase;
-  const parts = [commentBrief(language, cfg('suggestions')),
-    `Rewrite the user's draft comment so it is ${how}. Keep what it says and any names in it. Each option is a full replacement for the draft.`,
-    `DRAFT:\n${draft}`];
-  if (kind === 'mystyle') parts.push(styleBlock());
   parts.push(COMMENT_SAFETY, COMMENT_JSON);
   return aiComments(a, parts.join('\n'));
 }
@@ -836,7 +803,7 @@ const settings = {
   includeMe: false, enrich: true, widgetNames: true,
   checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
   theme: "auto", density: "comfortable", font: "sans", textSize: 1,
-  aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, aiCustom: "",   // remembered picks, also set inline
+  aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key,   // remembered picks, also set in the composer
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
   styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
   cfg: {},
@@ -849,7 +816,7 @@ const SET_KEYS = {
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
-  aiCustom: ["text", "render"], commentRules: ["rules", ""],
+  commentRules: ["rules", ""],
 };
 // Returns the effect ('', 'render', 'reload'), or null when the key or value isn't allowed.
 function setSetting(k, v) {
@@ -876,7 +843,7 @@ async function loadSettings() {
         if (/^\d+$/.test(String(o.athleteId || "").trim())) settings.cfg.athleteId = String(o.athleteId).trim();
       }
     } catch (e) {}
-    for (const [k, kc] of [["aiLang", KC_AI_LANG], ["aiMode", KC_AI_MODE], ["aiCustom", KC_AI_CUSTOM]]) if (Keychain.contains(kc)) settings[k] = Keychain.get(kc);
+    for (const [k, kc] of [["aiLang", KC_AI_LANG], ["aiMode", KC_AI_MODE]]) if (Keychain.contains(kc)) settings[k] = Keychain.get(kc);
     if (saveSettings()) for (const kc of [KC_SETTINGS_OLD, KC_AI_LANG, KC_AI_MODE, KC_AI_CUSTOM]) if (Keychain.contains(kc)) Keychain.remove(kc);
   }
   // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
@@ -2425,7 +2392,6 @@ function actHtml(a, p) {
       <div class="crow"><textarea rows="3" placeholder="${aiKey() ? 'Write a comment, or tap Suggest' : 'Write a comment'}"></textarea><button data-comment="${id}">Post</button></div>
       <div class="modes" role="group" aria-label="Comment mood">${DIGEST.AI.MODES.map(m =>
         `<button class="mode${m.key === settings.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>
-      <div class="customrow"${settings.aiMode === 'custom' ? '' : ' hidden'}><input class="aicustom" type="text" maxlength="200" placeholder="Describe the comments you want, e.g. tease about the rain" value="${esc(settings.aiCustom)}"></div>
       <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest 3</button>${DIGEST.AI.LANGUAGES.map(([code, name]) =>
         `<button class="lng${name === settings.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
       <div class="sugs"></div>
@@ -2647,11 +2613,8 @@ body.loading .loadst{display:block}
 .incs{margin-top:0}
 .incs textarea{font-size:16px;min-height:100px;line-height:1.4}
 .cslab{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:18px 0 0}
-.imps{display:flex;gap:6px;margin:8px -16px 0;padding:0 16px;overflow-x:auto;scrollbar-width:none}
-.imps::-webkit-scrollbar{display:none}
 .incs .modes{margin:8px -16px 0;padding:0 16px}
-.mode.imp:disabled{opacity:.5;background:var(--soft)}
-body.nokey .impr,body.nokey .incs .cslab{display:none}
+body.nokey .incs .cslab{display:none}
 #cfgsheet textarea.rules{display:block;width:100%;box-sizing:border-box;min-height:200px;margin-top:8px;font-size:15px;line-height:1.45}
 .stylebtns{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .styleprof{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)}
@@ -2808,9 +2771,6 @@ body.nokey .impr,body.nokey .incs .cslab{display:none}
 .modes::-webkit-scrollbar{display:none}
 .mode{flex:none;background:var(--soft);color:var(--fg);padding:7px 12px;font-size:calc(13px * var(--ts));font-weight:600;border:1px solid transparent}
 .mode.on{background:var(--fg);color:var(--bg)}
-.customrow{margin-top:8px}.customrow[hidden]{display:none}
-.aicustom{width:100%;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 11px}
-.aicustom:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .lng{background:transparent;color:var(--mut);padding:6px 10px;border:1px solid var(--line)}
 .lng.on{background:var(--soft);color:var(--fg);border-color:var(--soft)}
 .sugs{display:flex;flex-direction:column;gap:6px;margin-top:8px}
@@ -2980,7 +2940,7 @@ body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 #aisheet .utab th:not(:first-child),#aisheet .utab td:not(:first-child){text-align:right;white-space:nowrap}
 .badge-ai{display:inline-block;font-size:12px;font-weight:700;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border-radius:6px;padding:2px 8px}
 .badge-ex{display:inline-block;font-size:12px;font-weight:600;color:var(--mut);border:1px dashed var(--mut);border-radius:6px;padding:1px 8px}
-body.nokey .ai,body.nokey .modes,body.nokey .customrow{display:none!important}
+body.nokey .ai,body.nokey .modes{display:none!important}
 .sugs .badge-ai{align-self:flex-start}
 </style></head><body class="d-${look.density}${aiKey() ? '' : ' nokey'}">
 ${launchScreen()}${content}
@@ -3036,23 +2996,14 @@ function send(action,params,cb){
 }
 function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift(); setTimeout(function(){busy=false;pump();},300); }
 var aiLang=document.querySelector('.lng.on')?document.querySelector('.lng.on').dataset.lang:'';
-var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'funny';
+var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'mystyle';
 function setMode(mode, from){
   aiMode=mode;
   document.querySelectorAll('.mode').forEach(function(b){ b.classList.toggle('on', b.dataset.mode===mode); });
-  document.querySelectorAll('.customrow').forEach(function(r){ r.hidden=(mode!=='custom'); });
   send('setmode',{mode:mode});
-  if(mode==='custom'&&from){ var inp=from.closest('.cbox').querySelector('.aicustom'); if(inp) inp.focus(); }
 }
-document.addEventListener('change',function(e){
-  if(!e.target.classList||!e.target.classList.contains('aicustom')) return;
-  var v=e.target.value;
-  document.querySelectorAll('.aicustom').forEach(function(i){ if(i!==e.target) i.value=v; });
-  send('setcustom',{text:v});
-});
-// ── the comment composer: a pop-up with the draft, rewrites of it, and AI ideas ──
+// ── the comment composer: a pop-up with the draft and AI ideas ──
 var DRAFTS={};
-var IMPROVE=[['punchier','👊 Punchier'],['funnier','😂 Funnier'],['shorter','✂️ Shorter'],['warmer','🤗 Warmer'],['mystyle','✨ In my style'],['rephrase','🔁 Rephrase']];
 function composerSheet(){
   var ov=document.getElementById('csheet');
   if(!ov){
@@ -3073,10 +3024,8 @@ function openComposer(art){
   ov.querySelector('.csh').innerHTML='<div class="mtt"><b>Comment for '+escH(art.dataset.who||'your friend')+'</b><small>'+escH(ttl)+'</small></div><button class="mbtn" data-act="cs-close" aria-label="Close">✕</button>';
   var box=src.cloneNode(true); box.hidden=false; box.classList.add('incs');
   var ta=box.querySelector('textarea'); ta.rows=4; ta.value=DRAFTS[id]||''; ta.setAttribute('aria-label','Your comment');
-  var imp=document.createElement('div'); imp.className='impr';
-  imp.innerHTML='<div class="cslab">Improve my draft</div><div class="imps" role="group" aria-label="Improve my draft">'+IMPROVE.map(function(x){ return '<button class="mode imp" data-improve="'+x[0]+'">'+x[1]+'</button>'; }).join('')+'</div>';
   var lab=document.createElement('div'); lab.className='cslab'; lab.textContent='Write it for me';
-  var crow=box.querySelector('.crow'); crow.parentNode.insertBefore(imp,crow.nextSibling); imp.parentNode.insertBefore(lab,imp.nextSibling);
+  var crow=box.querySelector('.crow'); crow.parentNode.insertBefore(lab,crow.nextSibling);
   var body=ov.querySelector('.csb'); body.innerHTML=''; body.appendChild(box); body.scrollTop=0;
   ov.hidden=false; document.body.style.overflow='hidden';
   setTimeout(function(){ try{ ta.focus(); }catch(e){} },250);
@@ -3101,25 +3050,11 @@ function aiReply(box,ok,msg,label){
   list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
   return true;
 }
-function improve(btn){
-  var box=btn.closest('.cbox'), ta=box.querySelector('textarea'), draft=ta.value.trim(), ov=btn.closest('#csheet');
-  if(!draft){ toast('Write or pick a comment first, then improve it'); ta.focus(); return; }
-  if(box.dataset.busy||!ov) return;
-  box.dataset.busy='1'; var was=btn.textContent; btn.textContent='…'+was.replace(/^\S+/,'');
-  box.querySelectorAll('[data-improve]').forEach(function(b){ b.disabled=true; });
-  send('improve',{id:ov.dataset.id,draft:draft,kind:btn.dataset.improve,lang:aiLang},function(ok,msg){
-    delete box.dataset.busy; btn.textContent=was;
-    box.querySelectorAll('[data-improve]').forEach(function(b){ b.disabled=false; });
-    aiReply(box,ok,msg,'Rewrites');
-  });
-}
 function suggest(btn){
   if(btn.disabled) return;
   var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
-  var cin=box.querySelector('.aicustom'), custom=cin?cin.value.trim():'';
-  if(aiMode==='custom'&&!custom){ toast('Describe the comments you want first'); if(cin) cin.focus(); return; }
   btn.disabled=true; btn.dataset.busy='1'; btn.textContent='✨ Thinking…';
-  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode,custom:custom},function(ok,msg){
+  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode},function(ok,msg){
     btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
     if(!aiReply(box,ok,msg,'Suggestions')&&!ok&&msg==='NEED_KEY') btn.textContent='✨ Suggest';
   });
@@ -3447,7 +3382,7 @@ function writingHTML(){
   var when=meta.at?new Date(meta.at).toLocaleDateString(undefined,{day:'numeric',month:'short'}):'';
   return '<h3 class="sec">Comment writing</h3>'+
     '<div class="cfg'+(changed?' ch':'')+'"><div class="cfg-h"><b>Instructions for every AI comment</b>'+(changed?'<button class="link small" data-act="rules-reset">Reset to default</button>':'')+'</div>'+
-      '<small class="muted">Used for every suggestion and rewrite. They win over the app’s own defaults.</small>'+
+      '<small class="muted">Used for every AI comment idea. They win over the app’s own defaults.</small>'+
       '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="2000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea></div>'+
     (sec?sec.items.map(fieldHTML).join(''):'')+
     '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
@@ -3472,7 +3407,6 @@ function renderCfg(){
     '<h3 class="sec">AI comments</h3>'+
       '<div class="srow"><div class="grow"><b>Keys, models and token usage</b><small id="s-aistatus">'+(SET.hasKey?escH(SET.aiStatus):'Add a Claude or OpenAI key for ✨ comment ideas')+'</small></div><button class="sm" data-act="ai-open">AI settings</button></div>'+
       pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
-      '<div class="cfg"><div class="cfg-h"><b>Custom prompt</b></div><small class="muted">Used when the mood is ✎ Custom</small><textarea class="cfgsel" data-k="aiCustom" rows="3" maxlength="200" placeholder="e.g. tease about the rain, keep it short">'+escH(SET.settings.aiCustom||'')+'</textarea></div>'+
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
     writingHTML()+
     '<h3 class="sec">Updates</h3>'+
@@ -3815,7 +3749,6 @@ document.addEventListener('click',function(e){
     aiLang=t.dataset.lang; send('setlang',{lang:aiLang}); return;
   }
   if(t.dataset.suggest) return suggest(t);
-  if(t.dataset.improve) return improve(t);
   if(t.dataset.act==='cs-close') return closeComposer();
   if(t.dataset.mode) return setMode(t.dataset.mode, t);
   if(t.dataset.sug!==undefined){
