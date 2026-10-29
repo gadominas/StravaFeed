@@ -3,6 +3,37 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.14.0",
+      "date": "2026-10-29",
+      "title": "Your activities, on top",
+      "highlights": [
+        {
+          "icon": "🏃",
+          "title": "Your activities first",
+          "text": "Your latest one to three activities sit above everyone else's, with the kudos and comments you received."
+        },
+        {
+          "icon": "👍",
+          "title": "See who cheered",
+          "text": "Tap one to see who gave kudos and read every comment, without opening the Strava app."
+        },
+        {
+          "icon": "♡",
+          "title": "Like comments",
+          "text": "Tap the heart on a comment to like it right in the digest."
+        }
+      ],
+      "changes": [
+        "\"Your activities\" strip at the top of the digest: your activities from today and yesterday, newest first, up to three side by side, each with kudos and comments received",
+        "The strip is hidden when you have no activities of your own, and works whether or not \"Show my own activities\" is on",
+        "Tapping one opens a sheet with who gave kudos (with a full list) and all comments",
+        "Like or unlike a comment with its heart; the first like goes through Strava's own button and teaches the app the request, later likes are sent directly",
+        "If Strava offers no way to like comments, the hearts turn read-only and say so",
+        "Today's view reads back to yesterday in the background so yesterday's activities appear in the strip"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.13.0",
       "date": "2026-10-29",
       "title": "Kudos at a glance",

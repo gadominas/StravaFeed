@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.14.0 (2026-10-29): Your activities, on top
+
+- 🏃 **Your activities first**: Your latest one to three activities sit above everyone else's, with the kudos and comments you received.
+- 👍 **See who cheered**: Tap one to see who gave kudos and read every comment, without opening the Strava app.
+- ♡ **Like comments**: Tap the heart on a comment to like it right in the digest.
+
+**Changes**
+
+- "Your activities" strip at the top of the digest: your activities from today and yesterday, newest first, up to three side by side, each with kudos and comments received
+- The strip is hidden when you have no activities of your own, and works whether or not "Show my own activities" is on
+- Tapping one opens a sheet with who gave kudos (with a full list) and all comments
+- Like or unlike a comment with its heart; the first like goes through Strava's own button and teaches the app the request, later likes are sent directly
+- If Strava offers no way to like comments, the hearts turn read-only and say so
+- Today's view reads back to yesterday in the background so yesterday's activities appear in the strip
+
 ## 1.13.0 (2026-10-29): Kudos at a glance
 
 - 📲 **A new widget look**: The kudos widget now wears the Daily Digest logo on its dark tile, like the other apps.
