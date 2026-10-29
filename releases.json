@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.12.0",
+      "date": "2026-10-29",
+      "title": "Catch up. Cheer. Move on.",
+      "highlights": [
+        {
+          "icon": "📍",
+          "title": "A logo of its own",
+          "text": "The route digest: a route from a teal start to a rose finish, with two digest lines."
+        },
+        {
+          "icon": "🎬",
+          "title": "Launch screen",
+          "text": "The route draws itself and the tagline appears for about 2 seconds; tap to skip."
+        },
+        {
+          "icon": "✨",
+          "title": "Branded everywhere",
+          "text": "The logo sits in the header, on a day nobody has posted yet and in the README."
+        }
+      ],
+      "changes": [
+        "New Daily Digest logo (route digest): docs/logo.svg and a 1024 px app icon, docs/icon-1024.png",
+        "Launch screen shown for 2.4 s with a short animation and the tagline \"Catch up. Cheer. Move on.\"; tap to skip; still with Reduce Motion (shared launch-screen blueprint 1.0.0)",
+        "Logo mark in the sticky header with \"Digest\" in the brand rose, the logo on an empty day, and at the top of the README",
+        "Settings › Built with now lists the launch-screen blueprint"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.11.1",
       "date": "2026-10-28",
       "title": "Pace at a glance",

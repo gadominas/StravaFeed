@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.12.0 (2026-10-29): Catch up. Cheer. Move on.
+
+- 📍 **A logo of its own**: The route digest: a route from a teal start to a rose finish, with two digest lines.
+- 🎬 **Launch screen**: The route draws itself and the tagline appears for about 2 seconds; tap to skip.
+- ✨ **Branded everywhere**: The logo sits in the header, on a day nobody has posted yet and in the README.
+
+**Changes**
+
+- New Daily Digest logo (route digest): docs/logo.svg and a 1024 px app icon, docs/icon-1024.png
+- Launch screen shown for 2.4 s with a short animation and the tagline "Catch up. Cheer. Move on."; tap to skip; still with Reduce Motion (shared launch-screen blueprint 1.0.0)
+- Logo mark in the sticky header with "Digest" in the brand rose, the logo on an empty day, and at the top of the README
+- Settings › Built with now lists the launch-screen blueprint
+
 ## 1.11.1 (2026-10-28): Pace at a glance
 
 - 👟 **Pace on every line**: Runs, walks and hikes show their pace next to the distance in Compact and Tiny.
