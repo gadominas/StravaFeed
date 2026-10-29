@@ -3,6 +3,37 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.15.2",
+      "date": "2026-10-29",
+      "title": "Learns from more of your comments",
+      "highlights": [
+        {
+          "icon": "🔎",
+          "title": "Finds your comments",
+          "text": "Learn my style now recognises far more of your own comments among everything it reads."
+        },
+        {
+          "icon": "🪪",
+          "title": "Knows your name",
+          "text": "Looks up your name on Strava, and spots it shortened (Gediminas S.) or without Lithuanian accents."
+        },
+        {
+          "icon": "📊",
+          "title": "Shows what it read",
+          "text": "Settings says how many comments it read and how many were yours. Only yours shape your style."
+        }
+      ],
+      "changes": [
+        "Settings › Learn my style shows how many comments were read on how many activities, next to how many were yours",
+        "When it finds too few, the message says how many it read and whose name it looked for"
+      ],
+      "fixes": [
+        "A comment's author was sometimes taken from the comment's own ID, so most of your comments weren't recognised as yours",
+        "Your name was only known when your own activities were in the loaded feed; it's now read from your Strava profile",
+        "Shortened names (\"Gediminas S.\") and names written with or without Lithuanian letters now match"
+      ]
+    },
+    {
       "version": "1.15.1",
       "date": "2026-10-29",
       "title": "A simpler comment composer",

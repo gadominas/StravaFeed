@@ -2,6 +2,23 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.15.2 (2026-10-29): Learns from more of your comments
+
+- 🔎 **Finds your comments**: Learn my style now recognises far more of your own comments among everything it reads.
+- 🪪 **Knows your name**: Looks up your name on Strava, and spots it shortened (Gediminas S.) or without Lithuanian accents.
+- 📊 **Shows what it read**: Settings says how many comments it read and how many were yours. Only yours shape your style.
+
+**Changes**
+
+- Settings › Learn my style shows how many comments were read on how many activities, next to how many were yours
+- When it finds too few, the message says how many it read and whose name it looked for
+
+**Fixes**
+
+- A comment's author was sometimes taken from the comment's own ID, so most of your comments weren't recognised as yours
+- Your name was only known when your own activities were in the loaded feed; it's now read from your Strava profile
+- Shortened names ("Gediminas S.") and names written with or without Lithuanian letters now match
+
 ## 1.15.1 (2026-10-29): A simpler comment composer
 
 - 💬 **Less to choose from**: The composer is just your comment, the moods and the AI ideas.
