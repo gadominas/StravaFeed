@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.15.0 (2026-10-29): Comments that sound like you
+
+- 💬 **A proper comment composer**: 💬 opens a pop-up with your draft, AI ideas and one-tap rewrites: punchier, funnier, shorter, warmer.
+- 📝 **Your instructions, every time**: Write the rules once in Settings, like a witty British running mate, and every AI comment follows them.
+- ✨ **Learns your style**: Reads up to 50 of your own comments and writes like you when you tap ✨ My style.
+
+**Changes**
+
+- Tapping 💬 opens a comment composer pop-up instead of a box inside the card; drafts are kept if you close it
+- Improve my draft: Punchier, Funnier, Shorter, Warmer, In my style and Rephrase rewrite what you have written, three options each
+- ✨ My style mood, first in the list: your instructions plus the style learned from your comments
+- Settings › Comment writing: instructions for every AI comment (a British running-mate default, Reset to default), how many comments to learn from (5 to 50, default 20), Learn my style with progress, the learned profile and Clear
+- Your instructions now take priority over the app's own defaults in every AI request; the safety rules still always apply
+- Comments you post through the digest are remembered on the iPhone (last 50) as the surest examples of your style
+- AI settings › usage lists style learning separately
+
 ## 1.14.0 (2026-10-29): Your activities, on top
 
 - 🏃 **Your activities first**: Your latest one to three activities sit above everyone else's, with the kudos and comments you received.

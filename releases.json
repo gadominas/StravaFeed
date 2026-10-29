@@ -3,6 +3,38 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.15.0",
+      "date": "2026-10-29",
+      "title": "Comments that sound like you",
+      "highlights": [
+        {
+          "icon": "💬",
+          "title": "A proper comment composer",
+          "text": "💬 opens a pop-up with your draft, AI ideas and one-tap rewrites: punchier, funnier, shorter, warmer."
+        },
+        {
+          "icon": "📝",
+          "title": "Your instructions, every time",
+          "text": "Write the rules once in Settings, like a witty British running mate, and every AI comment follows them."
+        },
+        {
+          "icon": "✨",
+          "title": "Learns your style",
+          "text": "Reads up to 50 of your own comments and writes like you when you tap ✨ My style."
+        }
+      ],
+      "changes": [
+        "Tapping 💬 opens a comment composer pop-up instead of a box inside the card; drafts are kept if you close it",
+        "Improve my draft: Punchier, Funnier, Shorter, Warmer, In my style and Rephrase rewrite what you have written, three options each",
+        "✨ My style mood, first in the list: your instructions plus the style learned from your comments",
+        "Settings › Comment writing: instructions for every AI comment (a British running-mate default, Reset to default), how many comments to learn from (5 to 50, default 20), Learn my style with progress, the learned profile and Clear",
+        "Your instructions now take priority over the app's own defaults in every AI request; the safety rules still always apply",
+        "Comments you post through the digest are remembered on the iPhone (last 50) as the surest examples of your style",
+        "AI settings › usage lists style learning separately"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.14.0",
       "date": "2026-10-29",
       "title": "Your activities, on top",
