@@ -3,6 +3,36 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.13.0",
+      "date": "2026-10-29",
+      "title": "Kudos at a glance",
+      "highlights": [
+        {
+          "icon": "📲",
+          "title": "A new widget look",
+          "text": "The kudos widget now wears the Daily Digest logo on its dark tile, like the other apps."
+        },
+        {
+          "icon": "🔒",
+          "title": "Every size",
+          "text": "Small, medium and large on the Home Screen, plus inline, round and rectangular on the Lock Screen."
+        },
+        {
+          "icon": "📴",
+          "title": "Never an error",
+          "text": "Works offline from the last summary and says when it's out of date, never Scriptable's error text."
+        }
+      ],
+      "changes": [
+        "Home Screen widget in the shared frame (widgets blueprint 1.0.0): logo tile and name, people waiting for kudos as the big number, who is waiting with their sport, early-riser badge and ×n, and \"of 15 today, 10:22\" at the bottom",
+        "Large widget adds the day's PRs and early risers; Lock Screen widgets show \"👍 15 waiting for kudos\"",
+        "The widget reads a summary saved on this iPhone, so it works offline; after the time set in Settings › Widget › \"Mark the widget as out of date after\" (12 h by default) its bottom line turns amber",
+        "Before the digest has loaded today the widget says \"Open to load today\"; a failing widget shows the app name and \"Tap to open\" instead of an error",
+        "Settings › Built with now lists the widgets blueprint"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.12.0",
       "date": "2026-10-29",
       "title": "Catch up. Cheer. Move on.",
