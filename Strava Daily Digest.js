@@ -48,7 +48,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.15.1';
+const VERSION = '1.15.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -688,12 +688,27 @@ async function rememberSent(text) {
 }
 
 // "Learn my style": collect your latest comments, then have the AI describe how you write.
+// Is this commenter you? Same first name, and the same surname or its initial ("Gediminas S."), accents ignored.
+function nameMatches(name, mine) {
+  const norm = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\s]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  const a = norm(name), b = norm(mine);
+  if (!a.length || !b.length) return false;
+  if (a.join(' ') === b.join(' ')) return true;
+  if (a.length < 2 || b.length < 2 || a[0] !== b[0]) return false;
+  const lastA = a[a.length - 1], lastB = b[b.length - 1];
+  return lastA === lastB || (lastA.length === 1 && lastA === lastB[0]);
+}
+
 async function learnStyle(feed, sx, progress, isClosed) {
   if (!aiKey()) throw new Error('Add a Claude or OpenAI key first, in AI settings.');
-  const n = cfg('styleComments'), me = String(feed.me() || ''), myName = feed.myName().toLowerCase();
+  const n = cfg('styleComments'), me = String(feed.me() || '');
+  let myName = feed.myName();
+  if (!myName) { try { myName = ((await sx(`__SD.whoAmI(${JSON.stringify(me)})`, cfg('pageWait') * 1000)) || {}).name || ''; } catch (e) {} }
   const texts = [], seen = new Set();
+  let read = 0;   // everyone's comments looked at, yours or not
   const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); } };
-  const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || (!!myName && String(c.name || '').toLowerCase() === myName);
+  const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || nameMatches(c.name, myName);
   for (const h of await load('sent-comments', [])) take(h && h.text);
   for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
   const checked = new Set();
@@ -703,10 +718,10 @@ async function learnStyle(feed, sx, progress, isClosed) {
     for (let i = 0; i < todo.length && texts.length < n && scanned < 150 && !isClosed(); i += 8) {
       const ids = todo.slice(i, i + 8).map(a => a.id);
       ids.forEach(id => checked.add(id)); scanned += ids.length;
-      await progress(`Reading comments: ${texts.length} of ${n} found, ${scanned} activities checked`);
+      await progress(`Reading comments: ${texts.length} of ${n} yours found in ${read} read, ${scanned} activities checked`);
       let got = {};
       try { got = (await sx(`__SD.commentsMany(${JSON.stringify(ids)}, 4)`, cfg('detailsWait') * 2000)) || {}; } catch (e) { console.warn('Style: ' + e.message); }
-      for (const id of ids) (got[id] || []).filter(isMine).forEach(c => take(c.text));
+      for (const id of ids) { const list = got[id] || []; read += list.length; list.filter(isMine).forEach(c => take(c.text)); }
     }
     if (texts.length >= n || scanned >= 150) break;
     const before = feed.scan().position || Date.now();     // reach a week further back in the feed
@@ -714,14 +729,15 @@ async function learnStyle(feed, sx, progress, isClosed) {
     await feed.readBackTo(before - 7 * 864e5, async () => {}, isClosed);
     if ((feed.scan().position || before) >= before) break;  // nothing older came back
   }
-  if (texts.length < 3) throw new Error(texts.length
-    ? `Found only ${texts.length} of your comments, not enough to learn from. Comment a few more times, then try again.`
-    : 'Couldn\u2019t find any of your comments in your feed. Comment a few times, then try again.');
+  const who = myName ? ` (looking for ${myName})` : '';
+  if (texts.length < 3) throw new Error(read
+    ? `Read ${read} comments on ${scanned} activities, but only ${texts.length} were yours${who}. Comment a few more times, then try again.`
+    : `Found only ${texts.length} of your comments and couldn\u2019t read others from Strava. Comment a few more times, then try again.`);
   await progress(`Studying ${texts.length} comments…`);
   const out = await aiCall(STYLE_PROMPT, JSON.stringify({ comments: texts }), 900, 'style');
   const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 1500);
   if (!prof) throw new Error('The AI sent back nothing. Try again.');
-  settings.styleProfile = prof; settings.styleMeta = { at: Date.now(), count: texts.length };
+  settings.styleProfile = prof; settings.styleMeta = { at: Date.now(), count: texts.length, read, scanned };
   saveSettings();
 }
 
@@ -2010,12 +2026,16 @@ function stravaLib() {
     const conv = (c) => {
       if (!c || typeof c !== 'object') return null;
       const text = SD.text(c.text || c.body || c.content || c.comment || c.message || '');
-      const who = SD.person(c.athlete || c.user || c.author || c.commenter || c);
+      const nested = c.athlete || c.user || c.author || c.commenter;
+      const who = SD.person(nested || c);
       if (!text || !who) return null;
+      // the author's id: beside the comment (athlete_id) or inside its athlete record, never the comment's own id
+      const aid = c.athlete_id ?? c.athleteId ?? c.author_id ?? c.authorId ?? c.user_id ?? c.userId
+        ?? (nested && typeof nested === 'object' ? (nested.id ?? nested.athleteId ?? nested.athlete_id) : null);
       const likes = +(c.reactionCount ?? c.reaction_count ?? c.kudosCount ?? c.kudos_count ?? c.likeCount ?? c.likes ?? 0) || 0;
       const liked = !!(c.hasReacted ?? c.has_reacted ?? c.reacted ?? c.hasKudoed ?? c.kudosed ?? c.liked ?? false);
       const at = Date.parse(c.createdAt || c.created_at || c.timestamp || c.date || '');
-      return { id: String(c.id ?? c.commentId ?? c.comment_id ?? ''), text, name: who.name, avatar: who.avatar, athleteId: who.id, likes, liked, at: isNaN(at) ? null : at };
+      return { id: String(c.id ?? c.commentId ?? c.comment_id ?? ''), text, name: who.name, avatar: who.avatar, athleteId: aid != null ? String(aid) : '', likes, liked, at: isNaN(at) ? null : at };
     };
     let best = [];
     const take = (v) => { const list = v.map(conv).filter(Boolean); if (list.length > best.length) best = list; };
@@ -2042,6 +2062,22 @@ function stravaLib() {
     const d = await SD.getAny(`/activities/${id}`);
     const nd = d && d.__html ? d.__html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/) : null;
     try { return nd ? SD.commentsFrom(JSON.parse(nd[1])) : []; } catch (e) { return []; }
+  };
+  // Your name as Strava shows it: profile settings first, then your athlete page.
+  SD.whoAmI = async (id) => {
+    const grab = (html, re) => { const m = html.match(re); return m ? SD.text(m[1]) : ''; };
+    let d = await SD.getAny('/settings/profile');
+    let html = d && d.__html ? d.__html : '';
+    const first = grab(html, /name="athlete\[firstname\]"[^>]*value="([^"]*)"/i), last = grab(html, /name="athlete\[lastname\]"[^>]*value="([^"]*)"/i);
+    if (first) return { name: [first, last].filter(Boolean).join(' ') };
+    if (id) {
+      d = await SD.getAny(`/athletes/${id}`);
+      html = d && d.__html ? d.__html : '';
+      const t = grab(html, /<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i) || grab(html, /<title>([^<]+)<\/title>/i);
+      const name = t.split('|')[0].replace(/strava/i, '').trim();
+      if (name) return { name };
+    }
+    return { name: '' };
   };
   // Comments for many activities, a few at a time (used by "Learn my style").
   SD.commentsMany = async (ids, conc) => {
@@ -3386,10 +3422,10 @@ function writingHTML(){
       '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="2000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea></div>'+
     (sec?sec.items.map(fieldHTML).join(''):'')+
     '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
-      '<small class="muted">Reads your latest comments on Strava and describes how you write. ✨ My style then writes like you, on top of your instructions.</small>'+
+      '<small class="muted">Reads the comments on recent activities, picks out yours and describes how you write. ✨ My style then writes like you, on top of your instructions.</small>'+
       '<div class="stylebtns"><button class="sm" data-act="style-learn"'+(STYLEBUSY?' disabled':'')+'>'+(STYLEBUSY?'Learning…':(prof?'Learn again':'Learn my style'))+'</button>'+
       '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLEMSG)+'</small></div>'+
-      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
+      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.read?'<br>'+meta.read+' comments read on '+(meta.scanned||0)+' activities; only yours are used':'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
 function renderCfg(){
