@@ -1,12 +1,16 @@
-# Strava Daily Digest
+<p align="center"><img src="docs/logo.svg" width="112" alt="Strava Daily Digest logo: a route from a teal start dot to a rose finish dot, with two faint digest lines"></p>
+
+<h1 align="center">Strava Daily Digest</h1>
+<p align="center"><b>Catch up. Cheer. Move on.</b></p>
 
 **Your Strava following feed as one tidy page per day: grouped by athlete, with one-tap kudos and AI-assisted comments.**
 An iPhone and iPad script for [Scriptable](https://scriptable.app).
 
 <p align="center">
-  <img src="docs/screenshots/01-daily-digest.png" width="230" alt="Daily digest: athletes grouped with stats, badges and photos">
-  <img src="docs/screenshots/03-kudos-to-everyone.png" width="230" alt="Give kudos to everyone, one each">
-  <img src="docs/screenshots/04-ai-comment-suggestions.png" width="230" alt="AI comment suggestions">
+  <img src="docs/screenshots/01-daily-digest.png" width="180" alt="Daily digest: athletes grouped with stats, badges and photos">
+  <img src="docs/screenshots/launch.png" width="180" alt="Launch screen: the route draws itself, then the tagline Catch up. Cheer. Move on.">
+  <img src="docs/screenshots/03-kudos-to-everyone.png" width="180" alt="Give kudos to everyone, one each">
+  <img src="docs/screenshots/04-ai-comment-suggestions.png" width="180" alt="AI comment suggestions">
 </p>
 
 > Screenshots use invented athletes and illustrative photos. In the widget screenshot, real names are pixelated.
@@ -38,6 +42,7 @@ The bigger your feed, the more time it saves.
 | 🖼 **Photo viewer** | Tap a photo to view it full-screen without leaving the digest. Swipe left and right, or jump with the thumbnail strip. Double-tap or pinch to zoom, and close with the big **Close photo** button. |
 | 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
 | 🗺 **Activity details** | Tap an activity's title or **↗** for a details sheet: route map, all stats, PRs, description, larger photos, kudos and comments. From there you can also open it in the Strava app or on Strava's website. |
+| 🎬 **Launch screen** | The digest opens on its logo for 2.4 seconds: the route draws itself from start to finish, then "Catch up. Cheer. Move on." Tap to skip; with Reduce Motion it appears without movement. It is the shared [launch-screen](https://github.com/gadominas/app-blueprints/blob/main/blueprints/launch-screen.md) blueprint, so all the apps start the same way. |
 | 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who. |
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
@@ -147,7 +152,7 @@ Two values stay in code, in the `DIGEST` block at the top of `Strava Daily Diges
 
 The digest checks this repository for a newer version each time it opens. If there is one, it shows what's new and offers **Update now**. **Later**, or tapping outside, hides the reminder for two days. You can also update any time by running the installer again.
 
-See [CHANGELOG.md](CHANGELOG.md) for every release. This app follows the shared [app blueprints](https://github.com/gadominas/app-blueprints) (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
+See [CHANGELOG.md](CHANGELOG.md) for every release. This app follows the shared [app blueprints](https://github.com/gadominas/app-blueprints) (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)): in-app updates, settings, AI configuration and launch screen. **Settings › Built with** lists them with their versions; docs/BLUEPRINTS.md adds the deviations. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Privacy and security
 
