@@ -16,6 +16,7 @@
  * First run: you'll be asked to log in to Strava once (email + password or email code).
  * Run with ?days=1 (URL scheme / Shortcuts) to see yesterday.
  * Opens on a 2.4 s launch screen with the route-digest logo (app-blueprints · launch-screen).
+ * Home Screen and Lock Screen widget in the shared frame, from a snapshot the digest saves (app-blueprints · widgets).
  * The BLUEPRINTS block below lists every shared blueprint this app follows (Settings › Built with).
  */
 
@@ -38,7 +39,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -50,6 +51,7 @@ const BLUEPRINTS = [
   { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.10.0' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
+  { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
 ];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
@@ -727,6 +729,7 @@ const CONFIG = [
   ]],
   ["Widget", [
     { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 15, min: 15, max: 120, step: 15 },
+    { k: "widgetStaleMin", label: "Mark the widget as out of date after", help: "Older data shows \"Updated …\" in amber", unit: "min", def: 720, min: 60, max: 2880, step: 60 },
   ]],
   ["Account", [
     { k: "athleteId", label: "Strava athlete ID", help: "The number from strava.com/athletes/<ID>. Leave empty to detect it. Applies next time you open the digest.", type: "text", def: "", pattern: "^\\d*$", bad: "The athlete ID is the number from strava.com/athletes/<ID>." },
@@ -996,16 +999,13 @@ function fmtPace(sec) { sec = Math.round(sec); return `${Math.floor(sec / 60)}:$
 function photoKey(u) { return String(u).replace(/-\d+x\d+(?=\.\w+)/, '').replace(/\?.*$/, ''); }
 
 // ─────────────── home-screen widget: today's "waiting for kudos" summary ───────────────
-// Widgets can't use your Strava login, so the digest saves a small summary every time it loads
-// today (and after each kudos); the widget shows that summary.
+// Widgets can't use your Strava login, so the digest saves a small snapshot every time it loads
+// today (and after each kudos) with saveWidget(); the widget only reads it (app-blueprints · widgets).
 
-const SNAPSHOT_FILE = 'strava-digest-widget.json';
 const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const LEGACY_SNAPSHOT = 'strava-digest-widget.json';   // 1.12.0 and earlier kept the summary here (iCloud Documents)
 
-function snapshotFm() {
-  try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); }
-}
-
+// Only what widgetModel() shows: counts and first names of people waiting, never tokens or the login.
 function saveSnapshot(feed) {
   try {
     const { dayStart, dayEnd } = dayBounds(0);
@@ -1013,112 +1013,290 @@ function saveSnapshot(feed) {
     const acts = feed.day(+dayStart, +dayEnd);
     const people = groupByAthlete(acts);
     const waiting = people.filter(p => !p.kudoed);
-    const snap = {
-      date: dayKey(dayStart), updated: Date.now(),
-      waiting: waiting.length, people: people.length, activities: acts.length,
+    saveWidget({
+      date: dayKey(dayStart),
+      waiting: waiting.length, people: people.length,
       prs: acts.reduce((n, a) => n + (a.ach.prs || 0), 0),
       early: people.filter(p => p.early).length,
-      list: waiting.slice(0, 10).map(p => ({
+      list: waiting.slice(0, 6).map(p => ({
         name: String(p.name || '').split(/\s+/)[0], icon: emoji(p.primary.type),
         early: p.early ? p.early.icon : '', n: p.acts.length,
       })),
-    };
-    const fm = snapshotFm();
-    fm.writeString(fm.joinPath(fm.documentsDirectory(), SNAPSHOT_FILE), JSON.stringify(snap));
+    });
+    try {   // drop the old summary file once the new snapshot exists
+      const ofm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+      const old = ofm.joinPath(ofm.documentsDirectory(), LEGACY_SNAPSHOT);
+      if (ofm.fileExists(old)) ofm.remove(old);
+    } catch (e) {}
   } catch (e) { console.warn('Widget summary not saved: ' + e); }
 }
 
-async function readSnapshot() {
-  try {
-    const fm = snapshotFm();
-    const path = fm.joinPath(fm.documentsDirectory(), SNAPSHOT_FILE);
-    if (!fm.fileExists(path)) return null;
-    if (fm.isFileStoredIniCloud && fm.isFileStoredIniCloud(path) && !fm.isFileDownloaded(path)) await fm.downloadFileFromiCloud(path);
-    return JSON.parse(fm.readString(path));
-  } catch (e) { return null; }
-}
-
-// Rounded widget fonts, falling back to the plain system font on older Scriptable versions.
-function wFont(weight, size) {
-  const name = { bold: 'boldRoundedSystemFont', semi: 'semiboldRoundedSystemFont' }[weight] || 'regularRoundedSystemFont';
-  if (typeof Font[name] === 'function') return Font[name](size);
-  return weight === 'bold' ? Font.boldSystemFont(size) : weight === 'semi' ? Font.semiboldSystemFont(size) : Font.systemFont(size);
-}
-
-async function renderWidget() {
-  const fam = config.widgetFamily || 'small';
-  const snap = await readSnapshot();
-  const fresh = !!snap && snap.date === dayKey(new Date());
-  const tf = new DateFormatter(); tf.dateFormat = 'HH:mm';
-  const updated = snap ? tf.string(new Date(snap.updated)) : '';
-  const w = new ListWidget();
-  w.url = URLScheme.forRunningScript();
-  w.refreshAfterDate = new Date(Date.now() + cfg('widgetRefreshMin') * 60 * 1000);
-
-  const txt = (stack, s, size, weight, opacity = 1, color = Color.white()) => {
-    const t = stack.addText(s);
-    t.font = wFont(weight, size);
-    t.textColor = color; t.textOpacity = opacity; t.lineLimit = 1; t.minimumScaleFactor = 0.6;
-    return t;
+// Kudos at a glance: people still waiting as the big number, who they are as rows; large adds PRs and early risers.
+// Reads only the snapshot: no network, no Strava login, nothing written.
+async function widgetModel() {
+  const snap = readWidget();
+  if (!snap || snap.date !== dayKey(new Date())) {
+    return {
+      empty: 'Open to load today',
+      footer: snap && snap.at ? 'Last checked ' + wWhen(snap.at) : '',
+      accessory: { glyph: '👍', inline: '👍 Open to load today' },
+    };
+  }
+  const n = snap.waiting || 0;
+  const rows = settings.widgetNames ? (snap.list || []).map(p => ({
+    icon: p.icon, text: p.name + (p.early ? ' ' + p.early : '') + (p.n > 1 ? ' ×' + p.n : ''),
+  })) : [];
+  if (config.widgetFamily === 'large') {   // the frame shows 6 rows at most: keep room for the totals
+    const extra = [];
+    if (snap.prs) extra.push({ icon: '🏆', text: snap.prs + (snap.prs > 1 ? ' PRs' : ' PR'), tone: 'soft' });
+    if (snap.early) extra.push({ icon: '🌅', text: snap.early + (snap.early > 1 ? ' early risers' : ' early riser'), tone: 'soft' });
+    rows.splice(6 - extra.length);
+    rows.push(...extra);
+  }
+  return {
+    kicker: '👍 Kudos',
+    value: n,
+    caption: n ? (n === 1 ? 'person waiting' : 'people waiting') : snap.people ? 'All caught up 🎉' : 'Nobody posted yet',
+    rows,
+    footer: 'of ' + snap.people + ' today, ' + wWhen(snap.at),
+    at: snap.at,
+    accessory: { glyph: '👍', inline: '👍 ' + n + ' waiting for kudos' },
   };
-  const num = fresh ? String(snap.waiting) : '–';
+}
 
-  // Lock Screen widgets
-  if (fam === 'accessoryInline') { w.addText(fresh ? `👍 ${snap.waiting} waiting for kudos` : '👍 Open to load today'); Script.setWidget(w); return; }
-  if (fam === 'accessoryCircular') {
-    w.addAccessoryWidgetBackground = true;
-    const c = w.addStack(); c.layoutVertically(); c.centerAlignContent();
-    const a = c.addText('👍'); a.font = Font.systemFont(11); a.centerAlignText();
-    const b = c.addText(num); b.font = wFont('bold', 22); b.centerAlignText(); b.minimumScaleFactor = 0.5;
-    Script.setWidget(w); return;
-  }
-  if (fam === 'accessoryRectangular') {
-    const a = w.addText(fresh ? `👍 ${snap.waiting} waiting` : '👍 Strava digest'); a.font = wFont('bold', 15);
-    const b = w.addText(fresh ? `for your kudos, of ${snap.people} today` : 'Open to load today'); b.font = wFont('reg', 12);
-    const c = w.addText(fresh ? `Updated ${updated}` : ''); c.font = wFont('reg', 11); c.textOpacity = 0.7;
-    Script.setWidget(w); return;
-  }
+// ───────── Widget ─────────
+// Shared widget frame (github.com/gadominas/app-blueprints › blueprints/widgets.md).
+// An app changes only WIDGET and widgetModel(); everything below WB is the same in every app.
+const WIDGET = {
+  name: ['Daily ', 'Digest'],             // as on the launch screen: plain part, highlighted part, optional rest
+  accent: '#FB7185',                      // the logo's focal colour (the launch screen's --sp-accent)
+  icon: REPO_RAW + 'docs/icon-1024.png',  // the app icon, cached on the phone after the first fetch
+  words: { open: 'Tap to open', nothing: 'Nothing to show yet.', updated: 'Updated', yesterday: 'yesterday' },   // in the app's language
+};
+// Brand colours, the same in every app and in light and dark mode: the logo tile's ground and lines.
+const WB = { ground: '#0E1116', raised: '#171B22', ink: '#F6F7F9', ink2: '#C9CED6', muted: '#9AA3AE', good: '#2DD4BF', warn: '#FBBF24' };
+const wfm = FileManager.local();
+const wPath = (n) => wfm.joinPath(wfm.documentsDirectory(), APP_ID + '-' + n);
 
-  // Home Screen widgets
+// What the widget shows is saved by the app and only read by the widget: fast, offline, no sign-in.
+function saveWidget(data) {
+  try { wfm.writeString(wPath('widget.json'), JSON.stringify(Object.assign({}, data, { at: Date.now() }))); }
+  catch (e) { console.log('Widget: not saved: ' + e); }
+}
+function readWidget() {
+  try { const p = wPath('widget.json'); return wfm.fileExists(p) ? JSON.parse(wfm.readString(p)) : null; }
+  catch (e) { return null; }
+}
+
+// Tones: ink, soft, muted, accent, good, warn, or a hex colour.
+const wColor = (c, a = 1) => {
+  const k = c === 'soft' ? 'ink2' : c;
+  return new Color(k === 'accent' ? WIDGET.accent : (WB[k] || k), a);
+};
+// Rounded system fonts, falling back to the plain system font on older Scriptable versions.
+function wFont(weight, size) {
+  const name = { bold: 'boldRoundedSystemFont', semi: 'semiboldRoundedSystemFont', med: 'mediumRoundedSystemFont' }[weight] || 'regularRoundedSystemFont';
+  if (typeof Font[name] === 'function') return Font[name](size);
+  return weight === 'bold' ? Font.boldSystemFont(size) : weight === 'semi' ? Font.semiboldSystemFont(size) : weight === 'med' ? Font.mediumSystemFont(size) : Font.systemFont(size);
+}
+function wText(stack, s, size, weight, tone, lines = 1) {
+  const t = stack.addText(String(s));
+  t.font = wFont(weight, size);
+  t.textColor = wColor(tone);
+  t.lineLimit = lines;
+  if (lines === 1) t.minimumScaleFactor = 0.75;
+  return t;
+}
+function wWhen(ts) {
+  const d = new Date(ts), now = new Date(), f = new DateFormatter();
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const ago = Math.round((day(now) - day(d)) / 864e5);
+  if (ago === 1) return WIDGET.words.yesterday;
+  f.dateFormat = ago === 0 ? 'HH:mm' : 'd MMM';
+  return f.string(d);
+}
+
+// The app's logo tile, from the repository's icon, cached per app version; a monogram until then.
+async function widgetIcon() {
+  const p = wPath('widget-icon-' + VERSION + '.png');
+  try {
+    if (wfm.fileExists(p)) return wfm.readImage(p);
+    const r = new Request(WIDGET.icon);
+    r.timeoutInterval = 8;
+    const dc = new DrawContext();
+    dc.size = new Size(96, 96); dc.opaque = false; dc.respectScreenScale = false;
+    dc.drawImageInRect(await r.loadImage(), new Rect(0, 0, 96, 96));
+    const img = dc.getImage();
+    const dir = wfm.documentsDirectory();
+    wfm.listContents(dir).filter((f) => f.startsWith(APP_ID + '-widget-icon-')).forEach((f) => { try { wfm.remove(wfm.joinPath(dir, f)); } catch (e) {} });
+    wfm.writeImage(p, img);
+    return img;
+  } catch (e) {
+    return widgetMonogram();
+  }
+}
+function widgetMonogram() {
+  const dc = new DrawContext();
+  dc.size = new Size(96, 96); dc.opaque = false; dc.respectScreenScale = false;
+  dc.setFillColor(wColor('raised')); dc.fillRect(new Rect(0, 0, 96, 96));
+  dc.setFont(wFont('bold', 54)); dc.setTextColor(wColor('accent')); dc.setTextAlignedCenter();
+  dc.drawTextInRect(WIDGET.name.join('').charAt(0), new Rect(0, 14, 96, 70));
+  return dc.getImage();
+}
+
+// Rows that fit: a line counts 1, a sub line 0.8; medium holds 5.5 (3 rows at most), large 12 (6 at most).
+function wFit(rows, budget, max) {
+  const out = [];
+  let used = 0;
+  for (const r of rows || []) {
+    const n = (r.lines || 1) + (r.sub ? 0.8 : 0);
+    if (out.length >= max || used + n > budget + 1e-9) break;   // 1e-9: 3 + 5 × 1.8 must still fit in 12
+    used += n;
+    out.push(r);
+  }
+  return out;
+}
+function wRows(stack, rows) {
+  rows.forEach((r, i) => {
+    if (i) stack.addSpacer(5);
+    const row = stack.addStack();
+    row.topAlignContent(); row.spacing = 6;
+    if (r.url) row.url = r.url;
+    if (r.icon) { const ic = row.addStack(); ic.size = new Size(15, 0); wText(ic, r.icon, 11.5, 'reg', 'ink'); }
+    const tx = row.addStack();
+    tx.layoutVertically();
+    wText(tx, r.text, 12.5, r.lines ? 'reg' : 'med', r.tone || (r.lines ? 'soft' : 'ink'), r.lines || 1);
+    if (r.sub) wText(tx, r.sub, 11, 'reg', 'muted');
+  });
+}
+
+async function renderWidget(m) {
+  const fam = config.widgetFamily || 'medium';
+  const w = new ListWidget();
+  w.url = m.url || URLScheme.forRunningScript();
+  w.refreshAfterDate = new Date(Date.now() + cfg('widgetRefreshMin') * 60e3);
+  if (fam.startsWith('accessory')) return renderAccessory(w, fam, m);
+  const small = fam === 'small', medium = fam === 'medium', large = !small && !medium;
   const g = new LinearGradient();
-  g.colors = [new Color('#fc5c1a'), new Color('#c43c00')]; g.locations = [0, 1];
-  g.startPoint = new Point(0, 0); g.endPoint = new Point(1, 1);
+  g.colors = [wColor('raised'), wColor('ground')]; g.locations = [0, 1];
+  g.startPoint = new Point(0, 0); g.endPoint = new Point(0, 1);
   w.backgroundGradient = g;
   w.setPadding(14, 14, 14, 14);
 
-  const row = w.addStack(); row.layoutHorizontally(); row.topAlignContent();
-  const left = row.addStack(); left.layoutVertically();
-  txt(left, '👍 Kudos', 12, 'semi', 0.9);
-  left.addSpacer();
-  txt(left, num, fam === 'small' ? 46 : 52, 'bold');
-  if (!fresh) txt(left, snap ? 'Tap to load today' : 'Tap to open', 13, 'semi');
-  else if (snap.waiting === 0) txt(left, snap.people ? 'All caught up 🎉' : 'Nobody posted yet', 13, 'semi');
-  else txt(left, snap.waiting === 1 ? 'person waiting' : 'people waiting', 13, 'semi');
-  txt(left, fresh ? `of ${snap.people} today, ${updated}` : (snap ? `last check ${updated}` : ''), 11, 'reg', 0.8);
+  // 1. Header: logo tile, name (highlighted part in the accent), badge
+  const hd = w.addStack();
+  hd.centerAlignContent();
+  const icon = hd.addImage(await widgetIcon());
+  const is = small ? 18 : 20;
+  icon.imageSize = new Size(is, is); icon.cornerRadius = is * 0.225;
+  hd.addSpacer(6);
+  WIDGET.name.forEach((part, i) => {
+    if (!part) return;
+    const t = hd.addText(part);
+    t.font = wFont('bold', small ? 13 : 14); t.textColor = wColor(i === 1 ? 'accent' : 'ink'); t.lineLimit = 1;
+  });
+  hd.addSpacer();
+  if (m.badge && !small) {
+    const b = hd.addStack();
+    b.setPadding(2, 7, 2, 7); b.cornerRadius = 8;
+    b.backgroundColor = wColor(m.badgeTone || 'accent', 0.16);
+    wText(b, m.badge, 11.5, 'semi', m.badgeTone || 'accent');
+  }
+  w.addSpacer(small ? 8 : 10);
 
-  if (fam !== 'small' && fresh) {
-    row.addSpacer(14);
-    const right = row.addStack(); right.layoutVertically();
-    const max = fam === 'large' ? 9 : 4;
-    const names = settings.widgetNames ? snap.list : [];
-    if (!names.length) {
-      txt(right, snap.waiting ? 'Open the digest' : 'Nothing waiting', 13, 'semi', 0.9);
-      txt(right, snap.waiting ? 'to give kudos' : 'Enjoy your day', 12, 'reg', 0.8);
-    }
-    names.slice(0, max).forEach(p => {
-      txt(right, `${p.icon} ${p.name}${p.early ? ' ' + p.early : ''}${p.n > 1 ? ` ×${p.n}` : ''}`, 14, 'semi');
-      right.addSpacer(3);
-    });
-    if (names.length && snap.waiting > Math.min(max, names.length)) txt(right, `+${snap.waiting - Math.min(max, names.length)} more`, 12, 'reg', 0.8);
-    right.addSpacer();
-    if (fam === 'large') {
-      const extra = [snap.prs ? `🏆 ${snap.prs} PR${snap.prs > 1 ? 's' : ''}` : '', snap.early ? `🌅 ${snap.early} early riser${snap.early > 1 ? 's' : ''}` : '', `${snap.activities} activities`].filter(Boolean).join('   ');
-      txt(right, extra, 12, 'reg', 0.85);
-    }
-    row.addSpacer();
+  // Empty state: what to do next, never an error
+  if (m.empty) {
+    wText(w, m.empty, 13, 'semi', 'soft', 3);
+    w.addSpacer();
+    wText(w, m.footer || WIDGET.words.open, 11, 'reg', 'muted');
+    Script.setWidget(w);
+    return;
+  }
+
+  // 2. Hero: kicker, then a big value with its caption, or a title with its caption
+  const body = w.addStack();
+  body.topAlignContent();
+  const left = body.addStack();
+  left.layoutVertically();
+  if (medium) left.size = new Size(136, 0);
+  if (m.kicker) wText(left, m.kicker, 11, 'semi', m.kickerTone || 'accent');
+  if (m.value != null && m.value !== '') {
+    wText(left, m.value, small ? 40 : 42, 'bold', m.valueTone || 'ink');
+    if (m.caption) wText(left, m.caption, 13, 'semi', 'ink');
+  } else {
+    if (m.title) wText(left, m.title, small ? 16 : 18, 'bold', 'ink', 2);
+    if (m.caption) { left.addSpacer(2); wText(left, m.caption, 12, 'reg', 'soft', 2); }
+  }
+
+  // 3. Rows: beside the hero on medium, under it on large, none on small
+  const rows = m.rows || [];
+  if (medium && wFit(rows, 5.5, 3).length) {
+    body.addSpacer(12);
+    const right = body.addStack();
+    right.layoutVertically();
+    wRows(right, wFit(rows, 5.5, 3));
+  }
+  body.addSpacer();
+  if (large && wFit(rows, 12, 6).length) { w.addSpacer(14); wRows(w, wFit(rows, 12, 6)); }
+
+  // 4. Footer: one muted line; amber when the data is stale. Small shows the badge here if there's no footer.
+  w.addSpacer();
+  const ft = small ? (m.footer || m.badge) : m.footer;
+  if (ft) wText(w, (m.stale ? '⟳ ' : '') + ft, 11, 'reg', m.stale ? 'warn' : 'muted');
+  Script.setWidget(w);
+}
+
+// Lock Screen: iOS tints these, so text only, no colours or logo.
+function renderAccessory(w, fam, m) {
+  const name = WIDGET.name.join('');
+  const a = m.accessory || {};
+  const hasValue = m.value != null && m.value !== '';
+  const hero = m.empty || (hasValue ? (m.value + ' ' + (m.caption || '')).trim() : (m.title || ''));
+  if (fam === 'accessoryInline') {
+    w.addText(a.inline || (hero ? name + ': ' + hero : name));
+  } else if (fam === 'accessoryCircular') {
+    w.addAccessoryWidgetBackground = true;
+    const c = w.addStack();
+    c.layoutVertically(); c.centerAlignContent();
+    const gl = c.addText(a.glyph || name.charAt(0)); gl.font = Font.systemFont(11); gl.centerAlignText();
+    const v = c.addText(String(a.value != null ? a.value : hasValue ? m.value : '–'));
+    v.font = wFont('bold', 20); v.minimumScaleFactor = 0.5; v.centerAlignText();
+  } else {
+    const lines = [
+      [[name, m.badge || m.kicker].filter(Boolean).join(' · '), 'semi', 12],
+      [hero, 'bold', 15],
+      [m.empty ? '' : hasValue ? (m.footer || '') : (m.caption || m.footer || ''), 'reg', 12],
+    ];
+    lines.forEach(([s, wt, size]) => { if (!s) return; const t = w.addText(s); t.font = wFont(wt, size); t.lineLimit = 1; t.minimumScaleFactor = 0.7; });
   }
   Script.setWidget(w);
 }
+
+// Widget runs come here and only here: no WebView, Alert or QuickLook may be built or presented.
+async function runWidget() {
+  const name = WIDGET.name.join('');
+  let m = null;
+  try { m = await widgetModel(args.widgetParameter || '', config.widgetFamily || 'medium'); }
+  catch (e) { console.error('Widget model: ' + e); }
+  if (!m) m = { empty: WIDGET.words.nothing };
+  try {
+    if (m.at && !m.empty && Date.now() - m.at > cfg('widgetStaleMin') * 60e3) {
+      m.stale = true;
+      m.footer = WIDGET.words.updated + ' ' + wWhen(m.at);
+    }
+    await renderWidget(m);
+  } catch (e) {
+    console.error('Widget render: ' + e);
+    const w = new ListWidget();
+    w.backgroundColor = wColor('ground');
+    w.url = URLScheme.forRunningScript();
+    wText(w, name, 14, 'bold', 'ink');
+    w.addSpacer(4);
+    wText(w, WIDGET.words.open, 12, 'reg', 'muted');
+    Script.setWidget(w);
+  }
+}
+// ───────── end of Widget ─────────
 
 // Optional: run with ?refresh=1 (or the Shortcuts parameter "refresh") to update the widget
 // summary without showing the digest, e.g. from a Shortcuts automation that runs Scriptable in-app.
@@ -3011,13 +3189,14 @@ document.addEventListener('click',function(e){
 // ───────────── entry point (last, so every const above is initialised) ─────────────
 
 await loadSettings();   // before every branch: app, widget and Shortcuts runs all use the saved choices
-aiMigrate(['strava-digest-openai-key'], LEGACY_AI_MODEL);   // 1.8.x kept one OpenAI key and model elsewhere
 const wantsRefreshOnly = !!(qp.refresh || args.shortcutParameter === 'refresh');
 if (config.runsInWidget || config.runsInAccessoryWidget) {
-  await renderWidget();
+  await runWidget();             // never builds or presents a WebView, Alert or QuickLook
 } else if (wantsRefreshOnly) {
   try { await refreshOnly(); } catch (e) { console.error(e); }
 } else {
+  widgetIcon();                  // caches the logo tile for the widget, in the background
+  aiMigrate(['strava-digest-openai-key'], LEGACY_AI_MODEL);   // 1.8.x kept one OpenAI key and model elsewhere
   try { await main(); }
   catch (e) {
     const a = new Alert(); a.title = 'Strava digest'; a.message = String(e.message || e);

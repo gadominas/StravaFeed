@@ -43,7 +43,7 @@ The bigger your feed, the more time it saves.
 | 💬 **Comment in place** | Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands. |
 | 🗺 **Activity details** | Tap an activity's title or **↗** for a details sheet: route map, all stats, PRs, description, larger photos, kudos and comments. From there you can also open it in the Strava app or on Strava's website. |
 | 🎬 **Launch screen** | The digest opens on its logo for 2.4 seconds: the route draws itself from start to finish, then "Catch up. Cheer. Move on." Tap to skip; with Reduce Motion it appears without movement. It is the shared [launch-screen](https://github.com/gadominas/app-blueprints/blob/main/blueprints/launch-screen.md) blueprint, so all the apps start the same way. |
-| 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who. |
+| 📲 **Kudos widget** | A Home Screen and Lock Screen widget shows how many people are waiting for your kudos today, and who, under the Daily Digest logo. It is the shared [widgets](https://github.com/gadominas/app-blueprints/blob/main/blueprints/widgets.md) blueprint, so all the apps' widgets look alike. |
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
@@ -99,7 +99,7 @@ Either of these works:
 
 ### Optional: kudos widget
 
-The widget shows how many people are still waiting for your kudos today. The medium and large sizes also list their names. Tapping it opens the digest.
+The widget shows how many people are still waiting for your kudos today, under the Daily Digest logo on its dark tile. The medium size also lists up to three of them with their sport and early-riser badge; the large size lists more and adds the day's PRs and early risers. Lock Screen widgets come in inline, circular and rectangular kinds. Tapping it opens the digest.
 
 <p align="center"><img src="docs/screenshots/07-kudos-widget.png" width="420" alt="Medium kudos widget: 8 people waiting for kudos, with their sports and early-riser badges"></p>
 
@@ -108,7 +108,7 @@ The widget shows how many people are still waiting for your kudos today. The med
 
 Lock Screen widgets are added the same way under **Customize → Lock Screen**.
 
-Widgets can't use your Strava login, so the widget shows the summary the digest saves each time it loads today's feed and each time you give kudos. To update it automatically, create a Shortcuts automation, for example at 8:00 and 18:00, with Scriptable's **Run Script** action. Choose *Strava Daily Digest*, set the parameter to `refresh`, and turn **Run In App** on.
+Widgets can't use your Strava login, so the widget shows the summary the digest saves on this iPhone each time it loads today's feed and each time you give kudos. It never shows an error and works offline; when the summary is older than the time set in **Settings › Widget**, the bottom line turns amber and says when it was updated. To update it automatically, create a Shortcuts automation, for example at 8:00 and 18:00, with Scriptable's **Run Script** action. Choose *Strava Daily Digest*, set the parameter to `refresh`, and turn **Run In App** on.
 
 ## First run
 
@@ -143,7 +143,7 @@ Everything you might want different is in the app: tap the sliders icon in the h
 | AI comments | AI settings (keys, models, token usage), default mood, custom prompt, language |
 | Updates | Offer new versions, check now |
 | Reading the feed | Feed pages read for today, extra pages per earlier day, activities opened at once, time limits |
-| Digest, Comments, Widget, Account | Days in the header, comment ideas per tap, widget refresh, your Strava athlete ID |
+| Digest, Comments, Widget, Account | Days in the header, comment ideas per tap, widget refresh and when it counts as out of date, your Strava athlete ID |
 | Built with | The shared blueprints this app follows, with links (read-only) |
 
 Two values stay in code, in the `DIGEST` block at the top of `Strava Daily Digest.js`: `DAYS_BACK` (the day shown first; you can also run the script with `?days=1`) and `DEBUG_DUMP` (saves the raw feed for troubleshooting).
@@ -152,7 +152,7 @@ Two values stay in code, in the `DIGEST` block at the top of `Strava Daily Diges
 
 The digest checks this repository for a newer version each time it opens. If there is one, it shows what's new and offers **Update now**. **Later**, or tapping outside, hides the reminder for two days. You can also update any time by running the installer again.
 
-See [CHANGELOG.md](CHANGELOG.md) for every release. This app follows the shared [app blueprints](https://github.com/gadominas/app-blueprints) (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)): in-app updates, settings, AI configuration and launch screen. **Settings › Built with** lists them with their versions; docs/BLUEPRINTS.md adds the deviations. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
+See [CHANGELOG.md](CHANGELOG.md) for every release. This app follows the shared [app blueprints](https://github.com/gadominas/app-blueprints) (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)): in-app updates, settings, AI configuration, launch screen and widgets. **Settings › Built with** lists them with their versions; docs/BLUEPRINTS.md adds the deviations. Maintainers: release notes live in [`releases.json`](releases.json); see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Privacy and security
 
@@ -180,7 +180,7 @@ Strava's official API doesn't provide the feed of the people you follow, and it 
 | A day shows nobody | Read the grey note under **Check again**: it shows how far the feed was read and why it stopped |
 | An activity shows only a date, no time | Strava didn't share a start time; it usually appears once details finish loading |
 | The Strava app says "Something went wrong" | Use the details sheet (tap the title or **↗**) instead. This is an issue in the Strava app when it's opened from a link. |
-| The widget says "Tap to load today" | Open the digest once today; the widget updates from it |
+| The widget says "Open to load today" | Open the digest once today; the widget updates from it |
 | "Comment not posted" | Check the activity in Strava before retrying, to avoid posting twice |
 | ✨ Suggest fails or asks for a key | Open **⚙︎ › AI settings**, tap **Test connection**, and replace the key with **Change key** if it was rejected |
 
