@@ -39,7 +39,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.13.0';
+const VERSION = '1.14.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -93,6 +93,7 @@ async function main() {
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
   let viewing = false, savedScroll = 0;
+  let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
   // Show the update pitch over the digest (it is re-shown after day switches until answered).
   const offerUpdate = () => { if (pendingUpdate && !viewing && !closed) js(`window.__showUpdate && window.__showUpdate(${JSON.stringify(pendingUpdate)})`); };   // true while a Strava activity page is shown inside the digest
@@ -178,14 +179,29 @@ async function main() {
       acts.forEach(a => { if (details.has(a.id)) mergeDetails(a, details.get(a.id)); derive(a); });
       viewing = false;
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
-      await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length }));
+      await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList() }));
       saveSnapshot(feed);
       offerUpdate();
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
+      fillMine(token).catch(e => console.warn('Your activities: ' + e));
     } catch (e) {
       if (token !== viewToken) return;
       await ui.loadHTML(page(`${appHeader(daysBack, 0, 0)}<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="refresh">Try again</button></div>`));
     }
+  }
+
+  // Your latest activities (today and yesterday, newest first, at most three).
+  function mineList() {
+    if (!feed) return [];
+    return feed.mine(+dayBounds(1).dayStart, +dayBounds(0).dayEnd).slice(0, 3);
+  }
+  // Today's view may not have read back to yesterday: do it quietly, then refresh the strip.
+  async function fillMine(token) {
+    const y = dayBounds(1);
+    if (feed.covers(+y.dayStart)) return;
+    await feed.readBackTo(+y.dayStart, async () => {}, () => token !== viewToken || closed);
+    if (token !== viewToken || closed) return;
+    await js(`window.__patchMine(${JSON.stringify(mineHtml(mineList()))})`);
   }
 
   async function enrich(acts, token, dayStart, dayEnd) {
@@ -288,6 +304,33 @@ async function main() {
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
     if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
+    if (head === 'mine-open') {
+      const a = feed.mineGet(String(p.id));
+      let data = { ok: false };
+      if (a) {
+        let soc = { kudoers: [], comments: [] };
+        try { soc = (await sx(`__SD.social(${JSON.stringify(String(p.id))})`, cfg('detailsWait') * 1000)) || soc; } catch (e) { console.warn('Kudos and comments: ' + e.message); }
+        const kudoers = soc.kudoers && soc.kudoers.length ? soc.kudoers : (a.kudoers || []);
+        const comments = soc.comments && soc.comments.length ? soc.comments : (a.cmts || []);
+        if (comments.length > (a.comments || 0)) a.comments = comments.length;
+        data = {
+          ok: true, id: a.id, name: a.name || a.type, emoji: emoji(a.type), line: mineLine(a),
+          kudos: Math.max(a.kudos || 0, kudoers.length), commentCount: Math.max(a.comments || 0, comments.length),
+          kudoers, comments: comments.map(c => Object.assign({}, c, { ago: agoLabel(c.at) })), likeable: !likeUnsupported,
+        };
+      }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${!!data.ok}, ${JSON.stringify(JSON.stringify(data))})`);
+      return;
+    }
+    if (head === 'comment-like') {
+      let r;
+      try { r = await likeComment(sx, String(p.aid), String(p.cid || ''), String(p.text || ''), p.on === '1'); }
+      catch (e) { r = { ok: false, error: e.message }; }
+      if (r.unsupported) likeUnsupported = true;
+      if (r.via) console.log('Comment like sent via ' + r.via);
+      await js(`window.__done(${JSON.stringify(p.req)}, ${!!r.ok}, ${JSON.stringify(r.ok ? '' : (r.unsupported ? 'UNSUPPORTED' : (r.error || 'Like not sent')))})`);
+      return;
+    }
     let ok = false, msg = '';
     try {
       if (head === 'kudo') {
@@ -595,7 +638,7 @@ async function aiSuggest(a, language, hint, mode, custom) {
 // Everything read from the feed so far, newest first. Older days continue from where the last read stopped.
 function makeFeed(sx, me, first) {
   let st;
-  const reset = () => { st = { items: new Map(), next: null, position: null, oldest: null, done: false, stop: '', pages: 0, entries: 0, seenFirst: new Set(), raws: [] }; };
+  const reset = () => { st = { items: new Map(), mine: new Map(), next: null, position: null, oldest: null, done: false, stop: '', pages: 0, entries: 0, seenFirst: new Set(), raws: [] }; };
   const absorb = (r) => {
     st.pages++; st.entries += r.entryCount || 0;
     if (r.raw) st.raws.push(r.raw);
@@ -603,6 +646,7 @@ function makeFeed(sx, me, first) {
     if (r.firstId != null) st.seenFirst.add(r.firstId);
     for (const a of r.items) {
       if (!a.id || a.id === 'undefined') continue;
+      if (a.athleteId === me) { derive(a); st.mine.set(a.id, a); }   // your own: for the strip on top
       if (!settings.includeMe && a.athleteId === me) continue;
       derive(a);
       st.items.set(a.id, a);
@@ -635,6 +679,8 @@ function makeFeed(sx, me, first) {
     },
     day: (from, to) => [...st.items.values()].filter(a => a.ts != null && a.ts >= from && a.ts < to),
     get: (id) => st.items.get(id),
+    mine: (from, to) => [...st.mine.values()].filter(a => a.ts != null && a.ts >= from && a.ts < to).sort((x, y) => y.ts - x.ts),
+    mineGet: (id) => st.mine.get(id),
     update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
     scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
   };
@@ -880,6 +926,50 @@ async function postComment(sx, id, text) {
     return r;
   } finally {
     try { await cv.loadHTML('<html></html>'); } catch (e) {}  // drop Strava's heavy page right away
+    cv = null;
+  }
+}
+
+// ─────────────── liking a comment on your own activity ───────────────
+// Same pattern as posting comments: replay the request Strava's page sent last time,
+// otherwise press Strava's own like button on the activity page and learn that request.
+
+const KC_CLIKE_TPL = 'strava-digest-comment-like-request';
+
+function readLikeTemplates() {
+  try { return Keychain.contains(KC_CLIKE_TPL) ? JSON.parse(Keychain.get(KC_CLIKE_TPL)) : {}; } catch (e) { return {}; }
+}
+
+function learnLikeRequest(req, aid, cid, on) {
+  if (!req || !req.url || !cid) return;
+  const sub = (x) => String(x || '')
+    .replace(new RegExp(`(^|[^0-9])${cid}(?![0-9])`, 'g'), '$1{{CID}}')
+    .replace(new RegExp(`(^|[^0-9])${aid}(?![0-9])`, 'g'), '$1{{ID}}');
+  const url = sub(req.url), body = req.body ? sub(String(req.body).replace(/(authenticity_token=)[^&]*/, '$1{{CSRF}}')) : '';
+  if (!url.includes('{{CID}}') && !body.includes('{{CID}}')) return;   // can't tell which comment it targets
+  const all = readLikeTemplates();
+  all[on ? 'like' : 'unlike'] = { method: req.method || 'POST', url, body, ct: req.ct || '' };
+  Keychain.set(KC_CLIKE_TPL, JSON.stringify(all));
+  console.log(`Learned Strava's comment ${on ? 'like' : 'unlike'} request: ${req.method} ${url}`);
+}
+
+async function likeComment(sx, aid, cid, text, on) {
+  const all = readLikeTemplates(), tpl = all[on ? 'like' : 'unlike'];
+  if (tpl && cid) {
+    const r = await sx(`__SD.likeDirect(${JSON.stringify(tpl)}, ${JSON.stringify(aid)}, ${JSON.stringify(cid)})`, cfg('pageWait') * 1000);
+    if (r.ok || !r.definite) return r;                  // done, or unclear: never risk a double toggle
+    delete all[on ? 'like' : 'unlike']; Keychain.set(KC_CLIKE_TPL, JSON.stringify(all));   // Strava changed: relearn
+  }
+  let cv = new WebView();
+  cv.shouldAllowRequest = req => /^(https?:|about:)/i.test((req && req.url) || '');
+  try {
+    const cx = makeSx(cv);
+    await openStrava(cv, `/activities/${encodeURIComponent(aid)}`);
+    const r = await cx(`__SD.likeCommentViaUI(${JSON.stringify(text)}, ${!!on})`, cfg('detailsWait') * 1000);
+    if (r.ok && r.req) learnLikeRequest(r.req, aid, cid, on);
+    return r;
+  } finally {
+    try { await cv.loadHTML('<html></html>'); } catch (e) {}   // release Strava's heavy page at once
     cv = null;
   }
 }
@@ -1546,6 +1636,7 @@ function stravaLib() {
       description: SD.text(a.description || ''),
       stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a),
       kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
+      cmts: f.cmts || [], kudoers: f.kudoers || [],
     };
   };
 
@@ -1560,6 +1651,7 @@ function stravaLib() {
         athleteName: ath.athleteName || ath.name || [ath.firstName, ath.lastName].filter(Boolean).join(' '),
         kudos: kc.kudosCount, comments: kc.commentCount != null ? kc.commentCount : (Array.isArray(kc.comments) ? kc.comments.length : 0),
         hasKudoed: kc.hasKudoed, canKudo: kc.canKudo, photoSrc: a.mapAndPhotos || a,
+        cmts: SD.commentsFrom(kc), kudoers: SD.peopleFrom(kc),
       }));
     }
     const group = (e.rowData && e.rowData.activities) || e.activities || (e.groupActivity && e.groupActivity.activities);
@@ -1768,6 +1860,152 @@ function stravaLib() {
     };
   };
 
+  // ── your own activities: who gave kudos, the comments, and liking a comment ──
+  SD.nameOf = (o) => {
+    if (!o || typeof o !== 'object') return '';
+    const n = o.athleteName || o.athlete_name || o.displayName || o.display_name || o.fullName || o.full_name || o.name
+      || [o.firstName || o.firstname || o.first_name, o.lastName || o.lastname || o.last_name].filter(Boolean).join(' ');
+    return SD.text(typeof n === 'string' ? n : '');
+  };
+  SD.avatarOf = (o) => {
+    const v = o && (o.avatarUrl || o.avatar_url || o.avatar || o.profile_medium || o.profileMedium || o.profile || o.picture || o.imageUrl);
+    return typeof v === 'string' && /^https?:/.test(v) ? v : '';
+  };
+  SD.person = (o) => {
+    const a = (o && (o.athlete || o.user || o.owner)) || o;
+    const name = SD.nameOf(a);
+    return name ? { id: String(a.id || a.athleteId || a.athlete_id || ''), name, avatar: SD.avatarOf(a) } : null;
+  };
+  // The longest list of people found under a key matching rx (kudos givers, by default).
+  SD.peopleFrom = (o, rx) => {
+    const keyRx = rx || /kudo|athletes|people|users|givers/i;
+    let best = [];
+    const take = (v) => { const list = v.map(SD.person).filter(Boolean); if (list.length > best.length) best = list; };
+    if (Array.isArray(o)) take(o);
+    // an array counts when its own key, or any key above it, matches (kudos: { athletes: [...] })
+    const walk = (v, inside, depth) => {
+      if (!v || typeof v !== 'object' || depth > 12) return;
+      if (Array.isArray(v)) { v.forEach(x => walk(x, inside, depth + 1)); return; }
+      for (const k of Object.keys(v)) {
+        const x = v[k], hit = inside || keyRx.test(k);
+        if (hit && Array.isArray(x) && x.length && x[0] && typeof x[0] === 'object') take(x);
+        walk(x, hit, depth + 1);
+      }
+    };
+    walk(o, false, 0);
+    const seen = new Set();
+    return best.filter(x => { const key = x.id || x.name; if (seen.has(key)) return false; seen.add(key); return true; });
+  };
+  SD.peopleFromHtml = (html) => {
+    const out = [], seen = new Set(), re = /<a[^>]+href="\/athletes\/(\d+)"[^>]*>([\s\S]{0,600}?)<\/a>/gi;
+    let m;
+    while ((m = re.exec(html))) {
+      const inner = m[2], alt = inner.match(/\balt="([^"]+)"/i) || inner.match(/\btitle="([^"]+)"/i);
+      const name = SD.text(alt ? alt[1] : inner);
+      if (!name || name.length > 60 || seen.has(m[1])) continue;
+      const src = inner.match(/\bsrc="(https?:[^"]+)"/i);
+      seen.add(m[1]); out.push({ id: m[1], name, avatar: src ? src[1] : '' });
+    }
+    return out;
+  };
+  SD.commentsFrom = (o) => {
+    const conv = (c) => {
+      if (!c || typeof c !== 'object') return null;
+      const text = SD.text(c.text || c.body || c.content || c.comment || c.message || '');
+      const who = SD.person(c.athlete || c.user || c.author || c.commenter || c);
+      if (!text || !who) return null;
+      const likes = +(c.reactionCount ?? c.reaction_count ?? c.kudosCount ?? c.kudos_count ?? c.likeCount ?? c.likes ?? 0) || 0;
+      const liked = !!(c.hasReacted ?? c.has_reacted ?? c.reacted ?? c.hasKudoed ?? c.kudosed ?? c.liked ?? false);
+      const at = Date.parse(c.createdAt || c.created_at || c.timestamp || c.date || '');
+      return { id: String(c.id ?? c.commentId ?? c.comment_id ?? ''), text, name: who.name, avatar: who.avatar, athleteId: who.id, likes, liked, at: isNaN(at) ? null : at };
+    };
+    let best = [];
+    const take = (v) => { const list = v.map(conv).filter(Boolean); if (list.length > best.length) best = list; };
+    if (Array.isArray(o)) take(o);
+    SD.walk(o, (k, v) => { if (Array.isArray(v) && v.length && /comment/i.test(k)) take(v); });
+    return best;
+  };
+  SD.getAny = async (path) => {
+    try {
+      const r = await fetch(path, { credentials: 'include', headers: XHR });
+      if (!r.ok) return null;
+      const t = await r.text();
+      try { return JSON.parse(t); } catch (e) { return { __html: t }; }
+    } catch (e) { return null; }
+  };
+  // Who gave kudos and the comments for one activity, from whichever Strava source answers.
+  SD.social = async (id) => {
+    const out = { kudoers: [], comments: [], from: [] };
+    for (const path of [`/feed/activity/${id}/kudos`, `/activities/${id}/kudos`]) {
+      const d = await SD.getAny(path);
+      if (!d) continue;
+      const list = d.__html ? SD.peopleFromHtml(d.__html) : SD.peopleFrom(d);
+      if (list.length) { out.kudoers = list; out.from.push(path); break; }
+    }
+    for (const path of [`/feed/activity/${id}/comments`, `/activities/${id}/comments`]) {
+      const d = await SD.getAny(path);
+      if (!d || d.__html) continue;
+      const list = SD.commentsFrom(d);
+      if (list.length) { out.comments = list; out.from.push(path); break; }
+    }
+    if (!out.kudoers.length || !out.comments.length) {
+      const d = await SD.getAny(`/activities/${id}`);
+      const html = d && d.__html ? d.__html : '';
+      const nd = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+      let j = null;
+      try { if (nd) j = JSON.parse(nd[1]); } catch (e) {}
+      if (j && !out.kudoers.length) { const list = SD.peopleFrom(j, /kudo/i); if (list.length) { out.kudoers = list; out.from.push('page'); } }
+      if (j && !out.comments.length) { const list = SD.commentsFrom(j); if (list.length) { out.comments = list; out.from.push('page'); } }
+    }
+    return out;
+  };
+  // Replays the like request Strava's page sent before (learned once, like comment posting).
+  SD.likeDirect = async (tpl, aid, cid) => {
+    const token = await SD.csrf();
+    const fill = (x) => String(x || '').split('{{CID}}').join(cid).split('{{ID}}').join(aid).split('{{CSRF}}').join(encodeURIComponent(token || ''));
+    const headers = Object.assign({}, XHR, { 'X-CSRF-Token': token });
+    if (tpl.ct) headers['Content-Type'] = tpl.ct;
+    let r;
+    try { r = await fetch(fill(tpl.url), { method: tpl.method, credentials: 'include', headers, body: tpl.body ? fill(tpl.body) : undefined }); }
+    catch (e) { return { ok: false, error: String(e), definite: false }; }
+    if (r.ok) return { ok: true, via: `direct ${r.status}` };
+    return { ok: false, error: `HTTP ${r.status}`, definite: r.status >= 400 && r.status < 500 };
+  };
+  // Likes (or unlikes) one comment with Strava's own button on the activity page.
+  SD.likeCommentViaUI = async (text, on) => {
+    SD.hookNet();
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+    const want = norm(text).slice(0, 60);
+    const find = () => {
+      const els = [...document.querySelectorAll('li, article, div, section')].filter(el => visible(el) && norm(el.textContent).includes(want));
+      els.sort((a, b) => a.textContent.length - b.textContent.length);
+      return els[0] || null;
+    };
+    let el = await SD.waitFor(find, 8000);
+    if (!el) {
+      const more = [...document.querySelectorAll('button, a, [role="button"]')].find(b => visible(b) && COMMENT_RX.test(describe(b)));
+      if (more) { more.click(); el = await SD.waitFor(find, 5000); }
+    }
+    if (!el) return { ok: false, error: 'that comment wasn’t found on Strava’s page' };
+    const LIKE_RX = /like|kudo|react|heart|patinka|patiko|gef.llt|j.aime/i;
+    // climb from the comment's text to its own like button; stop when more than one is in reach,
+    // so a neighbouring comment's button is never pressed by mistake
+    let btn = null, box = el;
+    for (let i = 0; i < 5 && box && !btn; i++, box = box.parentElement) {
+      const likes = [...box.querySelectorAll('button, [role="button"]')].filter(b => visible(b) && LIKE_RX.test(describe(b)) && !/reply|share|report|delete/i.test(describe(b)));
+      if (likes.length > 1) return { ok: false, error: 'couldn’t tell which like button belongs to that comment' };
+      btn = likes[0] || null;
+    }
+    if (!btn) return { ok: false, unsupported: true, error: 'Strava shows no like button for comments here' };
+    const pressed = (b) => b.getAttribute('aria-pressed') === 'true' || /\b(liked|selected|active|is-active|filled)\b/i.test(String(b.className));
+    if (pressed(btn) === on) return { ok: true, via: 'already' };
+    window.__SDnet.length = 0;
+    btn.click();
+    const req = await SD.waitFor(() => window.__SDnet.find(r => r.method !== 'GET' && r.status), 10000);
+    if (req && req.status >= 200 && req.status < 300) return { ok: true, via: `${req.method} ${req.url}`, req: { method: req.method, url: String(req.url), body: req.body || null, ct: req.ct || '' } };
+    return { ok: false, error: req ? `Strava answered HTTP ${req.status}` : 'Strava did not respond' };
+  };
+
   SD.findCommentBox = () => [...document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]')]
     .find(el => visible(el) && COMMENT_RX.test(describe(el)));
 
@@ -1889,7 +2127,41 @@ function summaryText(people, count) {
   return `${people.length} ${people.length === 1 ? 'person' : 'people'}, ${count} ${count === 1 ? 'activity' : 'activities'}${prs ? `, ${prs} PR${prs > 1 ? 's' : ''}` : ''}${birds ? `, ${birds} early riser${birds > 1 ? 's' : ''}` : ''}`;
 }
 
-function renderDigest({ dayStart, daysBack, scan, people, count }) {
+// "Today 06:42", "Yesterday 19:05"
+function mineWhen(a) {
+  const t = a.ts || a.start;
+  if (!t) return '';
+  const day = t >= +dayBounds(0).dayStart ? 'Today' : 'Yesterday';
+  return a.clock ? `${day} ${fmtClock(a.clock)}` : day;
+}
+function mineLine(a) {
+  const dist = a.km ? `${a.km.value.toFixed(1)} ${a.km.unit}` : ((a.stats || []).find(x => RX.time.test(x.label)) || {}).value;
+  const pace = ((a.stats || []).find(x => RX.pace.test(x.label)) || {}).value;
+  return [mineWhen(a), dist, pace].filter(Boolean).join(', ');
+}
+function agoLabel(t) {
+  if (!t) return '';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'now';
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+// Your latest activities, above everyone else's. Hidden when you have none today or yesterday.
+function mineHtml(list) {
+  if (!list || !list.length) return '<div id="mine" hidden></div>';
+  const tiles = list.map(a => {
+    const name = a.name || a.type || 'Activity', when = mineWhen(a);
+    const sub = list.length === 1 ? [when, a.km ? `${a.km.value.toFixed(1)} ${a.km.unit}` : ''].filter(Boolean).join(', ') : when;
+    return `<button class="mt" data-mine="${esc(a.id)}" data-name="${esc(name)}" data-emoji="${esc(emoji(a.type))}" data-line="${esc(mineLine(a))}" data-kudos="${+a.kudos || 0}" data-comments="${+a.comments || 0}" aria-label="${esc(name)}, ${+a.kudos || 0} kudos, ${+a.comments || 0} comments">
+      <span class="mic" aria-hidden="true">${emoji(a.type)}</span>
+      <span class="mtx"><b>${esc(name)}</b><small>${esc(sub)}</small></span>
+      <span class="mcn"><span>👍 <b>${+a.kudos || 0}</b></span><span>💬 <b>${+a.comments || 0}</b></span></span></button>`;
+  }).join('');
+  return `<section id="mine" class="n${list.length}" aria-label="Your activities"><div class="mineh"><span>Your activities</span><small>Today &amp; yesterday</small></div><div class="minet">${tiles}</div></section>`;
+}
+
+function renderDigest({ dayStart, daysBack, scan, people, count, mine }) {
   const df = new DateFormatter(); df.dateFormat = 'EEEE, d MMMM';
   const summary = summaryText(people, count);
   const open = people.filter(p => !p.kudoed && p.primary.canKudo).length;
@@ -1902,6 +2174,7 @@ function renderDigest({ dayStart, daysBack, scan, people, count }) {
   return page(`
     ${appHeader(daysBack, open, people.length)}
     <div class="top"><div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div></div>
+    ${mineHtml(mine || [])}
     ${body}
     <p class="ver">Daily Digest v${VERSION}</p>`);
 }
@@ -2215,6 +2488,70 @@ body.loading .loadst{display:block}
 .ktitle{color:#fff;font-size:calc(19px * var(--ts));font-weight:700;margin-top:22px}
 .ksub{color:rgba(255,255,255,.7);font-size:calc(14px * var(--ts));margin-top:4px;min-height:1.3em}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
+#mine{background:var(--card);border-radius:18px;padding:12px;margin:0 0 14px}
+#mine[hidden]{display:none}
+.mineh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 2px 10px}
+.mineh span{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut)}
+.mineh small{font-size:12px;color:var(--mut)}
+.minet{display:grid;gap:8px}
+#mine.n1 .minet{grid-template-columns:minmax(0,1fr)}
+#mine.n2 .minet{grid-template-columns:repeat(2,minmax(0,1fr))}
+#mine.n3 .minet{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mt{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:14px;background:var(--soft);color:var(--fg);text-align:left;font-weight:400}
+.mt .mic{width:30px;height:30px;border-radius:50%;background:var(--bg);display:grid;place-items:center;font-size:16px;flex:none}
+.mtx{display:flex;flex-direction:column;gap:2px;min-width:0;width:100%}
+.mtx b{font-size:calc(13px * var(--ts));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mtx small{font-size:calc(12px * var(--ts));color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mcn{display:flex;gap:10px;font-size:calc(13px * var(--ts));font-variant-numeric:tabular-nums;white-space:nowrap}
+#mine.n1 .mt{flex-direction:row;align-items:center;gap:12px}
+#mine.n1 .mt .mic{width:40px;height:40px;font-size:20px}
+#mine.n1 .mtx{flex:1;width:auto}
+#mine.n1 .mtx b{font-size:calc(15px * var(--ts))}
+#mine.n1 .mcn{font-size:calc(15px * var(--ts))}
+#mine.n2 .mt{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:4px;align-items:center}
+#mine.n2 .mt .mic{grid-row:span 2}
+#mine.n2 .mtx small{display:none}
+#mine.n3 .mt{padding:10px}
+#mine.n3 .mtx b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.25}
+#mine.n3 .mtx small{white-space:normal;line-height:1.25}
+#mine.n3 .mcn{gap:8px;flex-wrap:wrap;margin-top:auto}
+#msheet{position:fixed;inset:0;z-index:46;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
+#msheet[hidden]{display:none}
+.msp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
+.msgrab{width:40px;height:5px;border-radius:999px;background:var(--line);margin:8px auto 0;flex:none}
+.msh{display:flex;align-items:center;gap:12px;padding:10px 16px 14px;border-bottom:1px solid var(--line)}
+.msh .mic{width:42px;height:42px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-size:22px;flex:none}
+.mtt{flex:1;min-width:0}
+.mtt b{display:block;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mtt small{display:block;color:var(--mut);font-size:13px}
+.mbtn{width:40px;height:40px;border-radius:50%;padding:0;background:var(--soft);color:var(--fg);font-size:18px;flex:none}
+.msb{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px;display:flex;flex-direction:column;gap:18px}
+.msect{font-size:16px;margin-bottom:8px}
+.mbox{display:flex;align-items:center;gap:12px;width:100%;padding:12px;border-radius:14px;background:var(--card);color:var(--fg);text-align:left;font-weight:400;font-size:14px;line-height:1.35}
+.mbox.muted{color:var(--mut)}
+.mstack{display:flex;flex:none}
+.mstack .mavw{margin-left:-6px;box-shadow:0 0 0 2px var(--card);font-size:11px}
+.mstack .mavw:first-child{margin-left:0}
+.mkt{flex:1;min-width:0}
+.mall{color:var(--accent);font-weight:700;font-size:13px;white-space:nowrap}
+.mavw{position:relative;border-radius:50%;background:var(--soft);color:var(--mut);display:grid;place-items:center;font-weight:700;font-size:12px;flex:none;overflow:hidden}
+.mavw img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.mcom{display:flex;gap:10px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--line)}
+.mctx{flex:1;min-width:0}
+.mctx b{font-size:14px}
+.mctx small{color:var(--mut);font-size:12px;margin-left:4px}
+.mctx p{margin:3px 0 0;font-size:15px;line-height:1.35;word-break:break-word}
+.mheart{flex:none;min-width:52px;height:44px;border-radius:12px;background:transparent;color:var(--mut);display:flex;align-items:center;justify-content:center;gap:5px;padding:0 6px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.mheart svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.mheart.on{color:var(--accent)}
+.mheart.on svg{fill:currentColor}
+.mheart:disabled{background:transparent;opacity:.55}
+.mrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.mname{flex:1;min-width:0;font-weight:600;font-size:15px}
+.mtag{font-size:12px;color:var(--mut);font-weight:600;white-space:nowrap}
+.msf{padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);flex:none}
+.msf button{width:100%;padding:12px}
+.mnote{color:var(--mut);font-size:13px;margin:0}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
 .detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
@@ -2752,7 +3089,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -3025,6 +3362,76 @@ window.__aiChanged=function(s){
   var el=document.getElementById('s-aistatus'), P=s.usage.p[s.provider];
   if(el) el.textContent=s.hasKey?AI_PN[s.provider]+' — '+s.model[s.provider]+(P&&P.calls?' — '+aiFmtN(P.in+P.out)+' tokens used':''):'Add a Claude or OpenAI key for ✨ comment ideas';
 };
+// ── your activities: kudos and comments, without leaving the digest ──
+var MINE=null, MINEVIEW='main';
+var HEART='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+window.__patchMine=function(html){ var old=document.getElementById('mine'); if(!old) return; var t=document.createElement('template'); t.innerHTML=html.trim(); old.replaceWith(t.content.firstElementChild); };
+function initialsOf(n){ return String(n||'?').split(' ').filter(Boolean).map(function(w){ return w.charAt(0); }).join('').slice(0,2).toUpperCase(); }
+function avH(p,size){ return '<span class="mavw" style="width:'+size+'px;height:'+size+'px">'+escH(initialsOf(p.name))+(p.avatar?'<img src="'+escH(p.avatar)+'" alt="" onerror="this.remove()">':'')+'</span>'; }
+function mineSheet(){
+  var ov=document.getElementById('msheet');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='msheet'; ov.hidden=true;
+    ov.innerHTML='<div class="msp" role="dialog" aria-label="Your activity"><div class="msgrab"></div><div class="msh"></div><div class="msb"></div><div class="msf"><button class="ghost" data-act="mine-strava">Open in Strava</button></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',function(e){ if(e.target===ov) closeMine(); });
+  }
+  return ov;
+}
+function openMine(btn){
+  var ov=mineSheet(), id=btn.dataset.mine;
+  MINE={ id:id, name:btn.dataset.name, emoji:btn.dataset.emoji, line:btn.dataset.line, kudos:+btn.dataset.kudos||0, commentCount:+btn.dataset.comments||0, kudoers:[], comments:[], loading:true, likeable:true };
+  MINEVIEW='main'; renderMine(); ov.hidden=false; document.body.style.overflow='hidden';
+  send('mine-open',{id:id},function(ok,msg){
+    if(!MINE||MINE.id!==id) return;
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    if(ok&&d.ok){ d.loading=false; MINE=d; } else { MINE.loading=false; MINE.failed=true; }
+    renderMine();
+  });
+}
+function closeMine(){ var ov=document.getElementById('msheet'); if(ov) ov.hidden=true; MINE=null; document.body.style.overflow=''; }
+function renderMine(){
+  var ov=document.getElementById('msheet'); if(!ov||!MINE) return;
+  var m=MINE, h=ov.querySelector('.msh'), b=ov.querySelector('.msb');
+  if(MINEVIEW==='kudos'){
+    h.innerHTML='<button class="mbtn" data-act="mine-back" aria-label="Back">‹</button><div class="mtt"><b>'+m.kudoers.length+' kudos</b><small>'+escH(m.name)+'</small></div>';
+    b.innerHTML='<div>'+m.kudoers.map(function(p){
+      var com=m.comments.some(function(c){ return (c.athleteId&&c.athleteId===p.id)||c.name===p.name; });
+      return '<div class="mrow">'+avH(p,40)+'<span class="mname">'+escH(p.name)+'</span>'+(com?'<span class="mtag">💬 Commented</span>':'')+'</div>';
+    }).join('')+'</div>';
+    return;
+  }
+  h.innerHTML='<span class="mic" aria-hidden="true">'+escH(m.emoji||'')+'</span><div class="mtt"><b>'+escH(m.name)+'</b><small>'+escH(m.line||'')+'</small></div><button class="mbtn" data-act="mine-close" aria-label="Close">✕</button>';
+  var html='<div class="msec"><div class="msect">👍 <b>'+m.kudos+' kudos</b></div>';
+  if(m.loading) html+='<div class="mbox muted">Loading who gave kudos…</div>';
+  else if(m.kudoers.length){
+    var names=m.kudoers.slice(0,2).map(function(p){ return '<b>'+escH(p.name)+'</b>'; }).join(', '), rest=m.kudos-Math.min(2,m.kudoers.length);
+    html+='<button class="mbox" data-act="mine-all"><span class="mstack">'+m.kudoers.slice(0,5).map(function(p){ return avH(p,30); }).join('')+'</span><span class="mkt">'+names+(rest>0?' and '+rest+' other'+(rest>1?'s':''):'')+'</span><span class="mall">See all</span></button>';
+  } else html+='<div class="mbox muted">'+(m.kudos?'Strava didn’t share who gave kudos here. Open the activity in Strava to see them.':'No kudos yet.')+'</div>';
+  html+='</div><div class="msec"><div class="msect">💬 <b>'+m.commentCount+' comment'+(m.commentCount===1?'':'s')+'</b></div>';
+  if(m.loading) html+='<div class="mbox muted">Loading comments…</div>';
+  else if(m.comments.length) html+=m.comments.map(function(c,i){
+    return '<div class="mcom">'+avH(c,36)+'<div class="mctx"><b>'+escH(c.name)+'</b><small>'+escH(c.ago||'')+'</small><p>'+escH(c.text)+'</p></div>'+
+      '<button class="mheart'+(c.liked?' on':'')+'" data-clike="'+i+'"'+(m.likeable?'':' disabled')+' aria-pressed="'+(c.liked?'true':'false')+'" aria-label="'+(c.liked?'Unlike':'Like')+' comment by '+escH(c.name)+'">'+HEART+'<span>'+(c.likes||0)+'</span></button></div>';
+  }).join('');
+  else html+='<div class="mbox muted">'+(m.commentCount?'Strava didn’t share the comments here. Open the activity in Strava to read them.':'No comments yet.')+'</div>';
+  html+='</div>';
+  if(m.failed) html+='<p class="mnote">Couldn’t load the details from Strava. Pull to refresh, then try again.</p>';
+  b.innerHTML=html;
+}
+function likeMine(btn){
+  var c=MINE&&MINE.comments[+btn.dataset.clike]; if(!c||btn.disabled||c.busy) return;
+  var on=!c.liked; c.liked=on; c.likes=Math.max(0,(c.likes||0)+(on?1:-1)); c.busy=true; renderMine();
+  send('comment-like',{aid:MINE.id,cid:c.id||'',text:c.text,on:on?'1':'0'},function(ok,msg){
+    c.busy=false;
+    if(!ok){
+      c.liked=!on; c.likes=Math.max(0,(c.likes||0)+(on?-1:1));
+      if(msg==='UNSUPPORTED'){ if(MINE) MINE.likeable=false; toast('Strava doesn’t offer liking comments here, so the hearts are read-only.'); }
+      else toast('Like not sent: '+(msg||'unknown error'));
+    }
+    renderMine();
+  });
+}
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
 document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
 (function(){
@@ -3124,6 +3531,12 @@ document.addEventListener('click',function(e){
   }
   var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
   if(t.dataset.detail) return openDetail(t.dataset.detail);
+  if(t.dataset.mine) return openMine(t);
+  if(t.dataset.clike!==undefined) return likeMine(t);
+  if(t.dataset.act==='mine-close') return closeMine();
+  if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
+  if(t.dataset.act==='mine-back'){ MINEVIEW='main'; renderMine(); return; }
+  if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
   if(t.dataset.act==='det-close') return closeDetail();
   if(t.dataset.act==='det-app') return send('activity',{id:document.getElementById('det').dataset.id});
   if(t.dataset.act==='det-web'){ var did=document.getElementById('det').dataset.id; closeDetail(); return send('view',{id:did,y:Math.round(window.scrollY)}); }

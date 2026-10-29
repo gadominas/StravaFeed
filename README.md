@@ -47,6 +47,7 @@ The bigger your feed, the more time it saves.
 | ⬇️ **Pull to refresh** | Drag the digest down at the top to reload today's feed. |
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
+| 🏃 **Your activities on top** | Your latest activities sit above everyone else's, with the kudos and comments you received. Tap one to see who gave kudos, read the comments and like them, without opening the Strava app. |
 | 🔎 **Peek, then expand** | In the Compact and Tiny layouts, every line shows distance, pace, trophies and photo counts. Tap to open the full activity in place. |
 | ⚙️ **Settings in the app** | Tap the sliders icon in the header: colours (six palettes or Auto), layout (Comfortable, Compact with tap-to-expand cards, or one-line Tiny), text size and font, plus the digest's own choices and tunables, each with Reset. Changes apply at once. |
 | 🤖 **Claude or OpenAI** | **⚙︎ › AI settings**: add a Claude or OpenAI key, pick any model your key can use, test the connection and see your token usage per day, feature and model. |
@@ -69,6 +70,10 @@ The bigger your feed, the more time it saves.
   <img src="docs/screenshots/11-kudos-celebration.png" width="230" alt="Kudos to everyone: thumbs flying from the centre to each athlete's photo">
   <img src="docs/screenshots/12-settings.png" width="230" alt="Settings: colours, layout, text size, font and digest options">
   <img src="docs/screenshots/13-update-offer.png" width="230" alt="Update offer showing the new version's three best features">
+</p>
+<p align="center">
+  <img src="docs/screenshots/14-your-activities.png" width="230" alt="Your activities strip on top of the digest: three of your own activities with kudos and comments received">
+  <img src="docs/screenshots/15-kudos-and-comments.png" width="230" alt="Your activity's sheet: who gave kudos, and comments you can like">
 </p>
 
 ## Requirements
