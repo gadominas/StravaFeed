@@ -48,6 +48,7 @@ The bigger your feed, the more time it saves.
 | 🏃 **Fun loading screen** | While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read. |
 | 🔔 **Update reminders** | When a new version is out, the digest shows its three best features and offers a one-tap update. **Later** hides the reminder for two days. |
 | 🏃 **Your activities on top** | Your latest activities sit above everyone else's, with the kudos and comments you received. Tap one to see who gave kudos, read the comments and like them, without opening the Strava app. |
+| 💬 **Comments that sound like you** | 💬 opens a composer with AI ideas and one-tap rewrites of your draft. Set your instructions once in Settings, and let ✨ My style learn how you write from your own past comments. |
 | 🔎 **Peek, then expand** | In the Compact and Tiny layouts, every line shows distance, pace, trophies and photo counts. Tap to open the full activity in place. |
 | ⚙️ **Settings in the app** | Tap the sliders icon in the header: colours (six palettes or Auto), layout (Comfortable, Compact with tap-to-expand cards, or one-line Tiny), text size and font, plus the digest's own choices and tunables, each with Reset. Changes apply at once. |
 | 🤖 **Claude or OpenAI** | **⚙︎ › AI settings**: add a Claude or OpenAI key, pick any model your key can use, test the connection and see your token usage per day, feature and model. |
@@ -74,6 +75,10 @@ The bigger your feed, the more time it saves.
 <p align="center">
   <img src="docs/screenshots/14-your-activities.png" width="230" alt="Your activities strip on top of the digest: three of your own activities with kudos and comments received">
   <img src="docs/screenshots/15-kudos-and-comments.png" width="230" alt="Your activity's sheet: who gave kudos, and comments you can like">
+</p>
+<p align="center">
+  <img src="docs/screenshots/16-comment-composer.png" width="230" alt="Comment composer: a draft, Improve my draft rewrites and AI moods including My style">
+  <img src="docs/screenshots/17-comment-writing-settings.png" width="230" alt="Settings, Comment writing: instructions for every AI comment, comments to learn from and the learned style">
 </p>
 
 ## Requirements

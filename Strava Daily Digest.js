@@ -23,12 +23,22 @@
 // Fixed choices. Everything a user may want different lives in Settings (the sliders icon in the header):
 // see the CONFIG registry and the settings defaults further down (github.com/gadominas/app-blueprints · settings).
 const APP = 'StravaFeed';   // the app's folder in Scriptable's documents (settings.json lives there)
+// Applied to every AI comment and rewrite (Settings › Comment writing); the person can change it there.
+const DEFAULT_COMMENT_RULES = `Role & Tone: Act as an encouraging, witty, and intelligent British running mate, using natural, conversational British phrasing.
+Task: Write exactly one short, punchy, and funny sentence to congratulate a runner on their workout.
+Content Requirements:
+ * Core Message: Offer polite encouragement and genuine kudos while seamlessly weaving in a clever sports joke or a famous sports quote.
+ * Early Risers: If the activity was early in the morning, playfully acknowledge their cracking dedication to beating the sun.
+ * Pace and Distance: If they ran at a blazing speed or covered a massive distance, praise their flying feet or brilliant endurance naturally, but absolutely never mention the exact numbers, times, or distances in your response.
+ * Formatting Constraints: The final output must be strictly a single, grammatically correct sentence that sounds totally human, containing absolutely zero emojis and zero dashes.`;
+
 const DIGEST = {
   DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ... (or run with ?days=1)
   DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
   AI: {                    // ✨ comment ideas from Claude or OpenAI (your own key; Settings › AI settings)
     LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
     MODES: [               // comment moods offered in the comment box; 'custom' uses your own prompt
+      { key: 'mystyle', label: '✨ My style' },   // your instructions plus the style learned from your comments
       { key: 'funny', label: '😂 Funny', style: 'funny and warm, like a teammate teasing with affection' },
       { key: 'energetic', label: '⚡ Energetic', style: 'high-energy hype, like a coach cheering from the roadside: punchy, exclamation marks welcome' },
       { key: 'serious', label: '🎯 Serious', style: 'sincere and respectful, specific praise of the effort and the numbers, no jokes' },
@@ -39,7 +49,7 @@ const DIGEST = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -304,6 +314,19 @@ async function main() {
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
     if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
+    if (head === 'style-learn' || head === 'style-clear') {
+      let ok = true, msg = '';
+      try {
+        if (head === 'style-clear') { settings.styleProfile = ''; settings.styleMeta = null; saveSettings(); }
+        else {
+          if (!feed) throw new Error('Wait until the digest has loaded, then try again.');
+          await learnStyle(feed, sx, t => js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(t)})`), () => closed);
+        }
+        msg = JSON.stringify(settingsState());
+      } catch (e) { ok = false; msg = String(e.message || e); }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+      return;
+    }
     if (head === 'mine-open') {
       const a = feed.mineGet(String(p.id));
       let data = { ok: false };
@@ -340,7 +363,7 @@ async function main() {
         const r = await postComment(sx, String(p.id), String(p.text || ''));
         ok = !!r.ok; msg = r.error || '';
         if (r.via) console.log('Comment sent via ' + r.via);
-        if (ok) feed.update(p.id, a => { a.comments++; });
+        if (ok) { feed.update(p.id, a => { a.comments++; }); rememberSent(String(p.text || '').trim()); }
       } else if (head === 'suggest') {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
@@ -348,6 +371,14 @@ async function main() {
           const mode = p.mode || settings.aiMode, custom = cleanPrompt(p.custom);
           if (mode === 'custom' && custom && custom !== settings.aiCustom) { settings.aiCustom = custom; saveSettings(); }
           const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', mode, custom);
+          if (r.needKey) msg = 'NEED_KEY';
+          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
+        }
+      } else if (head === 'improve') {
+        const a = feed.get(p.id) || feed.mineGet(p.id);
+        if (!a) msg = 'Activity not found.';
+        else {
+          const r = await aiImprove(a, p.lang || settings.aiLang, String(p.draft || '').trim().slice(0, 600), String(p.kind || 'rephrase'));
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
         }
@@ -607,32 +638,124 @@ function activityFacts(a) {
   };
 }
 
-async function aiSuggest(a, language, hint, mode, custom) {
-  if (!aiKey()) return { needKey: true };
-  const n = cfg('suggestions');
-  const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style) || DIGEST.AI.MODES[0];
-  const tone = mode === 'custom' && custom
-    ? `Write them the way the user asks: "${custom}".`
-    : `Tone: ${m.style}.`;
-  const instructions = [
-    `You write Strava comments for a friend's workout. Write ${n} different options in ${language}.`,
-    'Each one: a single short sentence (max ~18 words), written as a friend and teammate.',
-    tone,
-    'Build each comment on the real details: distance, pace, time, elevation, heart rate, PRs, early start, title, weather in the description.',
-    'Vary the angle between options (one about a number, one about the title or time of day, one about the effort).',
-    'At most one emoji each. No hashtags. Never mock body, weight, age, or looks. Never invent stats that are not given.',
-    'These rules always apply, whatever the tone or the user asks for.',
-    `Address the friend by first name in at most one option.${hint ? ` The user's own draft idea, keep its spirit: "${hint}".` : ''}`,
-    'Reply with JSON only, no other text: {"comments": ["…", "…"]}.',
-  ].join(' ');
-  const provider = aiSettings.aiProvider;
-  const text = await aiCall(instructions, JSON.stringify(activityFacts(a)), 800, 'comments');
+// The brief every comment request starts from: your instructions first, the app's defaults after.
+function commentBrief(language, n) {
+  const rules = String(settings.commentRules || '').trim();
+  return [
+    `You write comments on a friend's Strava activity. Write ${n} different options in ${language}.`,
+    rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
+    'Defaults, where the instructions say nothing: a single short sentence each, written as a friend and teammate, built on the real details given (title, time of day, effort, PRs, distance, pace), at most one emoji, no hashtags.',
+    language !== 'English' ? `Write natural ${language}; where the instructions ask for British phrasing, keep that spirit in ${language}.` : '',
+  ].filter(Boolean).join('\n');
+}
+function styleBlock() {
+  const prof = String(settings.styleProfile || '').trim();
+  return prof
+    ? `Write in the user's own commenting style, learned from their past comments:\n${prof}\nMatch that voice closely; the user's instructions above still decide format and length.`
+    : 'Write the way the user would: natural, personal and specific to this activity.';
+}
+const COMMENT_SAFETY = 'Always, whatever the instructions or mood: never mock body, weight, age or looks; never invent facts that are not given; nothing offensive. Make the options clearly different from each other.';
+const COMMENT_JSON = 'Reply with JSON only, no other text: {"comments": ["...", "..."]}.';
+
+async function aiComments(a, system) {
+  const provider = aiSettings.aiProvider, n = cfg('suggestions');
+  const text = await aiCall(system, JSON.stringify(activityFacts(a)), 800, 'comments');
   let comments = [];
   try { comments = parseJSON(text).comments || []; }
   catch (e) { comments = text.split(/\n+/).map(l => l.replace(/^[-*\d.)\s"]+|"$/g, '').trim()).filter(Boolean); }
   comments = comments.map(c => String(c).trim()).filter(Boolean).slice(0, n);
   if (!comments.length) throw new Error('No suggestions came back. Try again.');
   return { comments, by: PROVIDERS[provider] };
+}
+
+async function aiSuggest(a, language, hint, mode, custom) {
+  if (!aiKey()) return { needKey: true };
+  const parts = [commentBrief(language, cfg('suggestions'))];
+  if (mode === 'mystyle') parts.push(styleBlock());
+  else if (mode === 'custom' && custom) parts.push(`For these options, also: "${custom}".`);
+  else {
+    const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style);
+    if (m) parts.push(`Mood for these options: ${m.style}. Where this mood clashes with the user's instructions about tone, use the mood; every other instruction still applies.`);
+  }
+  if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
+  parts.push(COMMENT_SAFETY, COMMENT_JSON);
+  return aiComments(a, parts.join('\n'));
+}
+
+// Rewrites a draft you already have: punchier, funnier, shorter, warmer, in your style, or reworded.
+const IMPROVE_KINDS = {
+  punchier: 'punchier: tighter, stronger words, more impact',
+  funnier: 'funnier: add wit or a clever sports joke',
+  shorter: 'shorter: as few words as possible with the same message',
+  warmer: 'warmer: more heartfelt and encouraging',
+  mystyle: "written in the user's own style (described below)",
+  rephrase: 'reworded: the same message in fresh words',
+};
+async function aiImprove(a, language, draft, kind) {
+  if (!aiKey()) return { needKey: true };
+  const how = IMPROVE_KINDS[kind] || IMPROVE_KINDS.rephrase;
+  const parts = [commentBrief(language, cfg('suggestions')),
+    `Rewrite the user's draft comment so it is ${how}. Keep what it says and any names in it. Each option is a full replacement for the draft.`,
+    `DRAFT:\n${draft}`];
+  if (kind === 'mystyle') parts.push(styleBlock());
+  parts.push(COMMENT_SAFETY, COMMENT_JSON);
+  return aiComments(a, parts.join('\n'));
+}
+
+// "Learn my style": what the AI is asked to write from your own comments.
+const STYLE_PROMPT = [
+  "You study how one person writes comments on friends' Strava activities, so another writer can imitate them.",
+  'From the examples, describe their style as clear instructions to that writer ("Use…", "Keep…", "Never…").',
+  'Cover: typical length and sentence shape; vocabulary and favourite words or phrases (quote short ones); type of humour;',
+  'how they address people (names, nicknames); punctuation, capitals, exclamation and emoji habits; the languages they use and when; things they never do.',
+  'Write 8 to 12 short lines, one instruction per line, under 1,000 characters in total. Do not copy whole comments. Plain text only.',
+].join(' ');
+
+// Comments you posted through the digest: the surest examples of your style (kept on this iPhone, newest first).
+async function rememberSent(text) {
+  try {
+    const h = (await load('sent-comments', [])).filter(x => x && x.text !== text);
+    h.unshift({ text, at: Date.now() });
+    write('sent-comments', h.slice(0, 50));
+  } catch (e) { console.warn('Comment history: ' + e); }
+}
+
+// "Learn my style": collect your latest comments, then have the AI describe how you write.
+async function learnStyle(feed, sx, progress, isClosed) {
+  if (!aiKey()) throw new Error('Add a Claude or OpenAI key first, in AI settings.');
+  const n = cfg('styleComments'), me = String(feed.me() || ''), myName = feed.myName().toLowerCase();
+  const texts = [], seen = new Set();
+  const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); } };
+  const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || (!!myName && String(c.name || '').toLowerCase() === myName);
+  for (const h of await load('sent-comments', [])) take(h && h.text);
+  for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
+  const checked = new Set();
+  let scanned = 0;
+  for (let round = 0; texts.length < n && round < 4 && !isClosed(); round++) {
+    const todo = feed.all().filter(a => a.athleteId !== me && (a.comments || 0) > 0 && !checked.has(a.id));
+    for (let i = 0; i < todo.length && texts.length < n && scanned < 150 && !isClosed(); i += 8) {
+      const ids = todo.slice(i, i + 8).map(a => a.id);
+      ids.forEach(id => checked.add(id)); scanned += ids.length;
+      await progress(`Reading comments: ${texts.length} of ${n} found, ${scanned} activities checked`);
+      let got = {};
+      try { got = (await sx(`__SD.commentsMany(${JSON.stringify(ids)}, 4)`, cfg('detailsWait') * 2000)) || {}; } catch (e) { console.warn('Style: ' + e.message); }
+      for (const id of ids) (got[id] || []).filter(isMine).forEach(c => take(c.text));
+    }
+    if (texts.length >= n || scanned >= 150) break;
+    const before = feed.scan().position || Date.now();     // reach a week further back in the feed
+    await progress(`Reading older posts: ${texts.length} of ${n} found`);
+    await feed.readBackTo(before - 7 * 864e5, async () => {}, isClosed);
+    if ((feed.scan().position || before) >= before) break;  // nothing older came back
+  }
+  if (texts.length < 3) throw new Error(texts.length
+    ? `Found only ${texts.length} of your comments, not enough to learn from. Comment a few more times, then try again.`
+    : 'Couldn\u2019t find any of your comments in your feed. Comment a few times, then try again.');
+  await progress(`Studying ${texts.length} comments…`);
+  const out = await aiCall(STYLE_PROMPT, JSON.stringify({ comments: texts }), 900, 'style');
+  const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 1500);
+  if (!prof) throw new Error('The AI sent back nothing. Try again.');
+  settings.styleProfile = prof; settings.styleMeta = { at: Date.now(), count: texts.length };
+  saveSettings();
 }
 
 // Everything read from the feed so far, newest first. Older days continue from where the last read stopped.
@@ -681,6 +804,9 @@ function makeFeed(sx, me, first) {
     get: (id) => st.items.get(id),
     mine: (from, to) => [...st.mine.values()].filter(a => a.ts != null && a.ts >= from && a.ts < to).sort((x, y) => y.ts - x.ts),
     mineGet: (id) => st.mine.get(id),
+    all: () => [...st.items.values(), ...[...st.mine.values()].filter(a => !st.items.has(a.id))].sort((x, y) => (y.ts || 0) - (x.ts || 0)),
+    me: () => me,
+    myName: () => { for (const a of st.mine.values()) if (a.athleteName) return a.athleteName; return ''; },
     update: (id, fn) => { const a = st.items.get(id); if (a) fn(a); },
     scan: () => ({ pages: st.pages, entries: st.entries, position: st.position, oldest: st.oldest, stop: st.stop || 'reached the day before' }),
   };
@@ -711,6 +837,8 @@ const settings = {
   checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
   theme: "auto", density: "comfortable", font: "sans", textSize: 1,
   aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, aiCustom: "",   // remembered picks, also set inline
+  commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
+  styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
   cfg: {},
 };
 const saveSettings = () => write("settings", settings);
@@ -721,7 +849,7 @@ const SET_KEYS = {
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
-  aiCustom: ["text", "render"],
+  aiCustom: ["text", "render"], commentRules: ["rules", ""],
 };
 // Returns the effect ('', 'render', 'reload'), or null when the key or value isn't allowed.
 function setSetting(k, v) {
@@ -729,6 +857,7 @@ function setSetting(k, v) {
   if (!s) return null;
   if (s[0] === "bool") v = v === true || v === "true";
   else if (s[0] === "text") v = cleanPrompt(v);
+  else if (s[0] === "rules") v = String(v == null ? "" : v).replace(/\r\n?/g, "\n").slice(0, 2000).trim();
   else if (!s[0](v)) return null;
   if (k === "textSize") v = +v;
   settings[k] = v;
@@ -771,6 +900,7 @@ const CONFIG = [
     { k: "daysInPicker", label: "Days in the header", help: "Today, yesterday and further back", unit: "days", def: 2, min: 1, max: 7, step: 1 },
   ]],
   ["Comments", [
+    { k: "styleComments", label: "Comments read to learn your style", help: "Your latest comments on Strava", unit: "comments", def: 20, min: 5, max: 50, step: 5 },
     { k: "suggestions", label: "✨ Comment ideas per tap", unit: "", def: 3, min: 1, max: 5, step: 1 },
   ]],
   ["Widget", [
@@ -831,6 +961,7 @@ function settingsState() {
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
+    defaultRules: DEFAULT_COMMENT_RULES, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
   };
 }
 
@@ -1933,6 +2064,26 @@ function stravaLib() {
       try { return JSON.parse(t); } catch (e) { return { __html: t }; }
     } catch (e) { return null; }
   };
+  // The comments of one activity: Strava's comment endpoints first, then the page's own data.
+  SD.commentsOf = async (id) => {
+    for (const path of [`/feed/activity/${id}/comments`, `/activities/${id}/comments`]) {
+      const d = await SD.getAny(path);
+      if (!d || d.__html) continue;
+      const list = SD.commentsFrom(d);
+      if (list.length) return list;
+    }
+    const d = await SD.getAny(`/activities/${id}`);
+    const nd = d && d.__html ? d.__html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/) : null;
+    try { return nd ? SD.commentsFrom(JSON.parse(nd[1])) : []; } catch (e) { return []; }
+  };
+  // Comments for many activities, a few at a time (used by "Learn my style").
+  SD.commentsMany = async (ids, conc) => {
+    const out = {};
+    for (let i = 0; i < ids.length; i += conc) {
+      await Promise.all(ids.slice(i, i + conc).map(async (id) => { try { out[id] = await SD.commentsOf(id); } catch (e) { out[id] = []; } }));
+    }
+    return out;
+  };
   // Who gave kudos and the comments for one activity, from whichever Strava source answers.
   SD.social = async (id) => {
     const out = { kudoers: [], comments: [], from: [] };
@@ -2256,7 +2407,7 @@ function actHtml(a, p) {
     ? `<div class="photos">${a.photos.map(u => `<img loading="lazy" src="${esc(u)}" data-photo="1" alt="Activity photo" onerror="this.remove()">`).join('')}</div>` : '';
   const main = p.acts.length > 1 && p.primary.id === a.id ? `<span class="main">gets the kudos</span>` : '';
   const fold = settings.density === 'compact';
-  return `<article class="act${fold ? ' fold' : ''}" data-id="${id}" data-map="${esc(a.map || '')}">
+  return `<article class="act${fold ? ' fold' : ''}" data-id="${id}" data-who="${esc(String(p.name || '').split(/\s+/)[0])}" data-map="${esc(a.map || '')}">
     <div class="ah"${fold ? ` data-expand="${id}" role="button" aria-expanded="false"` : ''}><span class="emo">${emoji(a.type)}</span><div class="at"><b class="ttl"${fold ? '' : ` data-detail="${id}"`}>${esc(a.name || a.type || 'Activity')}</b>${main}<small>${meta}</small></div>${fold ? '<span class="chev" aria-hidden="true">⌄</span>' : ''}</div>
     ${fold ? `<div class="ind" data-expand="${id}">${actIndicators(a)}</div>` : ''}
     ${stats ? `<div class="stats">${stats}</div>` : ''}
@@ -2488,6 +2639,23 @@ body.loading .loadst{display:block}
 .ktitle{color:#fff;font-size:calc(19px * var(--ts));font-weight:700;margin-top:22px}
 .ksub{color:rgba(255,255,255,.7);font-size:calc(14px * var(--ts));margin-top:4px;min-height:1.3em}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
+#csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
+#csheet[hidden]{display:none}
+.csp{width:100%;max-height:94vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
+.csh{display:flex;align-items:center;gap:12px;padding:8px 16px 12px;border-bottom:1px solid var(--line)}
+.csb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px))}
+.incs{margin-top:0}
+.incs textarea{font-size:16px;min-height:100px;line-height:1.4}
+.cslab{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:18px 0 0}
+.imps{display:flex;gap:6px;margin:8px -16px 0;padding:0 16px;overflow-x:auto;scrollbar-width:none}
+.imps::-webkit-scrollbar{display:none}
+.incs .modes{margin:8px -16px 0;padding:0 16px}
+.mode.imp:disabled{opacity:.5;background:var(--soft)}
+body.nokey .impr,body.nokey .incs .cslab{display:none}
+#cfgsheet textarea.rules{display:block;width:100%;box-sizing:border-box;min-height:200px;margin-top:8px;font-size:15px;line-height:1.45}
+.stylebtns{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.styleprof{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)}
+.styleprof p{margin:6px 0 0;white-space:pre-wrap;font-size:13px;line-height:1.45}
 #mine{background:var(--card);border-radius:18px;padding:12px;margin:0 0 14px}
 #mine[hidden]{display:none}
 .mineh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 2px 10px}
@@ -2882,6 +3050,69 @@ document.addEventListener('change',function(e){
   document.querySelectorAll('.aicustom').forEach(function(i){ if(i!==e.target) i.value=v; });
   send('setcustom',{text:v});
 });
+// ── the comment composer: a pop-up with the draft, rewrites of it, and AI ideas ──
+var DRAFTS={};
+var IMPROVE=[['punchier','👊 Punchier'],['funnier','😂 Funnier'],['shorter','✂️ Shorter'],['warmer','🤗 Warmer'],['mystyle','✨ In my style'],['rephrase','🔁 Rephrase']];
+function composerSheet(){
+  var ov=document.getElementById('csheet');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='csheet'; ov.hidden=true;
+    ov.innerHTML='<div class="csp" role="dialog" aria-label="Write a comment"><div class="msgrab"></div><div class="csh"></div><div class="csb"></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',function(e){ if(e.target===ov) closeComposer(); });
+  }
+  return ov;
+}
+function openComposer(art){
+  var src=art&&art.querySelector('.cbox'); if(!src) return;
+  var id=art.dataset.id, ov=composerSheet(), det=document.getElementById('det');
+  var sec=document.querySelector('section.person .act[data-id="'+CSS.escape(id)+'"]');
+  ov.dataset.id=id;
+  ov.dataset.pid=sec?sec.closest('section.person').dataset.pid:(det&&!det.hidden?det.dataset.pid||'':'');
+  var ttl=(art.querySelector('.ttl')||{}).textContent||'';
+  ov.querySelector('.csh').innerHTML='<div class="mtt"><b>Comment for '+escH(art.dataset.who||'your friend')+'</b><small>'+escH(ttl)+'</small></div><button class="mbtn" data-act="cs-close" aria-label="Close">✕</button>';
+  var box=src.cloneNode(true); box.hidden=false; box.classList.add('incs');
+  var ta=box.querySelector('textarea'); ta.rows=4; ta.value=DRAFTS[id]||''; ta.setAttribute('aria-label','Your comment');
+  var imp=document.createElement('div'); imp.className='impr';
+  imp.innerHTML='<div class="cslab">Improve my draft</div><div class="imps" role="group" aria-label="Improve my draft">'+IMPROVE.map(function(x){ return '<button class="mode imp" data-improve="'+x[0]+'">'+x[1]+'</button>'; }).join('')+'</div>';
+  var lab=document.createElement('div'); lab.className='cslab'; lab.textContent='Write it for me';
+  var crow=box.querySelector('.crow'); crow.parentNode.insertBefore(imp,crow.nextSibling); imp.parentNode.insertBefore(lab,imp.nextSibling);
+  var body=ov.querySelector('.csb'); body.innerHTML=''; body.appendChild(box); body.scrollTop=0;
+  ov.hidden=false; document.body.style.overflow='hidden';
+  setTimeout(function(){ try{ ta.focus(); }catch(e){} },250);
+}
+function closeComposer(posted){
+  var ov=document.getElementById('csheet'); if(!ov||ov.hidden) return;
+  var ta=ov.querySelector('.csb textarea');
+  if(posted) delete DRAFTS[ov.dataset.id]; else if(ta) DRAFTS[ov.dataset.id]=ta.value;
+  ov.hidden=true; ov.querySelector('.csb').innerHTML='';
+  var det=document.getElementById('det'); document.body.style.overflow=(det&&!det.hidden)?'hidden':'';
+}
+function aiReply(box,ok,msg,label){
+  var sugs=box.querySelector('.sugs'); sugs.innerHTML='';
+  if(!ok&&msg==='NEED_KEY'){
+    sugs.innerHTML='<p class="keyhelp">✨ AI writing needs a Claude or OpenAI key. Add one in Settings › AI settings.</p><button class="small" data-act="ai-open" style="align-self:flex-start">AI settings</button>';
+    return false;
+  }
+  if(!ok){ toast(label+' failed: '+(msg||'unknown error')); return false; }
+  var res={}; try{ res=JSON.parse(msg); }catch(e){}
+  var list=res.comments||[];
+  if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI'); sugs.appendChild(lab); }
+  list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
+  return true;
+}
+function improve(btn){
+  var box=btn.closest('.cbox'), ta=box.querySelector('textarea'), draft=ta.value.trim(), ov=btn.closest('#csheet');
+  if(!draft){ toast('Write or pick a comment first, then improve it'); ta.focus(); return; }
+  if(box.dataset.busy||!ov) return;
+  box.dataset.busy='1'; var was=btn.textContent; btn.textContent='…'+was.replace(/^\S+/,'');
+  box.querySelectorAll('[data-improve]').forEach(function(b){ b.disabled=true; });
+  send('improve',{id:ov.dataset.id,draft:draft,kind:btn.dataset.improve,lang:aiLang},function(ok,msg){
+    delete box.dataset.busy; btn.textContent=was;
+    box.querySelectorAll('[data-improve]').forEach(function(b){ b.disabled=false; });
+    aiReply(box,ok,msg,'Rewrites');
+  });
+}
 function suggest(btn){
   if(btn.disabled) return;
   var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
@@ -2890,16 +3121,7 @@ function suggest(btn){
   btn.disabled=true; btn.dataset.busy='1'; btn.textContent='✨ Thinking…';
   send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode,custom:custom},function(ok,msg){
     btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
-    sugs.innerHTML='';
-    if(!ok&&msg==='NEED_KEY'){
-      sugs.innerHTML='<p class="keyhelp">✨ Comment ideas need a Claude or OpenAI key. Add one in Settings › AI settings.</p><button class="small" data-act="ai-open" style="align-self:flex-start">AI settings</button>';
-      btn.textContent='✨ Suggest'; return;
-    }
-    if(!ok){ toast('Suggestions failed: '+(msg||'unknown error')); return; }
-    var res={}; try{ res=JSON.parse(msg); }catch(e){}
-    var list=res.comments||[];
-    if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✦ AI suggestions by '+(res.by||'AI'); sugs.appendChild(lab); }
-    list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
+    if(!aiReply(box,ok,msg,'Suggestions')&&!ok&&msg==='NEED_KEY') btn.textContent='✨ Suggest';
   });
 }
 window.__done=function(req,ok,msg){ var cb=pending[req]; delete pending[req]; if(cb) cb(ok,msg); };
@@ -3089,7 +3311,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet','csheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -3217,6 +3439,24 @@ function builtWithHTML(){
     SET.blueprints.map(function(b){ return '<button class="srow bp" data-act="openurl" data-v="'+escH(bpLink(b))+'"><div class="grow"><b>'+escH(b.name)+'</b><small class="muted">Blueprint '+escH(b.version)+' · since '+escH(SET.appName)+' '+escH(b.since)+'</small></div><span class="chev" aria-hidden="true">›</span></button>'; }).join('')+
     '<button class="srow bp" data-act="openurl" data-v="'+escH(SET.blueprintsRepo)+'"><div class="grow"><b>All blueprints</b><small class="muted">'+escH(SET.blueprintsRepo.replace('https://',''))+'</small></div><span class="chev" aria-hidden="true">›</span></button>';
 }
+var STYLEBUSY=false, STYLEMSG='';
+window.__styleProgress=function(t){ STYLEMSG=t; var sm=document.getElementById('stylemsg'); if(sm) sm.textContent=t; };
+function writingHTML(){
+  var rules=SET.settings.commentRules||'', changed=rules!==SET.defaultRules, prof=SET.styleProfile||'', meta=SET.styleMeta||{};
+  var sec=SET.cfgSchema.filter(function(x){ return x.title==='Comments'; })[0];
+  var when=meta.at?new Date(meta.at).toLocaleDateString(undefined,{day:'numeric',month:'short'}):'';
+  return '<h3 class="sec">Comment writing</h3>'+
+    '<div class="cfg'+(changed?' ch':'')+'"><div class="cfg-h"><b>Instructions for every AI comment</b>'+(changed?'<button class="link small" data-act="rules-reset">Reset to default</button>':'')+'</div>'+
+      '<small class="muted">Used for every suggestion and rewrite. They win over the app’s own defaults.</small>'+
+      '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="2000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea></div>'+
+    (sec?sec.items.map(fieldHTML).join(''):'')+
+    '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
+      '<small class="muted">Reads your latest comments on Strava and describes how you write. ✨ My style then writes like you, on top of your instructions.</small>'+
+      '<div class="stylebtns"><button class="sm" data-act="style-learn"'+(STYLEBUSY?' disabled':'')+'>'+(STYLEBUSY?'Learning…':(prof?'Learn again':'Learn my style'))+'</button>'+
+      '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLEMSG)+'</small></div>'+
+      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
+    '</div>';
+}
 function renderCfg(){
   var el=cfgSheet(), keep=el.scrollTop;
   el.classList.toggle('open',cfgOpen); document.body.style.overflow=cfgOpen?'hidden':'';
@@ -3234,10 +3474,11 @@ function renderCfg(){
       pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
       '<div class="cfg"><div class="cfg-h"><b>Custom prompt</b></div><small class="muted">Used when the mood is ✎ Custom</small><textarea class="cfgsel" data-k="aiCustom" rows="3" maxlength="200" placeholder="e.g. tease about the rain, keep it short">'+escH(SET.settings.aiCustom||'')+'</textarea></div>'+
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
+    writingHTML()+
     '<h3 class="sec">Updates</h3>'+
       swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
       '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
-    SET.cfgSchema.map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join(''); }).join('')+
+    SET.cfgSchema.filter(function(sec){ return sec.title!=='Comments'; }).map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join(''); }).join('')+
     '<div class="cfg-foot"><span class="note">'+(changed?changed+' setting'+(changed===1?'':'s')+' changed':'All settings are at their original values')+'</span>'+
       (changed?'<button class="sm danger '+(cfgArmed?'armed':'')+'" data-act="cfgall">'+(cfgArmed?'Confirm reset':'Reset all')+'</button>':'')+'</div>'+
     builtWithHTML()+'</div>';
@@ -3259,6 +3500,17 @@ function cfgAction(t,act){
   if(act==='updcheck'){ var um=document.getElementById('updmsg'); t.disabled=true; if(um) um.textContent='Checking…';
     send('update-check',{},function(ok,res){ t.disabled=false; if(um) um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); return; }
   if(act==='openurl'){ send('openurl',{v:v}); return; }
+  if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
+  if(act==='style-clear'){ STYLEMSG=''; send('style-clear',{},setState); return; }
+  if(act==='style-learn'){
+    if(STYLEBUSY) return; STYLEBUSY=true; STYLEMSG='Starting…'; renderCfg();
+    send('style-learn',{},function(ok,msg){
+      STYLEBUSY=false;
+      if(ok){ STYLEMSG='Done. ✨ My style now writes like you.'; setState(true,msg); }
+      else { STYLEMSG=msg||'Couldn’t learn your style'; renderCfg(); }
+    });
+    return;
+  }
 }
 // Typed and picked values arrive through "change".
 document.addEventListener('change',function(e){
@@ -3271,7 +3523,7 @@ applyLook();
 // Opened with window.__aiOpen(); the Scriptable side pushes state with window.__aiState(state).
 var AIS=null, aiIsOpen=false, aiArmed=null, aiLoading={};
 var AI_PN={ anthropic:'Claude', openai:'OpenAI' };
-var AI_FEAT={"comments": "Comment ideas", "test": "Connection tests", "other": "Other"};
+var AI_FEAT={"comments": "Comment ideas", "style": "Style learning", "test": "Connection tests", "other": "Other"};
 var AI_JOBS=[];
 function aiSend(act,data){ send(act,data); }
 function aiEsc(t){ var d=document.createElement('div'); d.textContent=String(t==null?'':t); return d.innerHTML; }
@@ -3563,6 +3815,8 @@ document.addEventListener('click',function(e){
     aiLang=t.dataset.lang; send('setlang',{lang:aiLang}); return;
   }
   if(t.dataset.suggest) return suggest(t);
+  if(t.dataset.improve) return improve(t);
+  if(t.dataset.act==='cs-close') return closeComposer();
   if(t.dataset.mode) return setMode(t.dataset.mode, t);
   if(t.dataset.sug!==undefined){
     var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent; ta.focus(); return;
@@ -3573,17 +3827,18 @@ document.addEventListener('click',function(e){
     t.disabled=true; t.textContent='…';
     if(document.activeElement) document.activeElement.blur();
     var det=document.getElementById('det');
-    var who=t.closest('section.person')||(t.closest('#det')&&det.dataset.pid?document.querySelector('section.person[data-pid="'+CSS.escape(det.dataset.pid)+'"]'):null);
+    var cso=t.closest('#csheet');
+    var who=t.closest('section.person')||(cso&&cso.dataset.pid?document.querySelector('section.person[data-pid="'+CSS.escape(cso.dataset.pid)+'"]'):null)||(t.closest('#det')&&det.dataset.pid?document.querySelector('section.person[data-pid="'+CSS.escape(det.dataset.pid)+'"]'):null);
     var flight=showSending(who, text);
     send('comment',{id:id,text:text},function(ok,msg){
       t.disabled=false; t.textContent='Post';
-      if(ok){ ta.value=''; box.hidden=true; document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .cc').forEach(function(cc){ cc.textContent=(+cc.textContent||0)+1; }); }
+      if(ok){ ta.value=''; if(cso) closeComposer(true); else box.hidden=true; document.querySelectorAll('.act[data-id="'+CSS.escape(id)+'"] .cc').forEach(function(cc){ cc.textContent=(+cc.textContent||0)+1; }); }
       flight.finish(ok,msg);
     });
     return;
   }
   var act=t.dataset.act;
-  if(act==='toggle-comment'){ var b=t.closest('.act').querySelector('.cbox'); b.hidden=!b.hidden; if(!b.hidden) b.querySelector('textarea').focus(); }
+  if(act==='toggle-comment') openComposer(t.closest('.act'));
   if(act==='kudo-all') kudoAll(t);
   if(act==='upd-now') updNow(t);
   if(act==='upd-later') updLater();
@@ -3591,7 +3846,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','rules-reset','style-clear','style-learn'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
