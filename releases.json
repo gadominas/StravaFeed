@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.15.1",
+      "date": "2026-10-29",
+      "title": "A simpler comment composer",
+      "highlights": [
+        {
+          "icon": "💬",
+          "title": "Less to choose from",
+          "text": "The composer is just your comment, the moods and the AI ideas."
+        },
+        {
+          "icon": "✨",
+          "title": "My style leads",
+          "text": "✨ My style is the first mood and the default, with your instructions behind every idea."
+        },
+        {
+          "icon": "⚙️",
+          "title": "Tidier settings",
+          "text": "The Custom prompt box is gone; your instructions in Comment writing cover it."
+        }
+      ],
+      "changes": [
+        "Removed the ✎ Custom mood, its prompt field in the composer and the Custom prompt setting",
+        "Removed the Improve my draft row (Punchier, Funnier, Shorter, Warmer, In my style, Rephrase)",
+        "A saved Custom mood now opens as ✨ My style"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.15.0",
       "date": "2026-10-29",
       "title": "Comments that sound like you",

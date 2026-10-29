@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.15.1 (2026-10-29): A simpler comment composer
+
+- 💬 **Less to choose from**: The composer is just your comment, the moods and the AI ideas.
+- ✨ **My style leads**: ✨ My style is the first mood and the default, with your instructions behind every idea.
+- ⚙️ **Tidier settings**: The Custom prompt box is gone; your instructions in Comment writing cover it.
+
+**Changes**
+
+- Removed the ✎ Custom mood, its prompt field in the composer and the Custom prompt setting
+- Removed the Improve my draft row (Punchier, Funnier, Shorter, Warmer, In my style, Rephrase)
+- A saved Custom mood now opens as ✨ My style
+
 ## 1.15.0 (2026-10-29): Comments that sound like you
 
 - 💬 **A proper comment composer**: 💬 opens a pop-up with your draft, AI ideas and one-tap rewrites: punchier, funnier, shorter, warmer.
