@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.16.0';
+const VERSION = '1.17.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1276,11 +1276,55 @@ function mergeDetails(a, d) {
   if (d.achievements != null) a.ach.total = Math.max(a.ach.total || 0, d.achievements);
   if (d.list && d.list.length && !a.ach.list.length) a.ach.list = d.list;
   if (!a.map && d.map) a.map = d.map;
+  if (!a.route && d.poly) { a.poly = d.poly; a.route = routeShape(d.poly); }
   if (d.photos && d.photos.length) {
     const byKey = new Map();
     [...a.photos, ...d.photos].forEach(u => { const k = photoKey(u); if (!byKey.has(k)) byKey.set(k, u); });
     a.photos = [...byKey.values()].slice(0, 12);
   }
+}
+
+// Google's encoded polyline → [[lat, lng], …]
+function decodePolyline(str) {
+  const pts = [];
+  let i = 0, lat = 0, lng = 0;
+  while (i < str.length) {
+    for (const which of [0, 1]) {
+      let shift = 0, result = 0, b;
+      do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20 && i < str.length);
+      const d = (result & 1) ? ~(result >> 1) : (result >> 1);
+      if (which === 0) lat += d; else lng += d;
+    }
+    pts.push([lat / 1e5, lng / 1e5]);
+  }
+  return pts;
+}
+
+// The route as an SVG path in a 600×300 box, north up, kept to scale.
+function routeShape(poly) {
+  let pts;
+  try { pts = decodePolyline(String(poly || '')); } catch (e) { return null; }
+  pts = pts.filter(p => isFinite(p[0]) && isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+  if (pts.length < 2) return null;
+  if (pts.length > 400) { const step = pts.length / 400; pts = Array.from({ length: 400 }, (_, k) => pts[Math.floor(k * step)]).concat([pts[pts.length - 1]]); }
+  const k = Math.cos(pts.reduce((s, p) => s + p[0], 0) / pts.length * Math.PI / 180);
+  const xy = pts.map(p => [p[1] * k, -p[0]]);
+  const xs = xy.map(p => p[0]), ys = xy.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const W = 600, H = 300, pad = 26, dx = (maxX - minX) || 1e-9, dy = (maxY - minY) || 1e-9;
+  const sc = Math.min((W - 2 * pad) / dx, (H - 2 * pad) / dy);
+  const ox = (W - dx * sc) / 2, oy = (H - dy * sc) / 2;
+  const P = xy.map(p => [+(ox + (p[0] - minX) * sc).toFixed(1), +(oy + (p[1] - minY) * sc).toFixed(1)]);
+  return { d: 'M' + P.map(p => p.join(' ')).join('L'), start: P[0], end: P[P.length - 1] };
+}
+
+// The route on the card: Strava's map picture when there is one, otherwise the route drawn from its line.
+// If the picture fails to load, the drawn route takes its place.
+function routeHtml(a, id) {
+  const r = a.route;
+  const svg = r ? `<svg class="rmap" viewBox="0 0 600 300" role="img" aria-label="Route map" data-detail="${id}"${a.map ? ' hidden' : ''}><path class="rline" d="${r.d}"/><circle class="rstart" cx="${r.start[0]}" cy="${r.start[1]}" r="8"/><circle class="rend" cx="${r.end[0]}" cy="${r.end[1]}" r="8"/></svg>` : '';
+  const img = a.map ? `<img class="rmap" loading="lazy" src="${esc(a.map)}" alt="Route map" data-detail="${id}" onerror="var s=this.nextElementSibling;if(s)s.removeAttribute('hidden');this.remove()">` : '';
+  return img || svg ? `<div class="route">${img}${svg}</div>` : '';
 }
 
 function derive(a) {
@@ -1295,6 +1339,7 @@ function derive(a) {
       : { label: 'Speed', value: `${(a.km.value / (sec / 3600)).toFixed(1)} ${a.km.unit}/h` });
   }
   if (a.hr && a.stats.some(s => RX.hr.test(s.label + ' ' + s.value))) a.hrInStats = true;
+  if (a.poly && !a.route) a.route = routeShape(a.poly);
 }
 
 // Early-start badges, keyed by the hour the activity started (athlete's local time).
@@ -1796,6 +1841,17 @@ function stravaLib() {
     return [...best.values()].map(x => x.url).slice(0, 12);
   };
 
+  // Strava's encoded route line (Google polyline), sent instead of, or as well as, a map picture.
+  SD.polylineOf = (o) => {
+    let best = '';
+    SD.walk(o, (k, v) => {
+      if (typeof v !== 'string' || !/polyline/i.test(k)) return;
+      if (v.length < 12 || v.length > 200000 || /\s|^https?:/.test(v) || !/^[\x3f-\x7e]+$/.test(v)) return;
+      if (v.length > best.length) best = v;
+    });
+    return best;
+  };
+
   SD.mapUrl = (o) => {
     let best = null, score = -1;
     SD.walk(o, (k, v) => {
@@ -1904,7 +1960,7 @@ function stravaLib() {
       clock: SD.best(SD.clockLocal(a), SD.clockFromText(SD.text(f.when || '')), SD.clockUtc(f.start)),
       athleteId: String(f.athleteId || ''), athleteName: SD.text(f.athleteName || ''), avatar: f.avatar || '',
       description: SD.text(a.description || ''),
-      stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a),
+      stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a), poly: SD.polylineOf(a),
       kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
       cmts: f.cmts || [], kudoers: f.kudoers || [],
     };
@@ -2002,6 +2058,9 @@ function stravaLib() {
         if (a.total || a.prs) { res.prs = a.prs; res.achievements = a.total; res.list = a.list; }
         res.photos = SD.photos(j);
         res.clock = SD.clockLocal(j);
+        res.poly = SD.polylineOf(j);
+        const mu = SD.mapUrl(j);
+        if (mu) res.map = mu;
       } catch (e) {}
     }
     const txt = SD.text(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' '));
@@ -2021,7 +2080,8 @@ function stravaLib() {
       res.clock = SD.best(lm && { h: +lm[1], m: +lm[2], src: 3 }, on && SD.clockFromText(on[1]), tm && SD.clockFromText(tm[1]));
     }
     const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    if (og && !/logo|default|placeholder/i.test(og[1])) res.map = og[1].replace(/&amp;/g, '&');
+    // the page's preview picture is a photo whenever the activity has photos: use it only when it is a map
+    if (!res.map && og && /\/maps?\/|mapbox|staticmap|[_-]map\b|\bmap[_-]/i.test(og[1]) && !/logo|default|placeholder/i.test(og[1])) res.map = og[1].replace(/&amp;/g, '&');
     if (!res.photos.length) {
       const urls = html.match(/https:\/\/dgtzuqphqg23d\.cloudfront\.net\/[^"'\s)\\]+\.(?:jpe?g|png)/gi) || [];
       res.photos = SD.photos({ photos: urls });
@@ -2573,6 +2633,7 @@ function actHtml(a, p) {
     ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
     ${achList ? `<ul class="alist">${achList}</ul>` : ''}
     ${a.description ? `<p class="desc">${esc(a.description)}</p>` : ''}
+    ${routeHtml(a, id)}
     ${photos}
     <div class="bar">
       <span class="counts">👍 <i class="kc">${a.kudos}</i>&nbsp;&nbsp;💬 <i class="cc">${a.comments}</i></span>
@@ -2886,7 +2947,12 @@ body.nokey .incs .cslab{display:none}
 .detwho b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .deth .lbx{background:var(--soft);color:var(--fg)}
 .detb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px}
-.detmap{display:block;width:100%;border-radius:14px;margin-bottom:4px;background:var(--soft);max-height:46vh;object-fit:cover}
+.route{margin:var(--gap) 0 0;border-radius:14px;overflow:hidden;background:var(--soft)}
+.route [hidden]{display:none}
+.rmap{display:block;width:100%;aspect-ratio:2/1;object-fit:cover;cursor:pointer}
+.rline{fill:none;stroke:var(--accent);stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+.rstart{fill:#2fbf71;stroke:var(--card);stroke-width:3}
+.rend{fill:var(--fg);stroke:var(--card);stroke-width:3}
 .detb .act{border-top:0;margin-top:0;padding:4px 2px 0}
 .detb .photos img{height:170px;max-width:260px}
 .detf{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card)}
@@ -3516,7 +3582,6 @@ function openDetail(id){
     var nm=document.createElement('b'); nm.textContent=(person.querySelector('.pn b').firstChild||{}).textContent||''; who.appendChild(nm);
   }
   body.innerHTML='';
-  if(art.dataset.map){ var m=document.createElement('img'); m.className='detmap'; m.src=art.dataset.map; m.alt='Route map'; m.onerror=function(){ m.remove(); }; body.appendChild(m); }
   var c=art.cloneNode(true); c.classList.remove('fold'); c.querySelectorAll('.chev,.act > .ind').forEach(function(x){ x.remove(); }); c.querySelectorAll('[data-expand]').forEach(function(x){ x.removeAttribute('data-expand'); x.removeAttribute('role'); }); c.querySelectorAll('[data-detail]').forEach(function(x){ if(x.tagName==='BUTTON') x.remove(); else x.removeAttribute('data-detail'); });
   var cb=c.querySelector('.cbox'); if(cb){ cb.hidden=true; var ta=cb.querySelector('textarea'); if(ta) ta.value=''; var sg=cb.querySelector('.sugs'); if(sg) sg.innerHTML=''; }
   body.appendChild(c);

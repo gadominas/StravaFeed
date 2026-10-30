@@ -38,6 +38,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 - **AI comment ideas.** 💬 opens a composer that writes comment ideas from the activity's real details, in ✨ My style or a mood (Funny, Energetic, Serious, Funky), in English or Lithuanian.
 - **Comments that sound like you.** Write your instructions once in Settings, and let **Learn my style** study your own past comments, so ✨ My style writes the way you do.
 - **Early-riser badges.** The 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs get a badge, and the day's summary counts the early risers.
+- **Route maps on the card.** Runs, rides and walks show their route between the stats and the photos, drawn by the digest when Strava sends only the route line.
 - **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map, every stat, PRs, the description and photos.
 - **Your activities on top.** Your latest activities sit above everyone else's. Tap one to see who gave kudos, read the comments and like them.
 - **Kudos widget, launch screen, settings, updates.** A Home Screen and Lock Screen widget shows who is still waiting for your kudos; the digest opens on its logo; colours, layout and text size are in Settings; new versions are offered in the app.
@@ -109,6 +110,7 @@ You don't need a computer, developer account, or Strava API application.
 | Give kudos to a specific activity | Tap 👍 on that activity |
 | Comment | Tap 💬, write a comment, then tap **Post** |
 | Get comment ideas | Tap 💬, pick a mood (✨ My style, 😂 Funny, ⚡ Energetic, 🎯 Serious or 🕺 Funky) and **EN** or **LT**, tap **✨ Suggest 3**, then tap an idea, edit it and **Post**. Text already in the box is used as your idea. |
+| See the route | Runs, rides and walks show their route map on the card; tap it for the activity's details |
 | See photos | Tap a photo, then swipe left or right or tap a thumbnail. Double-tap or pinch to zoom, and tap **✕ Close photo** to go back. |
 | See activity details | Tap the activity title or **↗** |
 | Open in Strava | In the details sheet, tap **Open in Strava app** or **Strava website** (the website opens inside the digest, with **‹ Back to digest**) |
