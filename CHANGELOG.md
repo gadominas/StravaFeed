@@ -2,6 +2,34 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.21.0 (2026-10-30): Sunshine while you wait
+
+- ☀️ **Your friend, shining**: While comment ideas are written, the composer turns into a sky with your friend's photo as the sun.
+- 😄 **Something to read**: Funny lines rotate while you wait: scrambling the adjectives, cooking up something witty, pacing the punchline…
+- 📊 **See how far along**: A progress bar follows the photos being looked at and the ideas being written; Cancel if you change your mind.
+
+**Changes**
+
+- Tapping ✨ Suggest covers the composer with a sky: the friend's profile picture (or initials) as the sun with turning rays, drifting clouds, rotating funny lines and a progress bar
+- The bar follows the real steps: each photo looked at, then the ideas being written
+- Cancel closes the sky and ignores ideas that arrive afterwards
+- With Reduce Motion on, the sun and clouds stay still
+
+## 1.20.1 (2026-10-30): Learn my style really reads your comments
+
+- 🔎 **Opens every friend's activity**: Learn my style no longer waits for Strava to report comments; it opens friends' activities until it finds yours.
+- 📅 **Reaches further back**: When today's activities run out it reads older weeks of your feed and keeps going.
+- 🧾 **Shows what it did**: Settings and the start-up log show comments read, pages opened and how far back it reached.
+
+**Changes**
+
+- Settings › Learn my style always shows comments read, activities opened and the earliest day reached
+- Each run is noted in the start-up log, with how many comments came from Strava's data and how many from pages
+
+**Fixes**
+
+- Learn my style opened no pages when Strava's feed didn't report comment counts, so it learned only from comments sent through the digest
+
 ## 1.20.0 (2026-10-30): Comments that see the photos
 
 - 📷 **Comment ideas see the photos**: The AI looks at up to three of the activity's photos and builds comment ideas on what it spots.
