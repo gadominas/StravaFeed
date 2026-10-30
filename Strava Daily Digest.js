@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -119,6 +119,7 @@ async function main() {
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
   let viewing = false, savedScroll = 0;
+  let storyDay = null;            // the day on screen: its date and activities
   let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
   let updateSettled = false, onDigest = false;   // the AI invitation waits for both (see inviteIfDue)
@@ -212,6 +213,7 @@ async function main() {
       acts.forEach(a => { if (details.has(a.id)) mergeDetails(a, details.get(a.id)); derive(a); });
       viewing = false;
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
+      storyDay = { dayStart, acts };   // what "The day's story" writes about
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList() }));
       if (booting) startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
       saveSnapshot(feed);
@@ -405,6 +407,16 @@ async function main() {
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
         }
+      } else if (head === 'story') {
+        const people = storyDay ? groupByAthlete(storyDay.acts) : [];
+        if (!people.length) msg = 'Nobody to write about for this day yet.';
+        else {
+          const r = await aiStory(people, storyDay.dayStart, p.lang || settings.aiLang);
+          if (r.needKey) msg = 'NEED_KEY';
+          else { ok = true; msg = JSON.stringify(r); }
+        }
+      } else if (head === 'share') {
+        await ShareSheet.present([String(p.text || '')]); ok = true;
       } else if (head === 'activity') {
         Safari.open(`strava://activities/${p.id}`);
         ok = true;
@@ -734,6 +746,39 @@ function activityFacts(a) {
     photos: a.photos.length,
     kudos_so_far: a.kudos,
   };
+}
+
+// ── The day's story: everyone in the digest, with or without your kudos, in one funny tale ──
+const STORY_PROMPT = (language, n) => [
+  `You are a witty, warm storyteller. Write one short, funny story (about 180 to 280 words) in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
+  'Every athlete in the data must appear at least once, by first name. Weave them into one connected tale (a relay, an adventure, a heist, a sitcom episode, whatever suits the day) rather than a list.',
+  'Build the jokes on the real details: sports, activity titles, times of day, early starts, places, PRs, photos, descriptions. Keep numbers light; a few are fine, a wall of them is not.',
+  'Playfully mention who already has the reader\'s kudos and who is still waiting for it.',
+  'Keep it affectionate: never mock bodies, weight, age, looks or slowness, never invent facts that are not in the data, nothing offensive.',
+  'Give it a short, punchy title.',
+  'Reply with JSON only, no other text: {"title": "...", "story": "paragraphs separated by a blank line"}.',
+].join(' ');
+
+async function aiStory(people, dayStart, language) {
+  if (!aiKey()) return { needKey: true };
+  const cast = people.slice(0, 25).map(p => ({
+    name: p.name, first_name: String(p.name || '').split(/\s+/)[0],
+    has_your_kudos: !!p.kudoed, early_club: p.early ? p.early.label : null,
+    activities: p.acts.slice(0, 3).map(a => { const f = activityFacts(a); delete f.friend_first_name; return f; }),
+  }));
+  const day = dayStart ? new Date(+dayStart).toISOString().slice(0, 10) : null;
+  const text = await aiCall(STORY_PROMPT(language, cast.length), JSON.stringify({ day, athletes: cast }), 1600, 'story');
+  let out;
+  try { out = parseJSON(text); }
+  catch (e) {
+    // models sometimes put real line breaks inside the JSON strings: pull the two fields out directly
+    const raw = String(text || ''), un = (x) => x.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    const t = raw.match(/"title"\s*:\s*"([\s\S]*?)"\s*,\s*"story"/), st = raw.match(/"story"\s*:\s*"([\s\S]*)"\s*\}?[\s`]*$/);
+    out = st ? { title: t ? un(t[1]) : '', story: un(st[1]) } : { title: '', story: raw.replace(/```\w*|```/g, '') };
+  }
+  const story = String(out.story || '').trim();
+  if (!story) throw new Error('No story came back. Try again.');
+  return { title: String(out.title || '').trim(), story, by: PROVIDERS[aiSettings.aiProvider], count: cast.length };
 }
 
 // The brief every comment request starts from: your instructions first, the app's defaults after.
@@ -2476,6 +2521,7 @@ const LOGO = '<svg viewBox="0 0 240 240" aria-hidden="true">' + LOGO_PARTS + '</
 
 // Header icons: same size, same stroke, drawn in the text colour (Feather icons, MIT licence).
 const ICON_GEAR = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>';   // Settings (sliders)
+const ICON_STORY = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>';
 const ICON_REFRESH = '<svg class="hico" viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 
 // Sticky app header: brand row, then day switcher + "kudos to all", always within reach.
@@ -2486,7 +2532,7 @@ function appHeader(daysBack, open, people) {
   return `<header class="hdr">
     <div class="brand"><span class="brand-mark">${LOGO}</span><span class="brand-name">Daily <span class="x">Digest</span></span>
       <button class="hbtn" data-act="settings" aria-label="Settings">${ICON_GEAR}</button><button class="hbtn" data-act="refresh" aria-label="Refresh">${ICON_REFRESH}</button></div>
-    <div class="hrow">${daysNav(daysBack)}${all}</div>
+    <div class="hrow">${people ? `<button class="hbtn hstory" data-act="story" aria-label="Tell the day’s story">${ICON_STORY}</button>` : ''}${daysNav(daysBack)}${all}</div>
     <div id="st" class="loadst" aria-live="polite"></div>
   </header>`;
 }
@@ -2948,6 +2994,23 @@ body.nokey .incs .cslab{display:none}
 .deth .lbx{background:var(--soft);color:var(--fg)}
 .detb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px}
 .route{margin:var(--gap) 0 0;border-radius:14px;overflow:hidden;background:var(--soft)}
+section.person .route{display:none}
+#det .route{display:block}
+.hbtn.hstory{border-radius:12px;flex:none}
+#storysheet{position:fixed;inset:0;z-index:46;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
+#storysheet[hidden]{display:none}
+.stb{gap:12px}
+.stwait{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:34px 10px}
+.stquill{font-size:40px;animation:quill 1.1s ease-in-out infinite alternate}
+@keyframes quill{from{transform:translateX(-10px) rotate(-8deg)}to{transform:translateX(10px) rotate(8deg)}}
+.stline{color:var(--mut);font-size:13px}
+.sttitle{margin:0;font-size:calc(22px * var(--ts));line-height:1.2}
+.stb .badge-ai{align-self:flex-start}
+.stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
+.stf{display:flex;gap:10px}
+.stf[hidden]{display:none}
+.stf button{flex:1}
+@media (prefers-reduced-motion: reduce){.stquill{animation:none}}
 .route [hidden]{display:none}
 .rmap{display:block;width:100%;aspect-ratio:2/1;object-fit:cover;cursor:pointer}
 .rline{fill:none;stroke:var(--accent);stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
@@ -3541,7 +3604,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet','csheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet','csheet','storysheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -3759,7 +3822,7 @@ applyLook();
 // Opened with window.__aiOpen(); the Scriptable side pushes state with window.__aiState(state).
 var AIS=null, aiIsOpen=false, aiArmed=null, aiLoading={};
 var AI_PN={ anthropic:'Claude', openai:'OpenAI' };
-var AI_FEAT={"comments": "Comment ideas", "style": "Style learning", "test": "Connection tests", "other": "Other"};
+var AI_FEAT={"comments": "Comment ideas", "story": "Day’s story", "style": "Style learning", "test": "Connection tests", "other": "Other"};
 var AI_JOBS=[];
 function aiSend(act,data){ send(act,data); }
 function aiEsc(t){ var d=document.createElement('div'); d.textContent=String(t==null?'':t); return d.innerHTML; }
@@ -3977,6 +4040,48 @@ function likeMine(btn){
     renderMine();
   });
 }
+// ── The day's story ──
+var STORY=null, STORYBUSY=false;
+var STORY_LINES=['Gathering everyone’s adventures…','Interviewing the early birds…','Counting the kudos, and the kudos still owed…','Polishing the punchlines…','Checking the facts, mostly…'];
+function storyKey(){ var h=document.querySelector('.top h1'); return h?h.textContent:''; }
+function storySheet(){
+  var ov=document.getElementById('storysheet');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='storysheet'; ov.hidden=true;
+    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button data-act="story-share">Share</button></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',function(e){ if(e.target===ov) closeStory(); });
+  }
+  return ov;
+}
+function openStory(again){
+  var ov=storySheet(); ov.querySelector('.stday').textContent=storyKey();
+  ov.hidden=false; document.body.style.overflow='hidden';
+  if(!again&&STORY&&STORY.key===storyKey()) return renderStory();
+  writeStory();
+}
+function writeStory(){
+  if(STORYBUSY) return; STORYBUSY=true;
+  var ov=storySheet(), body=ov.querySelector('.stb'), i=0, n=document.querySelectorAll('section.person').length;
+  ov.querySelector('.stf').hidden=true;
+  body.innerHTML='<div class="stwait"><div class="stquill" aria-hidden="true">✍️</div><b>Writing the story of '+n+' '+(n===1?'friend':'friends')+'</b><small class="stline">'+STORY_LINES[0]+'</small></div>';
+  var tick=setInterval(function(){ var l=body.querySelector('.stline'); if(!l){ clearInterval(tick); return; } i=(i+1)%STORY_LINES.length; l.textContent=STORY_LINES[i]; },1800);
+  var key=storyKey();
+  send('story',{lang:aiLang},function(ok,msg){
+    clearInterval(tick); STORYBUSY=false;
+    if(!ok&&msg==='NEED_KEY'){ body.innerHTML='<p class="keyhelp">✨ The day’s story is written by AI. Add a Claude or OpenAI key in Settings › AI settings.</p><button class="small" data-act="ai-open">AI settings</button>'; return; }
+    if(!ok){ body.innerHTML='<p class="mnote">'+escH(msg||'The story couldn’t be written.')+'</p><button class="small" data-act="story-again">Try again</button>'; return; }
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    STORY={key:key,title:d.title||'',story:d.story||'',by:d.by||'AI'}; renderStory();
+  });
+}
+function renderStory(){
+  var ov=document.getElementById('storysheet'); if(!ov||!STORY) return;
+  var paras=STORY.story.split(/\\n\\s*\\n|\\n/).filter(function(x){ return x.trim(); });
+  ov.querySelector('.stb').innerHTML=(STORY.title?'<h2 class="sttitle">'+escH(STORY.title)+'</h2>':'')+paras.map(function(x){ return '<p class="stp">'+escH(x.trim())+'</p>'; }).join('')+'<span class="badge-ai">✨ Written by '+escH(STORY.by)+'</span>';
+  ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
+}
+function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
 document.addEventListener('click',function(e){ if(e.target.id==='det') closeDetail(); });
 (function(){
@@ -4079,6 +4184,10 @@ document.addEventListener('click',function(e){
   if(t.dataset.mine) return openMine(t);
   if(t.dataset.clike!==undefined) return likeMine(t);
   if(t.dataset.act==='mine-close') return closeMine();
+  if(t.dataset.act==='story') return openStory(false);
+  if(t.dataset.act==='story-again') return openStory(true);
+  if(t.dataset.act==='story-close') return closeStory();
+  if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:(STORY.title?STORY.title+'\\n\\n':'')+STORY.story}); return; }
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
   if(t.dataset.act==='mine-back'){ MINEVIEW='main'; renderMine(); return; }
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
