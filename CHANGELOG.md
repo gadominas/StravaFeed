@@ -2,6 +2,25 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.20.0 (2026-10-30): Comments that see the photos
+
+- 📷 **Comment ideas see the photos**: The AI looks at up to three of the activity's photos and builds comment ideas on what it spots.
+- 📝 **Reads the description**: The whole description goes in, emojis included, so 🥐, 🌧️ or 🐶 can turn into the comment's joke.
+- 🧠 **Learns from all your comments**: Learn my style now opens friends' activities one by one until it has the number you set, up to 50, with Stop.
+
+**Changes**
+
+- Comment ideas attach up to three of the activity's photos and ask the AI to name the objects, places, food, animals and moments it sees
+- The full description goes to the AI (from the activity page when the feed shortened it), with its emojis listed
+- The ✨ Suggest button says 📷 Looking at the photos… while it works, and the result says how many photos the AI looked at
+- Learn my style reads Strava's comment data first, then opens friends' activity pages one at a time (friends you gave kudos to first) and reads your comments as Strava shows them, until it has the number you set
+- Stop learns from what was found so far; Settings shows how many comments were read and how many activities were opened
+- If the chosen model can't read photos, comment ideas are written without them
+
+**Fixes**
+
+- Learn my style found only the comments you'd posted through the digest when Strava's comment data had none of yours
+
 ## 1.19.0 (2026-10-30): Stories with photos
 
 - 📸 **The AI looks at the photos**: Up to three photos per person go into the day's story, and the AI writes about what it sees in them.
