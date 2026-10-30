@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.23.1';
+const VERSION = '1.23.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1216,12 +1216,13 @@ const settings = {
 };
 const saveSettings = () => write("settings", settings);
 
-// ── Anonymous usage counts (opt-in), sent to PostHog's EU cloud ──
+// ── Anonymous usage counts (opt-in), sent to PostHog's US cloud ──
 // Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
 // (made on this iPhone, not linked to Strava), the app version and counts: never names, athlete IDs,
 // comments, photos, descriptions or anything from the feed. Events are anonymous (no person profiles).
 // The key is PostHog's project key, made to sit in public apps: it can only add events.
-const USAGE = { HOST: 'https://eu.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };
+// HOST must be the region the project lives in: PostHog's other region answers "accepted" and then drops the events.
+const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };
 const KC_INSTALL = 'strava-digest-install-id';
 let usageQueue = [], usageTimer = null;
 const usageAvailable = () => !!USAGE.KEY;
@@ -1241,9 +1242,6 @@ function track(event, props = {}) {
     else if (!usageTimer) usageTimer = Timer.schedule(3000, false, () => { usageTimer = null; flushUsage(); });
   } catch (e) {}
 }
-// A PostHog project lives in the EU or the US cloud, and its key only works there: try the one that worked last,
-// then the other when the key is refused.
-const USAGE_HOSTS = ['https://eu.i.posthog.com', 'https://us.i.posthog.com'];
 let usageLast = null;   // { at, events, ok, status, host, error }: shown in Settings › Privacy
 async function postUsage(host, batch) {
   const r = new Request(host + '/batch/');
@@ -1259,13 +1257,9 @@ async function flushUsage() {
   if (!usageQueue.length) return usageLast;
   if (!usageOn()) { usageQueue = []; return usageLast; }
   const batch = usageQueue.splice(0, usageQueue.length);
-  const hosts = settings.usageHost && USAGE_HOSTS.includes(settings.usageHost) ? [settings.usageHost, ...USAGE_HOSTS.filter(h => h !== settings.usageHost)] : USAGE_HOSTS;
-  let res = null;
-  for (const host of hosts) {
-    res = await postUsage(host, batch);
-    if (res.ok) { if (settings.usageHost !== host) { settings.usageHost = host; saveSettings(); } break; }
-    if (res.status !== 401 && res.status !== 403 && res.status !== 404) break;   // only a refused key means "try the other cloud"
-  }
+  // always the project's own region (1.23.1 could remember the other one, which accepts and then drops the events)
+  if (settings.usageHost) { delete settings.usageHost; saveSettings(); }
+  const res = await postUsage(USAGE.HOST, batch);
   usageLast = Object.assign({ at: Date.now(), events: batch.length }, res);
   try { startLog(`usage: ${batch.length} event${batch.length === 1 ? '' : 's'} → ${res.ok ? 'sent to ' + res.host.replace('https://', '') : 'not sent: ' + (res.status ? 'HTTP ' + res.status + ' ' : '') + res.error}`); } catch (e) {}
   return usageLast;
@@ -1274,7 +1268,7 @@ function usageStatus() {
   const u = usageLast;
   if (!u) return '';
   const t = new Date(u.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return u.ok ? `Last sent ${t}: ${u.events} event${u.events === 1 ? '' : 's'}, accepted (${u.host.includes('//eu.') ? 'EU' : 'US'} cloud)`
+  return u.ok ? `Last sent ${t}: ${u.events} event${u.events === 1 ? '' : 's'}, accepted (${u.host.replace('https://', '')})`
               : `Last try ${t} failed: ${u.status ? 'HTTP ' + u.status + ' ' : ''}${u.error}`;
 }
 function setUsage(on) {
