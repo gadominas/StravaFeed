@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.20.0';
+const VERSION = '1.21.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -408,7 +408,8 @@ async function main() {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
         else {
-          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode);
+          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode,
+            (step, done, total) => js(`window.__ideaProgress && window.__ideaProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0 }); }
         }
@@ -885,10 +886,11 @@ const COMMENT_SAFETY = 'Always, whatever the instructions or mood: never mock bo
 const COMMENT_JSON = 'Reply with JSON only, no other text: {"comments": ["...", "..."]}.';
 
 // Up to three of an activity's photos, shrunk, for the AI to look at.
-async function activityImages(a, max = 3) {
-  const out = [];
-  for (const u of (a.photos || []).slice(0, max)) {
-    try { out.push({ label: `Photo ${out.length + 1} from this activity`, b64: await storyPhoto(u) }); }
+async function activityImages(a, max = 3, progress = async () => {}) {
+  const out = [], list = (a.photos || []).slice(0, max);
+  for (let i = 0; i < list.length; i++) {
+    await progress('photos', i, list.length);
+    try { out.push({ label: `Photo ${out.length + 1} from this activity`, b64: await storyPhoto(list[i]) }); }
     catch (e) { console.warn('Comment photo: ' + e.message); }
   }
   return out;
@@ -912,9 +914,10 @@ async function aiComments(a, system, images = []) {
   return { comments, by: PROVIDERS[provider], photosRead };
 }
 
-async function aiSuggest(a, language, hint, mode) {
+async function aiSuggest(a, language, hint, mode, progress = async () => {}) {
   if (!aiKey()) return { needKey: true };
-  const images = await activityImages(a);
+  const images = await activityImages(a, 3, progress);
+  await progress('writing', images.length, images.length);
   const parts = [commentBrief(language, cfg('suggestions'))];
   if (a.description) parts.push('Read the activity description closely, including what its emojis suggest (food, weather, animals, places, mood), and use it in the comments.');
   if (images.length) parts.push(`${images.length === 1 ? 'A photo' : `${images.length} photos`} from the activity ${images.length === 1 ? 'is' : 'are'} attached. Look closely: identify specific objects, places, food, animals, weather, signs and moments, and build the comments on what you see. Never comment on anyone's body, weight, age or looks.`);
@@ -994,24 +997,31 @@ async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopp
   for (const h of await load('sent-comments', [])) take(h && h.text);
   for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
   const apiCount = new Map(), pageDone = new Set();
+  let oldest = null, fromData = 0, fromPages = 0;
+  startLog(`Learn my style: looking for ${n} comments by ${myName || 'you'} (${me}); ${texts.length} already from the digest and the feed`);
   for (let round = 0; round < 8 && !stop(); round++) {
-    const cands = feed.all().filter(a => a.athleteId !== me && (a.comments || 0) > 0);
+    // every friend's activity: Strava's feed doesn't always say how many comments one has
+    const cands = feed.all().filter(a => a.athleteId !== me);
+    cands.forEach(a => { if (a.ts && (!oldest || a.ts < oldest)) oldest = a.ts; });
     const quick = cands.filter(a => !apiCount.has(a.id));
     for (let i = 0; i < quick.length && !stop(); i += 8) {
       const ids = quick.slice(i, i + 8).map(a => a.id);
       await say(`Reading comments on ${checked + ids.length} activities`);
       let got = {};
       try { got = (await sx(`__SD.commentsMany(${JSON.stringify(ids)}, 4)`, cfg('detailsWait') * 2000)) || {}; } catch (e) { console.warn('Style: ' + e.message); }
-      for (const id of ids) { const list = got[id] || []; apiCount.set(id, list.length); checked++; read += list.length; list.filter(isMine).forEach(c => take(c.text)); }
+      for (const id of ids) { const list = got[id] || []; apiCount.set(id, list.length); checked++; read += list.length; const before = texts.length; list.filter(isMine).forEach(c => take(c.text)); fromData += texts.length - before; }
     }
     if (readPage) {
-      const slow = cands.filter(a => !pageDone.has(a.id) && (apiCount.get(a.id) || 0) < (a.comments || 0))
-        .sort((x, y) => (y.hasKudoed ? 1 : 0) - (x.hasKudoed ? 1 : 0) || (y.ts || 0) - (x.ts || 0));
+      // open every page the data didn't fully cover: known comments first, then friends you gave kudos to, newest first
+      const covered = (a) => (apiCount.get(a.id) || 0) > 0 && (apiCount.get(a.id) || 0) >= (a.comments || 0);
+      const slow = cands.filter(a => !pageDone.has(a.id) && !covered(a))
+        .sort((x, y) => ((y.comments || 0) > 0) - ((x.comments || 0) > 0) || (y.hasKudoed ? 1 : 0) - (x.hasKudoed ? 1 : 0) || (y.ts || 0) - (x.ts || 0));
       for (let i = 0; i < slow.length && !stop() && opened < 300; i++) {
         pageDone.add(slow[i].id); opened++;
         await say(`Opening activity ${i + 1} of ${slow.length}`);
-        try { (await readPage(slow[i].id, me, myName)).forEach(take); }
+        try { const got = await readPage(slow[i].id, me, myName), before = texts.length; got.forEach(take); fromPages += texts.length - before; read += got.length; }
         catch (e) { console.warn('Style page: ' + e.message); }
+        if (opened % 25 === 0) startLog(`Learn my style: ${opened} pages opened, ${texts.length} of ${n} found`);
       }
     }
     if (stop()) break;
@@ -1020,6 +1030,7 @@ async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopp
     await feed.readBackTo(before - 7 * 864e5, async () => {}, isClosed);
     if ((feed.scan().position || before) >= before) break;
   }
+  startLog(`Learn my style: found ${texts.length} of ${n} (${fromData} from Strava's data, ${fromPages} from ${opened} pages opened, ${checked} activities checked, back to ${oldest ? new Date(oldest).toISOString().slice(0, 10) : 'today'})${isStopped() ? ', stopped' : ''}`);
   if (isClosed()) throw new Error('Stopped.');
   const who = myName ? ` (looking for ${myName})` : '';
   if (texts.length < 3) throw new Error(read || opened
@@ -1030,7 +1041,7 @@ async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopp
   const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 2000);
   if (!prof) throw new Error('The AI sent back nothing. Try again.');
   settings.styleProfile = prof;
-  settings.styleMeta = { at: Date.now(), count: texts.length, wanted: n, read, scanned: checked, opened, stopped: isStopped() };
+  settings.styleMeta = { at: Date.now(), count: texts.length, wanted: n, read, scanned: checked, opened, oldest, stopped: isStopped() };
   saveSettings();
 }
 
@@ -3091,7 +3102,38 @@ body.loading .loadst{display:block}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
 #csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #csheet[hidden]{display:none}
-.csp{width:100%;max-height:94vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
+#ideaov{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;overflow:hidden;color:#fff;border-radius:20px 20px 0 0;
+  background:linear-gradient(180deg,#0e3a78 0%,#2f74c8 52%,#7fb6e8 78%,#ffd59a 100%);animation:ifade .2s ease-out}
+#ideaov.done{opacity:0;transition:opacity .3s}
+@keyframes ifade{from{opacity:0}to{opacity:1}}
+.isun{position:relative;width:112px;height:112px;margin:24px 0 28px;flex:none}
+#ideaov > *{flex:none}
+.isun::before{content:'';position:absolute;inset:-46px;border-radius:50%;
+  background:repeating-conic-gradient(rgba(255,214,102,.9) 0deg 7deg,rgba(255,214,102,0) 7deg 22.5deg);
+  -webkit-mask:radial-gradient(circle,transparent 62px,#000 64px,#000 98px,transparent 102px);mask:radial-gradient(circle,transparent 62px,#000 64px,#000 98px,transparent 102px);
+  animation:isunspin 16s linear infinite}
+.isun::after{content:'';position:absolute;inset:0;border-radius:50%;box-shadow:0 0 34px 14px rgba(255,205,90,.85),0 0 90px 40px rgba(255,190,70,.35);animation:isunglow 2.2s ease-in-out infinite alternate}
+.isun img,.isunini{position:relative;z-index:1;display:grid;place-items:center;width:112px;height:112px;border-radius:50%;object-fit:cover;border:4px solid #ffd166;box-sizing:border-box;background:#ffb703;color:#7a3e00;font-size:34px;font-weight:800}
+@keyframes isunspin{to{transform:rotate(360deg)}}
+@keyframes isunglow{from{opacity:.65}to{opacity:1}}
+.icloud{position:absolute;z-index:0;height:26px;border-radius:999px;background:rgba(255,255,255,.85);filter:blur(.3px);animation:idrift linear infinite}
+.icloud::before,.icloud::after{content:'';position:absolute;bottom:8px;border-radius:50%;background:inherit}
+.icloud::before{width:34px;height:34px;left:16px}
+.icloud::after{width:24px;height:24px;left:44px}
+.icloud.c1{width:96px;top:9%;animation-duration:22s}
+.icloud.c2{width:70px;top:21%;opacity:.7;animation-duration:30s;animation-delay:-12s}
+.icloud.c3{width:84px;top:33%;opacity:.5;animation-duration:26s;animation-delay:-6s}
+.isun{z-index:1}
+.iquote,.ibar,.isub,.icancel{position:relative;z-index:2}
+@keyframes idrift{from{transform:translateX(-160px)}to{transform:translateX(520px)}}
+.iquote{font-size:calc(19px * var(--ts));font-weight:800;min-height:1.4em;text-shadow:0 1px 6px rgba(0,0,0,.35);transition:opacity .25s,transform .25s}
+.iquote.out{opacity:0;transform:translateY(6px)}
+.ibar{width:min(260px,80%);height:8px;border-radius:999px;background:rgba(255,255,255,.3);overflow:hidden}
+.ibar i{display:block;height:100%;width:0;background:#ffd166;border-radius:999px;transition:width .35s ease-out}
+.isub{font-size:13px;opacity:.92;text-shadow:0 1px 4px rgba(0,0,0,.35)}
+.icancel{margin-top:4px;background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.35);padding:8px 18px;border-radius:999px;font-weight:600}
+@media (prefers-reduced-motion: reduce){.isun::before,.isun::after,.icloud{animation:none}.iquote{transition:none}}
+.csp{position:relative;width:100%;max-height:94vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
 .csh{display:flex;align-items:center;gap:12px;padding:8px 16px 12px;border-bottom:1px solid var(--line)}
 .csb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px))}
 .incs{margin-top:0}
@@ -3581,7 +3623,7 @@ function openComposer(art){
   var src=art&&art.querySelector('.cbox'); if(!src) return;
   var id=art.dataset.id, ov=composerSheet(), det=document.getElementById('det');
   var sec=document.querySelector('section.person .act[data-id="'+CSS.escape(id)+'"]');
-  ov.dataset.id=id;
+  ov.dataset.id=id; ov.dataset.who=art.dataset.who||'';
   ov.dataset.pid=sec?sec.closest('section.person').dataset.pid:(det&&!det.hidden?det.dataset.pid||'':'');
   var ttl=(art.querySelector('.ttl')||{}).textContent||'';
   ov.querySelector('.csh').innerHTML='<div class="mtt"><b>Comment for '+escH(art.dataset.who||'your friend')+'</b><small>'+escH(ttl)+'</small></div><button class="mbtn" data-act="cs-close" aria-label="Close">✕</button>';
@@ -3613,12 +3655,53 @@ function aiReply(box,ok,msg,label){
   list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
   return true;
 }
+// While comment ideas are written: the composer is covered by a sky, with the friend's photo as the sun.
+var IDEA_QUOTES=['Generating…','Scrambling the adjectives…','Cooking up something witty…','Warming up the puns…','Lacing up the jokes…','Stretching before the punchline…','Checking the splits on this sentence…','Adding a pinch of British…','Carb-loading on compliments…','Negative-splitting the wordplay…','Hunting for a PR-worthy pun…','Hydrating the vocabulary…','Tying a double knot on the joke…','Pacing the punchline…'];
+function ideaOverlay(box){
+  var cs=box.closest('#csheet'); if(!cs) return null;
+  var panel=cs.querySelector('.csp'), who=cs.dataset.who||'your friend';
+  var sec=cs.dataset.pid?document.querySelector('section.person[data-pid="'+CSS.escape(cs.dataset.pid)+'"]'):null;
+  var av=sec?sec.querySelector('img.av'):null, ini=sec?sec.querySelector('.av.ph'):null;
+  var face=av?'<img src="'+escH(av.getAttribute('src'))+'" alt="">':'<span class="isunini">'+escH(ini?ini.textContent:initialsOf(who))+'</span>';
+  var el=document.createElement('div'); el.id='ideaov'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite');
+  el.innerHTML='<div class="icloud c1" aria-hidden="true"></div><div class="icloud c2" aria-hidden="true"></div><div class="icloud c3" aria-hidden="true"></div>'+
+    '<div class="isun" aria-hidden="true">'+face+'</div>'+
+    '<div class="iquote"></div>'+
+    '<div class="ibar" role="progressbar" aria-label="Comment ideas progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>'+
+    '<div class="isub">Comment ideas for '+escH(who)+'</div>'+
+    '<button class="icancel" data-act="idea-cancel">Cancel</button>';
+  var old=panel.querySelector('#ideaov'); if(old) old.remove();
+  panel.appendChild(el);
+  var q=el.querySelector('.iquote'), fill=el.querySelector('.ibar i'), bar=el.querySelector('.ibar'), sub=el.querySelector('.isub');
+  var k=Math.floor(Math.random()*IDEA_QUOTES.length), pct=0, creep=null, early=null;
+  q.textContent=IDEA_QUOTES[0];
+  var rot=setInterval(function(){ q.classList.add('out'); setTimeout(function(){ k=(k+1)%IDEA_QUOTES.length; if(k===0) k=1; q.textContent=IDEA_QUOTES[k]; q.classList.remove('out'); },250); },1700);
+  function set(v){ pct=Math.max(pct,Math.min(100,v)); fill.style.width=pct+'%'; bar.setAttribute('aria-valuenow',Math.round(pct)); }
+  set(6);
+  var ctl={ cancelled:false,
+    progress:function(p){
+      if(early){ clearInterval(early); early=null; }
+      if(p.step==='photos'&&p.total){ sub.textContent='Looking at photo '+Math.min(p.done+1,p.total)+' of '+p.total+' from '+who; set(6+40*(p.done/p.total)); }
+      if(p.step==='writing'){ sub.textContent='Writing comment ideas for '+who; set(48); if(!creep) creep=setInterval(function(){ set(pct+(93-pct)*0.06); },350); }
+    },
+    finish:function(){ clearInterval(rot); if(creep) clearInterval(creep); if(early) clearInterval(early); set(100); el.classList.add('done'); setTimeout(function(){ el.remove(); },300); },
+    cancel:function(){ ctl.cancelled=true; ctl.finish(); }
+  };
+  early=setInterval(function(){ if(pct<40) set(pct+0.6); },400);   // creep a little before the first news arrives
+  window.__ideaProgress=function(p){ ctl.progress(p); };
+  el.querySelector('.icancel').addEventListener('click',function(e){ e.stopPropagation(); ctl.cancel(); });
+  return ctl;
+}
 function suggest(btn){
   if(btn.disabled) return;
   var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
   btn.disabled=true; btn.dataset.busy='1'; var card=document.querySelector('.act[data-id="'+CSS.escape(btn.dataset.suggest)+'"]'); btn.textContent=(card&&card.querySelector('.photos img'))?'📷 Looking at the photos…':'✨ Thinking…';
+  var io=ideaOverlay(box);
   send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode},function(ok,msg){
-    btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
+    window.__ideaProgress=null;
+    btn.disabled=false; delete btn.dataset.busy;
+    if(io){ if(io.cancelled){ btn.textContent='✨ Suggest'; return; } io.finish(); }
+    btn.textContent='✨ More';
     if(!aiReply(box,ok,msg,'Suggestions')&&!ok&&msg==='NEED_KEY') btn.textContent='✨ Suggest';
   });
 }
@@ -3952,7 +4035,7 @@ function writingHTML(){
       '<div class="stylebtns"><button class="sm" data-act="style-learn"'+(STYLEBUSY?' disabled':'')+'>'+(STYLEBUSY?'Learning…':(prof?'Learn again':'Learn my style'))+'</button>'+
       (STYLEBUSY?'<button class="sm" data-act="style-stop">Stop</button>':'')+
       '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLEMSG)+'</small></div>'+
-      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+((meta.read||meta.opened)?'<br>'+(meta.read||0)+' comments read, '+(meta.opened||0)+' activities opened'+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
+      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.opened!=null?'<br>'+(meta.read||0)+' comments read, '+meta.opened+' activities opened'+(meta.oldest?', back to '+escH(new Date(meta.oldest).toLocaleDateString(undefined,{day:'numeric',month:'short'})):'')+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
 function renderCfg(){
