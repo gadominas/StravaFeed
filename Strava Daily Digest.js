@@ -17,6 +17,9 @@
  * Run with ?days=1 (URL scheme / Shortcuts) to see yesterday.
  * Opens on a 2.4 s launch screen with the route-digest logo (app-blueprints · launch-screen).
  * Home Screen and Lock Screen widget in the shared frame, from a snapshot the digest saves (app-blueprints · widgets).
+ * While no AI key is saved, a short card now and then shows what AI adds (app-blueprints · ai-invitation).
+ * Safe start-up: an empty dark window first, data read after it with time limits, one window at a time,
+ * and a start-up log in Settings › Updates (app-blueprints · recipes/safe-startup).
  * The BLUEPRINTS block below lists every shared blueprint this app follows (Settings › Built with).
  */
 
@@ -47,8 +50,19 @@ const DIGEST = {
   },
 };
 
+// ───────── AI invitation (app-blueprints · ai-invitation) ─────────
+// What the invitation promises. Exactly three perks, each a real feature that needs a key.
+const AI_INVITE = {
+  title: "Give Daily Digest superpowers",       // punchy, names the app, at most 32 characters
+  perks: [                                      // icon + at most 48 characters each
+    { icon: "✦", text: "Comment ideas for every activity, in one tap" },
+    { icon: "🎭", text: "Funny, energetic or serious, in two languages" },
+    { icon: "✍️", text: "Learns your style, then writes like you" },
+  ],
+};
+
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.15.2';
+const VERSION = '1.16.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -61,6 +75,7 @@ const BLUEPRINTS = [
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.0', since: '1.16.0' },
 ];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
@@ -91,9 +106,11 @@ function dayBounds(daysBack) {
 }
 
 async function main() {
+  await waitForOtherWindow();        // safe start-up: quick taps on the widget don't stack up windows
+  const runStart = Date.now();
   const sv = new WebView();          // hidden: feed, kudos (sits on a tiny strava.com page)
   const sx = makeSx(sv);
-  let ev = null, ex = null;          // hidden: activity details, so kudos never wait behind them
+  let dv = null, dx = null;          // hidden: activity details, so kudos never wait behind them
   const ui = new WebView();          // the digest you see
 
   let settingsEffect = '';   // what closing Settings must do: '', 'render' or 'reload'
@@ -104,8 +121,16 @@ async function main() {
   let viewing = false, savedScroll = 0;
   let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
+  let updateSettled = false, onDigest = false;   // the AI invitation waits for both (see inviteIfDue)
+  let icloudNote = false;                        // a data file didn't arrive from iCloud: say so once the digest is up
   // Show the update pitch over the digest (it is re-shown after day switches until answered).
   const offerUpdate = () => { if (pendingUpdate && !viewing && !closed) js(`window.__showUpdate && window.__showUpdate(${JSON.stringify(pendingUpdate)})`); };   // true while a Strava activity page is shown inside the digest
+  // One offer per launch, and an update wins: call this once the update check has settled.
+  // The digest loads a new page for every screen, so it is also held until the digest itself is on screen
+  // (the boot or login page would be replaced under the card): whichever of the two comes last calls it.
+  function inviteIfDue() {
+    if (!pendingUpdate && aiInviteDue()) js(`window.__aiInvite && window.__aiInvite(${JSON.stringify(AI_INVITE)})`);
+  }
   ui.shouldAllowRequest = (req) => {
     const url = (req && req.url) || '';
     if (url.startsWith(SCHEME)) { handleAction(url).catch(e => console.error(e)); return false; }
@@ -140,14 +165,11 @@ async function main() {
       await js(`window.scrollTo(0, ${savedScroll}); window.toast && toast(${JSON.stringify("Strava's page didn't open. The details view shows everything the digest has.")})`);
     }
   }
-  const js = (code) => ui.evaluateJavaScript(`${code}; 'ok'`).catch(() => {});
+  // Talks to the page with a time limit, so a stuck page can't stall the app (safe-startup).
+  const ev = (js, ms = 20000) => Promise.race([ui.evaluateJavaScript(js, false), pause(ms).then(() => { throw new Error("the page didn't respond in " + ms / 1000 + " s"); })]);
+  const js = (code) => ev(`${code}; 'ok'`).catch(() => {});
   const status = (t) => js(`window.setStatus && window.setStatus(${JSON.stringify(t)})`);
   const count = (n) => js(`window.setCount && window.setCount(${+n || 0})`);
-
-  // Show the window straight away; everything else loads behind it.
-  await ui.loadHTML(bootScreen('Opening your feed'));
-  const shown = ui.present(true);
-  shown.then(() => { closed = true; });
 
   async function startSession() {
     await sv.loadURL(`${STRAVA}/robots.txt`);
@@ -158,6 +180,7 @@ async function main() {
 
     status('Checking your Strava login');
     if (!(await authInfo(sx)).loggedIn) {
+      startLog('not logged in to Strava: login page shown');
       await ui.loadHTML(page(`<div class="center"><h1>Log in to Strava</h1><p>Use email and password or the emailed code. Google sign-in usually doesn't work here.<br>The digest opens by itself once you're logged in.</p><br><button data-act="login">Log in to Strava</button></div>`));
       while (!closed && !(await authInfo(sx)).loggedIn) await sleep(2500);
       if (closed) return null;
@@ -189,8 +212,11 @@ async function main() {
       viewing = false;
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList() }));
+      if (booting) startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
       saveSnapshot(feed);
       offerUpdate();
+      if (!onDigest) { onDigest = true; if (updateSettled) inviteIfDue(); }   // AI invitation: once the digest is up and the update check has settled
+      if (icloudNote) { icloudNote = false; js(`window.toast && toast(${JSON.stringify("Some of your data is still coming from iCloud. Nothing will be saved until you reopen Daily Digest.")})`); }
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
       fillMine(token).catch(e => console.warn('Your activities: ' + e));
     } catch (e) {
@@ -217,12 +243,12 @@ async function main() {
     if (!settings.enrich) return;
     const todo = acts.filter(a => !details.has(a.id)).map(a => a.id);
     if (!todo.length) return;
-    if (!ev) { ev = new WebView(); await ev.loadURL(`${STRAVA}/robots.txt`); ex = makeSx(ev); }
+    if (!dv) { dv = new WebView(); await dv.loadURL(`${STRAVA}/robots.txt`); dx = makeSx(dv); }
     for (let i = 0; i < todo.length; i += cfg('enrichConcurrency')) {
       if (token !== viewToken || closed) return;
       const chunk = todo.slice(i, i + cfg('enrichConcurrency'));
       let det = {};
-      try { det = await ex(`__SD.enrich(${JSON.stringify(chunk)}, ${chunk.length})`, cfg('detailsWait') * 1000); } catch (e) { console.warn(e.message); }
+      try { det = await dx(`__SD.enrich(${JSON.stringify(chunk)}, ${chunk.length})`, cfg('detailsWait') * 1000); } catch (e) { console.warn(e.message); }
       chunk.forEach(id => details.set(id, det[id] || {}));
       if (token !== viewToken || closed) return;
       const touched = new Set();
@@ -247,6 +273,13 @@ async function main() {
       await js(`window.__aiState(${JSON.stringify(aiClientState())})`);
       if (msg) await js(`window.__aiToast(${JSON.stringify(msg)})`);
       await js(`window.__done(${JSON.stringify(p.req)}, true, '')`);
+      return;
+    }
+    if (head === 'aiinvite') { aiInviteNote(p.v); return; }   // AI invitation: shown, open, later or never
+    if (head === 'startlog') {   // Settings › Updates › Start-up log (safe-startup)
+      let txt = '';
+      try { txt = FileManager.local().readString(LOG_PATH).split('\n').slice(-40).join('\n'); } catch (e) {}
+      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(txt)})`);
       return;
     }
     if (head === 'login') { await openStrava(ui, '/login'); return; }
@@ -383,21 +416,67 @@ async function main() {
     await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
   }
 
+  // The app's own start-up work: the Strava session and the feed (the update check now starts from bootApp).
   async function boot() {
     try {
       const session = await startSession();
       if (!session) return;
       feed = makeFeed(sx, session.me, session.first);
-      if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
       await count(feed.scan().entries);
       await showDay(false, true);
     } catch (e) {
+      startLog('feed failed: ' + (e.message || e));
       await ui.loadHTML(page(`<div class="center">${esc(e.message || e)}<br><br><button class="ghost" data-act="retry">Try again</button></div>`));
     }
   }
 
-  await boot();
-  await shown;
+  // Safe start-up (app-blueprints · recipes/safe-startup): the boot page is on screen; read the data, hand it over,
+  // then start the deferred work. Every later screen (login, digest, refresh) is a new page in the same visible window.
+  async function bootApp(isClosed) {
+    const t0 = Date.now();
+    startLog(`Daily Digest ${VERSION}: reading data`);
+    await loadData();
+    startLog(`data read in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${sentComments.length} sent comments${loadIssues.length ? '; missing: ' + loadIssues.join(', ') : ''}`);
+    if (isClosed()) return;
+    // Nothing is handed over in pieces (window.__parts stays empty): the digest arrives as its own page.
+    await ev(`window.__boot(${JSON.stringify({ status: 'Opening your feed' })})`);
+    let seen = '';
+    try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight`, 5000); } catch (e) { seen = String(e.message || e); }
+    startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
+    if (loadIssues.length) icloudNote = true;   // toasted once the digest is on screen
+    // Deferred work, once the first screen is drawn: the feed, then updates (and the AI invitation), then the widget's icon.
+    // The feed loads even when a data file is missing: it comes from Strava, and write() saves nothing over unread files.
+    Timer.schedule(700, false, () => {
+      if (isClosed()) return;
+      boot().catch(e => startLog('feed failed: ' + (e.message || e)));
+    });
+    Timer.schedule(3500, false, () => {
+      if (isClosed() || updateChecked) return;
+      updateChecked = true;
+      checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }).catch(() => {})
+        .then(() => { updateSettled = true; if (onDigest) inviteIfDue(); });   // AI invitation: after the update check, never with an offer
+    });
+    Timer.schedule(6000, false, () => { widgetIcon(); });
+  }
+
+  // A page built before its window is on screen can stay blank on some iPhones (the page runs, nothing is drawn),
+  // most often when opened from the widget. So: an empty dark window first, then the boot page built inside it.
+  await ui.loadHTML('<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:#0E1116"></body></html>');
+  const presented = ui.present(true);
+  holdLock();
+  presented.then(() => { closed = true; releaseLock(); });
+  await pause(300);                          // let the window finish appearing
+  startLog('window on screen');
+  await Promise.race([ui.loadHTML(bootScreen('Opening your feed')), pause(15000)]);   // the launch screen, drawn on screen
+  bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
+    startLog('start-up failed: ' + (e.message || e));
+    let log = '';
+    try { log = FileManager.local().readString(LOG_PATH).split('\n').slice(-12).join('\n'); } catch (x) {}
+    if (!closed) ui.evaluateJavaScript(`window.__bootNote("Daily Digest couldn't open", ${JSON.stringify(log)})`, false).catch(() => {});
+  });
+  await presented;
+  closed = true;
+  releaseLock();
 }
 
 // ─────────────── AI configuration ───────────────
@@ -559,6 +638,7 @@ async function aiAction(head, m) {
       break;
     case "airm": removeKey(P); msg = `${PROVIDERS[P]} key removed`;
       if (!aiKey()) { const other = Object.keys(PROVIDERS).find(p => keyFor(p)); if (other) aiSettings.aiProvider = other; }
+      aiInviteKeyRemoved();   // AI invitation: removing the last key invites again from the next launch
       break;
     case "aiprov": if (PROVIDERS[m.v] && keyFor(m.v)) aiSettings.aiProvider = m.v; break;
     case "aimodels":
@@ -601,6 +681,33 @@ function aiStatusLine() {
     (P && P.calls ? ` — ${aiFmtN(P.in + P.out)} tokens used` : "");
 }
 const aiFmtN = n => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+
+// AI invitation (app-blueprints · ai-invitation): when it may appear.
+// Its state lives in settings.json as settings.aiInvite (no UI of its own); saveSettings is this app's saveAll.
+const INVITE_DAY = 864e5;
+const INVITE_GAP = 3;          // days between invitations (about twice a week)
+const INVITE_GAP_SLOW = 7;     // days between invitations after the 4th "Later"
+function aiInviteDue(now = Date.now()) {
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  if (aiKey()) return false;   // a key means AI is on: nothing to invite to
+  if (s.off) return false;     // "Don't remind me again"
+  return now >= (s.next || 0); // from the very first launch (right after install), then at most every 3 days
+}
+// Removing the last key turns AI off: invite again from the next launch (called in the "airm" action).
+function aiInviteKeyRemoved() {
+  if (aiKey()) return;
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  s.next = 0; saveSettings();
+}
+// The page reports what happened: "shown", "open", "later" or "never".
+function aiInviteNote(what, now = Date.now()) {
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  if (what === "shown") { s.shown = (s.shown || 0) + 1; s.next = now + INVITE_GAP * INVITE_DAY; }
+  else if (what === "later") { s.later = (s.later || 0) + 1; s.next = now + (s.later >= 4 ? INVITE_GAP_SLOW : INVITE_GAP) * INVITE_DAY; }
+  else if (what === "never") s.off = true;
+  else return;   // "open": the AI sheet takes over; "shown" already set the next date
+  saveSettings();
+}
 // ─────────────── end of AI configuration ───────────────
 
 // ─────────────── ✨ comment suggestions (through aiCall) ───────────────
@@ -681,9 +788,8 @@ const STYLE_PROMPT = [
 // Comments you posted through the digest: the surest examples of your style (kept on this iPhone, newest first).
 async function rememberSent(text) {
   try {
-    const h = (await load('sent-comments', [])).filter(x => x && x.text !== text);
-    h.unshift({ text, at: Date.now() });
-    write('sent-comments', h.slice(0, 50));
+    sentComments = [{ text, at: Date.now() }].concat(sentComments.filter(x => x && x.text !== text)).slice(0, 50);
+    write('sent-comments', sentComments);   // skipped when loadData() couldn't read the file (safe-startup)
   } catch (e) { console.warn('Comment history: ' + e); }
 }
 
@@ -709,7 +815,7 @@ async function learnStyle(feed, sx, progress, isClosed) {
   let read = 0;   // everyone's comments looked at, yours or not
   const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); } };
   const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || nameMatches(c.name, myName);
-  for (const h of await load('sent-comments', [])) take(h && h.text);
+  for (const h of sentComments) take(h && h.text);   // read in loadData()
   for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
   const checked = new Set();
   let scanned = 0;
@@ -804,15 +910,44 @@ const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return File
 const DIR = fm.joinPath(fm.documentsDirectory(), APP);
 if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
 const P = n => fm.joinPath(DIR, n + ".json");
-async function load(n, def) {
+// A short start-up log on the phone (local, not iCloud): Settings › Updates › Start-up log, and on screen if opening stalls.
+const LOG_PATH = FileManager.local().joinPath(FileManager.local().documentsDirectory(), APP_ID + "-startup.log");
+function startLog(msg) {
+  try {
+    const lfm = FileManager.local(), line = new Date().toISOString().slice(11, 19) + "  " + msg;
+    const old = lfm.fileExists(LOG_PATH) ? lfm.readString(LOG_PATH).split("\n").slice(-60) : [];
+    lfm.writeString(LOG_PATH, old.concat(line).join("\n"));
+  } catch (e) {}
+}
+const loadIssues = [];   // files iCloud didn't hand over in time
+async function load(n, def, waitMs = 10000) {
   const p = P(n);
   if (!fm.fileExists(p)) return def;
   try {
-    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) await fm.downloadFileFromiCloud(p);
+    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) {
+      // iCloud can take a long time (or forever, offline): never let start-up hang on it
+      await Promise.race([fm.downloadFileFromiCloud(p), new Promise(r => Timer.schedule(waitMs, false, r))]);
+      if (!fm.isFileDownloaded(p)) { loadIssues.push(n); startLog(`iCloud didn't deliver ${n}.json in ${waitMs / 1000} s`); return def; }
+    }
     return JSON.parse(fm.readString(p));
-  } catch (e) { return def; }   // a broken file falls back to defaults, never crashes
+  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // a broken file falls back to defaults, never crashes
 }
-const write = (n, v) => { try { fm.writeString(P(n), JSON.stringify(v)); return true; } catch (e) { console.warn("Couldn't save " + n + ": " + e); return false; } };
+// Data files are only written once they were read, so a slow start can never save an empty list over them.
+// settingsOk is set by loadSettings() (settings that were never read are never saved over).
+let settingsOk = false, dataLoaded = false;
+const write = (n, v) => {
+  if (n === "settings" ? !settingsOk : (["sent-comments"].includes(n) && !dataLoaded)) return false;
+  try { fm.writeString(P(n), JSON.stringify(v)); return true; } catch (e) { console.warn("Couldn't save " + n + ": " + e); return false; }
+};
+// Data is read in loadData(): the app shows its first screen before reading it, because iCloud can be slow.
+// The feed itself comes from Strava; the AI settings and usage are small local files (ai-configuration), read as before.
+let sentComments = [];   // comments you posted through the digest, newest first: the surest examples of your style
+async function loadData() {
+  loadIssues.length = 0;
+  sentComments = await load("sent-comments", []);
+  if (!Array.isArray(sentComments)) sentComments = [];
+  dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
+}
 
 // Defaults first, saved choices on top (loadSettings, at the entry point, before any branch).
 const settings = {
@@ -849,8 +984,9 @@ function setSetting(k, v) {
 
 async function loadSettings() {
   const saved = await load("settings", null);
+  settingsOk = !loadIssues.includes("settings");   // settings that were never read are never saved over
   if (saved) Object.assign(settings, saved);
-  else {   // first run of 1.10: move the choices 1.9.x kept in the Keychain into settings.json
+  else if (settingsOk) {   // first run of 1.10: move the choices 1.9.x kept in the Keychain into settings.json
     try {
       if (Keychain.contains(KC_SETTINGS_OLD)) {
         const o = JSON.parse(Keychain.get(KC_SETTINGS_OLD));
@@ -2474,6 +2610,7 @@ function launchScreen() {
 }
 
 function page(content) {
+  const splash = launchScreen();   // only the run's first page (the boot page) carries it, and only that page waits for __boot
   const look = lookState();
   return `<!doctype html><html data-theme="${look.shown}" data-font="${look.font}" style="--ts:${look.textSize}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -2978,8 +3115,44 @@ body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 .badge-ex{display:inline-block;font-size:12px;font-weight:600;color:var(--mut);border:1px dashed var(--mut);border-radius:6px;padding:1px 8px}
 body.nokey .ai,body.nokey .modes{display:none!important}
 .sugs .badge-ai{align-self:flex-start}
+/* Safe start-up (app-blueprints · recipes/safe-startup): a stalled start says so on the boot page; Settings › Updates › Start-up log */
+.booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
+.booting.note{flex-direction:column;text-align:center;color:var(--ink-2);padding:60px 24px}
+.booting.note b{font-size:calc(18px * var(--ts));color:var(--ink)}
+.booting.note pre,.startlog{max-width:100%;overflow:auto;text-align:left;font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px;color:var(--ink-2);white-space:pre-wrap;-webkit-user-select:text;user-select:text}
+.startlog{margin:8px 0;max-height:260px}
+/* AI invitation (app-blueprints · ai-invitation): above Settings and the AI sheet, below the update sheet and the launch screen */
+#aiinv{position:fixed;inset:0;z-index:47;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.45);animation:aiinvFade .25s ease both}
+#aiinv.out{animation:aiinvFadeOut .24s ease both}
+.aiinv-card{position:relative;width:100%;max-width:380px;background:var(--sheet);color:var(--ink);border:1px solid var(--rule);border-radius:24px;padding:26px 22px 16px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.35);animation:aiinvUp .5s cubic-bezier(.2,.9,.3,1.2) both}
+#aiinv.out .aiinv-card{animation:aiinvDown .24s ease both}
+.aiinv-spark{width:56px;height:56px;margin:-4px auto 10px;border-radius:18px;display:grid;place-items:center;font-size:calc(30px * var(--ts));color:var(--signal);background:var(--signal-wash);animation:aiinvTwinkle 2.4s ease-in-out .5s infinite}
+#aiinv h2{margin:0 0 6px;font-family:var(--display);font-size:calc(23px * var(--ts));line-height:1.2;font-weight:800}
+.aiinv-lead{margin:0 0 14px;color:var(--ink-2);font-size:calc(15px * var(--ts))}
+.aiinv-perks{list-style:none;margin:0 0 14px;padding:0;text-align:left}
+.aiinv-perks li{display:flex;gap:10px;align-items:center;padding:9px 12px;margin-bottom:6px;border-radius:12px;background:var(--signal-wash);font-size:calc(15px * var(--ts));font-weight:600;animation:aiinvPerk .4s ease both;animation-delay:calc(.25s + var(--i) * .09s)}
+.aiinv-ico{flex:none;width:22px;text-align:center}
+.aiinv-steps{margin:0 0 16px;padding-left:22px;text-align:left;color:var(--muted);font-size:calc(13px * var(--ts));line-height:1.6}
+.aiinv-go{display:block;width:100%;border:0;border-radius:14px;padding:14px;font:700 calc(17px * var(--ts)) var(--display);color:var(--sheet);background:var(--signal);animation:aiinvGlow 1.6s ease-in-out .9s 2}
+.aiinv-go:focus{outline:none}
+.aiinv-go:focus-visible{box-shadow:0 0 0 4px var(--signal-wash)}
+.aiinv-row{display:flex;justify-content:space-between;gap:8px;margin-top:6px}
+.aiinv-later,.aiinv-never{border:0;background:none;padding:12px 6px;color:var(--muted);font:600 calc(14px * var(--ts)) var(--sans, inherit)}
+.aiinv-later{color:var(--ink-2)}
+.aiinv-nudge{animation:aiinvGlow 1.2s ease-in-out 2}
+@keyframes aiinvFade{from{opacity:0}to{opacity:1}}
+@keyframes aiinvFadeOut{from{opacity:1}to{opacity:0}}
+@keyframes aiinvUp{from{opacity:0;transform:translateY(40px) scale(.94)}to{opacity:1;transform:none}}
+@keyframes aiinvDown{to{opacity:0;transform:translateY(24px) scale(.97)}}
+@keyframes aiinvPerk{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+@keyframes aiinvTwinkle{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.12) rotate(12deg)}}
+@keyframes aiinvGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--signal-wash)}}
+@media (prefers-reduced-motion:reduce){
+  #aiinv,#aiinv.out,.aiinv-card,#aiinv.out .aiinv-card,.aiinv-perks li,.aiinv-spark,.aiinv-go,.aiinv-nudge{animation:none}
+  #aiinv.out{opacity:0;transition:opacity .2s}
+}
 </style></head><body class="d-${look.density}${aiKey() ? '' : ' nokey'}">
-${launchScreen()}${content}
+${splash}${content}
 <div id="sendov" hidden role="status" aria-live="polite"><div class="sv">
   <div class="stage">
     <svg class="arc" viewBox="0 0 280 130" aria-hidden="true"><path d="M62 65 Q140 -5 218 65"/></svg>
@@ -3448,6 +3621,8 @@ function renderCfg(){
     '<h3 class="sec">Updates</h3>'+
       swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
       '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
+      '<div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Daily Digest opened</small></div><button class="sm" data-act="startlog">Show</button></div>'+
+      '<pre id="startlog" class="startlog" hidden></pre>'+
     SET.cfgSchema.filter(function(sec){ return sec.title!=='Comments'; }).map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join(''); }).join('')+
     '<div class="cfg-foot"><span class="note">'+(changed?changed+' setting'+(changed===1?'':'s')+' changed':'All settings are at their original values')+'</span>'+
       (changed?'<button class="sm danger '+(cfgArmed?'armed':'')+'" data-act="cfgall">'+(cfgArmed?'Confirm reset':'Reset all')+'</button>':'')+'</div>'+
@@ -3470,6 +3645,12 @@ function cfgAction(t,act){
   if(act==='updcheck'){ var um=document.getElementById('updmsg'); t.disabled=true; if(um) um.textContent='Checking…';
     send('update-check',{},function(ok,res){ t.disabled=false; if(um) um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); return; }
   if(act==='openurl'){ send('openurl',{v:v}); return; }
+  if(act==='startlog'){   // safe-startup: the last 40 lines of the start-up log
+    var pre=document.getElementById('startlog');
+    if(!pre.hidden){ pre.hidden=true; t.textContent='Show'; return; }
+    send('startlog',{},function(ok,txt){ pre.textContent=txt||'Nothing logged yet.'; pre.hidden=false; t.textContent='Hide'; });
+    return;
+  }
   if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
   if(act==='style-clear'){ STYLEMSG=''; send('style-clear',{},setState); return; }
   if(act==='style-learn'){
@@ -3584,6 +3765,61 @@ window.__aiChanged=function(s){
   var el=document.getElementById('s-aistatus'), P=s.usage.p[s.provider];
   if(el) el.textContent=s.hasKey?AI_PN[s.provider]+' — '+s.model[s.provider]+(P&&P.calls?' — '+aiFmtN(P.in+P.out)+' tokens used':''):'Add a Claude or OpenAI key for ✨ comment ideas';
 };
+// ── AI invitation (app-blueprints · ai-invitation) ── ES5, no backticks: this sits inside the page's template string.
+// Never while the digest is reloading (a new page is on its way and would replace the card).
+window.canInvite = function () { return !document.body.classList.contains("loading"); };
+window.__aiInvite = function (c) {
+  var tries = 0;
+  (function wait() {
+    // Never over the launch screen, another sheet, or a task the app says can't be interrupted.
+    var busy = document.querySelector("#splash:not(.gone)") || document.getElementById("upd") || document.getElementById("aiinv") ||
+      document.querySelector(".sheet.open, #cfgsheet.open, #aisheet.open") ||
+      document.querySelector("#csheet:not([hidden]), #msheet:not([hidden]), #det:not([hidden]), #sheet:not([hidden]), #lb:not([hidden]), #kov:not([hidden]), #sendov:not([hidden])") ||
+      (window.canInvite && !window.canInvite());
+    if (busy) { if (++tries < 40) setTimeout(wait, 500); return; }   // gives up after 20 s; it comes back another day
+    setTimeout(function () { if (!document.getElementById("aiinv")) showInvite(c); }, 600);
+  })();
+};
+function escI(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
+function showInvite(c) {
+  var el = document.createElement("div");
+  el.id = "aiinv";
+  el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-labelledby", "aiinv-t");
+  el.innerHTML = '<div class="aiinv-card">' +
+    '<div class="aiinv-spark" aria-hidden="true">✦</div>' +
+    '<h2 id="aiinv-t">' + escI(c.title) + '</h2>' +
+    '<p class="aiinv-lead">Add an AI key and these switch on:</p>' +
+    '<ul class="aiinv-perks">' + c.perks.slice(0, 3).map(function (p, i) {
+      return '<li style="--i:' + i + '"><span class="aiinv-ico" aria-hidden="true">' + escI(p.icon) + '</span>' + escI(p.text) + '</li>';
+    }).join("") + '</ul>' +
+    '<ol class="aiinv-steps"><li>Get a key from Claude or OpenAI</li><li>Paste it in AI settings</li><li>That’s it: these turn on at once</li></ol>' +
+    '<button class="aiinv-go" data-inv="open">Turn on AI</button>' +
+    '<div class="aiinv-row"><button class="aiinv-later" data-inv="later">Later</button>' +
+    '<button class="aiinv-never" data-inv="never">Don’t remind me again</button></div></div>';
+  el.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-inv]") : null;
+    if (!b && e.target !== el) return;      // taps inside the card do nothing
+    closeInvite(b ? b.dataset.inv : "later");   // a tap on the dimmed backdrop counts as Later
+  });
+  document.body.appendChild(el);
+  send("aiinvite", { v: "shown" });
+  var go = el.querySelector(".aiinv-go"); if (go && go.focus) go.focus();
+}
+function closeInvite(what) {
+  var el = document.getElementById("aiinv"); if (!el || el.classList.contains("out")) return;
+  el.classList.add("out");
+  setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
+  send("aiinvite", { v: what });
+  if (what === "open") setTimeout(function () {
+    window.__aiOpen();   // the same thing the Settings row's "ai-open" action does
+    var n = 0;
+    (function nudge() {   // this app's AI sheet draws its cards once its state arrives, so wait for Add key (at most 3 s)
+      var add = document.querySelector('#aisheet [data-aiact="aikey"]');   // the provider in use comes first
+      if (!add) { if (++n < 20) setTimeout(nudge, 150); return; }
+      add.classList.add("aiinv-nudge"); if (add.scrollIntoView) add.scrollIntoView({ block: "center" }); setTimeout(function () { add.classList.remove("aiinv-nudge"); }, 2600);
+    })();
+  }, 280);
+}
 // ── your activities: kudos and comments, without leaving the digest ──
 var MINE=null, MINEVIEW='main';
 var HEART='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
@@ -3815,27 +4051,78 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','rules-reset','style-clear','style-learn'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
 });
+// Safe start-up (app-blueprints · recipes/safe-startup). The page goes on screen first; Scriptable hands over the data
+// once it has read it. The digest loads a new page for every screen: only the run's first page (the boot page, with the
+// launch screen) waits for __boot; every later page is built inside the visible window and counts as booted.
+window.__parts = [];
+window.__booted = ${splash ? 'false' : 'true'};
+window.__bootNote = function (title, detail) {
+  var b = document.querySelector(".booting, .boot"); if (!b) return;   // the boot page's runner is this app's placeholder
+  b.className = "booting note";
+  b.innerHTML = "<b></b><span></span>" + (detail ? "<pre></pre>" : "");
+  b.querySelector("b").textContent = title;
+  b.querySelector("span").textContent = "Close Daily Digest and open it again. If it keeps happening, run the installer once more.";
+  if (detail) b.querySelector("pre").textContent = detail;
+};
+setTimeout(function () { if (!window.__booted) window.__bootNote("Still loading…"); }, 25000);
+document.addEventListener("visibilitychange", function () {   // coming back into view: redraw
+  if (document.visibilityState !== "visible") return;
+  var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight; d.style.transform = "";
+});
+window.__boot = function (st) {
+  if (window.__booted) return;
+  window.__parts = [];   // nothing comes in pieces here: the digest arrives as its own page
+  window.__booted = true; window.__INIT = st;
+  requestAnimationFrame(function () {   // make WebKit draw again once the data is in (helps if the window came up blank)
+    var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight;
+    requestAnimationFrame(function () { d.style.transform = ""; });
+  });
+  if (st && st.status) window.setStatus(st.status);
+};
 </script></body></html>`;
 }
+
+// ---------- run ----------
+// A run marks itself as open while its window is on screen. A new run waits at most 1.5 s for an older
+// window to close, then opens anyway: quick taps on the widget don't stack up copies (safe-startup).
+const lockFm = FileManager.local();
+const RUN_LOCK = lockFm.joinPath(lockFm.temporaryDirectory(), APP_ID + '-running');
+let lockTimer = null;
+const lockAge = () => { try { return lockFm.fileExists(RUN_LOCK) ? Date.now() - Number(lockFm.readString(RUN_LOCK)) : Infinity; } catch (e) { return Infinity; } };
+const pause = ms => new Promise(r => Timer.schedule(ms, false, r));
+async function waitForOtherWindow() { for (let waited = 0; lockAge() < 2500 && waited < 1500; waited += 300) await pause(300); }
+function holdLock() {
+  const beat = () => { try { lockFm.writeString(RUN_LOCK, String(Date.now())); } catch (e) {} };
+  beat(); lockTimer = Timer.schedule(1000, true, beat);
+}
+function releaseLock() {
+  if (lockTimer) { lockTimer.invalidate(); lockTimer = null; }
+  try { if (lockFm.fileExists(RUN_LOCK)) lockFm.remove(RUN_LOCK); } catch (e) {}
+}
+// main() (the digest, its bridge and bootApp) is at the top of the script, under "main flow".
 
 // ───────────── entry point (last, so every const above is initialised) ─────────────
 
 await loadSettings();   // before every branch: app, widget and Shortcuts runs all use the saved choices
 const wantsRefreshOnly = !!(qp.refresh || args.shortcutParameter === 'refresh');
+// Settings are loaded above, before every branch; data is read in each branch that uses it.
 if (config.runsInWidget || config.runsInAccessoryWidget) {
+  await loadData();
   await runWidget();             // never builds or presents a WebView, Alert or QuickLook
 } else if (wantsRefreshOnly) {
+  // Reads no data file (the feed comes from Strava, the widget snapshot is local) and writes none, so no loadData().
   try { await refreshOnly(); } catch (e) { console.error(e); }
 } else {
-  widgetIcon();                  // caches the logo tile for the widget, in the background
   aiMigrate(['strava-digest-openai-key'], LEGACY_AI_MODEL);   // 1.8.x kept one OpenAI key and model elsewhere
-  try { await main(); }
+  try { await main(); }          // the widget's logo tile is cached 6 s after the first screen (bootApp)
   catch (e) {
+    releaseLock();
+    startLog('start-up failed: ' + (e.message || e));
     const a = new Alert(); a.title = 'Strava digest'; a.message = String(e.message || e);
     a.addAction('OK'); await a.present();
   }
