@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.23.2",
+      "date": "2026-10-31",
+      "title": "Usage counts reach the project",
+      "highlights": [
+        {
+          "icon": "🎯",
+          "title": "Right place",
+          "text": "Anonymous usage counts now go to the PostHog project's own region, the US cloud."
+        },
+        {
+          "icon": "🧹",
+          "title": "Forgets the wrong address",
+          "text": "An address remembered by 1.23.1 is cleared, so nothing more is sent where it gets lost."
+        },
+        {
+          "icon": "🧪",
+          "title": "Clearer test",
+          "text": "Send test now names the address PostHog accepted the event at."
+        }
+      ],
+      "changes": [
+        "Settings › Privacy › Send test shows the address that accepted the event"
+      ],
+      "fixes": [
+        "Usage counts went to PostHog's EU cloud, which accepted and then dropped them because the project lives in the US cloud; 1.23.1's fallback never noticed, since the EU cloud said OK"
+      ]
+    },
+    {
       "version": "1.23.1",
       "date": "2026-10-30",
       "title": "Usage counts that arrive",

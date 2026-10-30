@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.23.2 (2026-10-31): Usage counts reach the project
+
+- 🎯 **Right place**: Anonymous usage counts now go to the PostHog project's own region, the US cloud.
+- 🧹 **Forgets the wrong address**: An address remembered by 1.23.1 is cleared, so nothing more is sent where it gets lost.
+- 🧪 **Clearer test**: Send test now names the address PostHog accepted the event at.
+
+**Changes**
+
+- Settings › Privacy › Send test shows the address that accepted the event
+
+**Fixes**
+
+- Usage counts went to PostHog's EU cloud, which accepted and then dropped them because the project lives in the US cloud; 1.23.1's fallback never noticed, since the EU cloud said OK
+
 ## 1.23.1 (2026-10-30): Usage counts that arrive
 
 - 🌍 **Finds the right cloud**: Works whether the PostHog project lives in the EU or the US cloud, and remembers which.
