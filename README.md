@@ -38,7 +38,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 - **AI comment ideas.** 💬 opens a composer that writes comment ideas from the activity's real details, in ✨ My style or a mood (Funny, Energetic, Serious, Funky), in English or Lithuanian.
 - **Comments that sound like you.** Write your instructions once in Settings, and let **Learn my style** study your own past comments, so ✨ My style writes the way you do.
 - **Early-riser badges.** The 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs get a badge, and the day's summary counts the early risers.
-- **The day's story.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it.
+- **The day's story.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it. It looks at up to three photos per person and weaves them in, with everyone's profile pictures at the top.
 - **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map (drawn from Strava's route line when there's no map picture), every stat, PRs, the description and photos.
 - **Your activities on top.** Your latest activities sit above everyone else's. Tap one to see who gave kudos, read the comments and like them.
 - **Kudos widget, launch screen, settings, updates.** A Home Screen and Lock Screen widget shows who is still waiting for your kudos; the digest opens on its logo; colours, layout and text size are in Settings; new versions are offered in the app.

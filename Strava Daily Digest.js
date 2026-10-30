@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.18.0';
+const VERSION = '1.19.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -411,7 +411,8 @@ async function main() {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
         if (!people.length) msg = 'Nobody to write about for this day yet.';
         else {
-          const r = await aiStory(people, storyDay.dayStart, p.lang || settings.aiLang);
+          const r = await aiStory(people, storyDay.dayStart, p.lang || settings.aiLang,
+            (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify(r); }
         }
@@ -566,19 +567,27 @@ function removeKey(p) {
 
 // The only way the app calls AI. feature: a short tag for the usage table.
 // provider: defaults to the one in use; "Test connection" passes the card's provider.
-async function aiCall(system, user, maxTokens = 2500, feature = "other", provider = aiSettings.aiProvider) {
+// images: [{ label, b64 }] JPEG photos to look at, each introduced by its label.
+async function aiCall(system, user, maxTokens = 2500, feature = "other", provider = aiSettings.aiProvider, images = []) {
   const key = keyFor(provider);
   if (!key) throw new Error(`No ${PROVIDERS[provider]} key saved`);
   const openai = provider === "openai", model = modelFor(provider);
   const r = new Request(openai ? "https://api.openai.com/v1/chat/completions" : "https://api.anthropic.com/v1/messages");
   r.method = "POST";
-  r.timeoutInterval = 90;
+  r.timeoutInterval = images.length ? 150 : 90;
+  const pics = images.filter(im => im && im.b64);
   if (openai) {
     r.headers = { "Authorization": "Bearer " + key, "Content-Type": "application/json" };
-    r.body = JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: user }] });
+    const content = pics.length
+      ? [{ type: "text", text: user }, ...pics.flatMap(im => [{ type: "text", text: im.label }, { type: "image_url", image_url: { url: "data:image/jpeg;base64," + im.b64, detail: "low" } }])]
+      : user;
+    r.body = JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content }] });
   } else {
     r.headers = { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" };
-    r.body = JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] });
+    const content = pics.length
+      ? [{ type: "text", text: user }, ...pics.flatMap(im => [{ type: "text", text: im.label }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: im.b64 } }])]
+      : user;
+    r.body = JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content }] });
   }
   const j = await r.loadJSON();
   if (j.error) throw new Error(j.error.message || "AI request failed");
@@ -588,6 +597,23 @@ async function aiCall(system, user, maxTokens = 2500, feature = "other", provide
     openai ? (u.completion_tokens || 0) : (u.output_tokens || 0));
   return openai ? ((j.choices && j.choices[0] && j.choices[0].message.content) || "")
                 : (j.content || []).map(c => c.text || "").join("");
+}
+
+// Escapes raw line breaks and tabs that models sometimes leave inside JSON strings.
+function repairJSON(txt) {
+  let out = '', inStr = false, esc = false;
+  for (const ch of String(txt)) {
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === '\\') { esc = true; out += ch; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') continue;
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  return out;
 }
 
 // For prompts that ask for JSON: tolerate code fences and stray text around it.
@@ -749,36 +775,88 @@ function activityFacts(a) {
 }
 
 // ── The day's story: everyone in the digest, with or without your kudos, in one funny tale ──
-const STORY_PROMPT = (language, n) => [
-  `You are a witty, warm storyteller. Write one short, funny story (about 180 to 280 words) in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
+const STORY_PROMPT = (language, n, photos) => [
+  `You are a witty, warm storyteller. Write one short, funny story (about 200 to 300 words) in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
   'Every athlete in the data must appear at least once, by first name. Weave them into one connected tale (a relay, an adventure, a heist, a sitcom episode, whatever suits the day) rather than a list.',
-  'Build the jokes on the real details: sports, activity titles, times of day, early starts, places, PRs, photos, descriptions. Keep numbers light; a few are fine, a wall of them is not.',
+  'Build the jokes on the real details: sports, activity titles, times of day, early starts, places, PRs, descriptions. Keep numbers light; a few are fine, a wall of them is not.',
+  photos ? `${photos} photos are attached after the data, each introduced by its id, athlete and activity. Look at them closely and make them a highlight of the story: scenery, weather, food, pets, gear, signs, the odd funny detail. Never comment on anyone's body, weight, age or looks.` : '',
   'Playfully mention who already has the reader\'s kudos and who is still waiting for it.',
-  'Keep it affectionate: never mock bodies, weight, age, looks or slowness, never invent facts that are not in the data, nothing offensive.',
-  'Give it a short, punchy title.',
-  'Reply with JSON only, no other text: {"title": "...", "story": "paragraphs separated by a blank line"}.',
-].join(' ');
+  'Keep it affectionate: never mock bodies, weight, age, looks or slowness, never invent facts that are not in the data or the photos, nothing offensive.',
+  'Give it a short, punchy title. Split the story into 3 to 6 short paragraphs.',
+  photos ? 'For each paragraph, list the ids of the photos that belong right after it; use each photo at most once and leave out dull ones.' : '',
+  'Reply with JSON only, no other text: {"title": "...", "paragraphs": [{"text": "...", "photos": ["P1"]}]}.',
+].filter(Boolean).join(' ');
 
-async function aiStory(people, dayStart, language) {
+// Downloaded and shrunk story photos, kept while the app is open so "Another take" doesn't load them again.
+const storyPhotoCache = new Map();
+async function storyPhoto(url) {
+  if (storyPhotoCache.has(url)) return storyPhotoCache.get(url);
+  const r = new Request(url); r.timeoutInterval = 20;
+  const img = await r.loadImage();
+  const w = img.size.width, h = img.size.height, k = Math.min(1, 768 / Math.max(w, h, 1));
+  let small = img;
+  if (k < 1) {
+    const dc = new DrawContext();
+    dc.size = new Size(Math.round(w * k), Math.round(h * k)); dc.respectScreenScale = false; dc.opaque = true;
+    dc.drawImageInRect(img, new Rect(0, 0, dc.size.width, dc.size.height));
+    small = dc.getImage();
+  }
+  const b64 = Data.fromJPEG(small).toBase64String();
+  if (storyPhotoCache.size > 40) storyPhotoCache.delete(storyPhotoCache.keys().next().value);
+  storyPhotoCache.set(url, b64);
+  return b64;
+}
+
+// progress(step, done, total): 'people', 'photos' (one call per photo) and 'writing'
+async function aiStory(people, dayStart, language, progress = async () => {}) {
   if (!aiKey()) return { needKey: true };
-  const cast = people.slice(0, 25).map(p => ({
+  const crew = people.slice(0, 25);
+  await progress('people', crew.length, crew.length);
+  // up to three photos per athlete, twelve in all, taken round-robin so more people get one
+  const pools = crew.map(p => p.acts.flatMap(a => a.photos.map(u => ({ url: u, who: p.name, act: a.name || a.type, pid: p.id }))).slice(0, 3));
+  const picks = [];
+  for (let round = 0; round < 3 && picks.length < 12; round++) {
+    for (const pool of pools) if (pool[round] && picks.length < 12) picks.push(Object.assign({ id: `P${picks.length + 1}` }, pool[round]));
+  }
+  const images = [];
+  for (let i = 0; i < picks.length; i++) {
+    await progress('photos', i, picks.length);
+    try { images.push({ label: `Photo ${picks[i].id}: ${picks[i].who}, "${picks[i].act}"`, b64: await storyPhoto(picks[i].url), id: picks[i].id }); }
+    catch (e) { console.warn('Story photo: ' + e.message); }
+  }
+  await progress('photos', picks.length, picks.length);
+  const used = new Set(images.map(im => im.id));
+  const cast = crew.map(p => ({
     name: p.name, first_name: String(p.name || '').split(/\s+/)[0],
     has_your_kudos: !!p.kudoed, early_club: p.early ? p.early.label : null,
+    photos: picks.filter(x => x.pid === p.id && used.has(x.id)).map(x => ({ id: x.id, activity: x.act })),
     activities: p.acts.slice(0, 3).map(a => { const f = activityFacts(a); delete f.friend_first_name; return f; }),
   }));
   const day = dayStart ? new Date(+dayStart).toISOString().slice(0, 10) : null;
-  const text = await aiCall(STORY_PROMPT(language, cast.length), JSON.stringify({ day, athletes: cast }), 1600, 'story');
-  let out;
-  try { out = parseJSON(text); }
+  await progress('writing', 0, 1);
+  const ask = (imgs) => aiCall(STORY_PROMPT(language, cast.length, imgs.length), JSON.stringify({ day, athletes: cast }), 2200, 'story', aiSettings.aiProvider, imgs);
+  let text, photosRead = images.length;
+  try { text = await ask(images); }
   catch (e) {
-    // models sometimes put real line breaks inside the JSON strings: pull the two fields out directly
-    const raw = String(text || ''), un = (x) => x.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-    const t = raw.match(/"title"\s*:\s*"([\s\S]*?)"\s*,\s*"story"/), st = raw.match(/"story"\s*:\s*"([\s\S]*)"\s*\}?[\s`]*$/);
-    out = st ? { title: t ? un(t[1]) : '', story: un(st[1]) } : { title: '', story: raw.replace(/```\w*|```/g, '') };
+    if (!images.length || !/image|vision|multimodal|content|media/i.test(e.message)) throw e;
+    console.warn('Story without photos: ' + e.message);   // the chosen model can't read photos
+    photosRead = 0; text = await ask([]);
   }
-  const story = String(out.story || '').trim();
-  if (!story) throw new Error('No story came back. Try again.');
-  return { title: String(out.title || '').trim(), story, by: PROVIDERS[aiSettings.aiProvider], count: cast.length };
+  let out;
+  try { out = parseJSON(repairJSON(text)); }
+  catch (e) { out = { title: '', paragraphs: String(text || '').replace(/```\w*|```/g, '').split(/\n\s*\n/).map(t => ({ text: t })) }; }
+  let paras = Array.isArray(out.paragraphs) ? out.paragraphs : String(out.story || '').split(/\n\s*\n/).map(t => ({ text: t }));
+  const byId = new Map(picks.map(x => [x.id, x.url])), placed = new Set();
+  paras = paras.map(x => ({
+    text: String((x && x.text) || x || '').trim(),
+    photos: (Array.isArray(x && x.photos) ? x.photos : []).map(String).filter(id => photosRead && byId.has(id) && !placed.has(id) && placed.add(id)).map(id => byId.get(id)),
+  })).filter(x => x.text);
+  if (!paras.length) throw new Error('No story came back. Try again.');
+  return {
+    title: String(out.title || '').trim(), paragraphs: paras,
+    cast: crew.map(p => ({ name: p.name, avatar: p.avatar || '', kudoed: !!p.kudoed })),
+    by: PROVIDERS[aiSettings.aiProvider], count: cast.length, photos: picks.length, photosRead,
+  };
 }
 
 // The brief every comment request starts from: your instructions first, the app's defaults after.
@@ -3006,6 +3084,27 @@ section.person .route{display:none}
 .stline{color:var(--mut);font-size:13px}
 .sttitle{margin:0;font-size:calc(22px * var(--ts));line-height:1.2}
 .stb .badge-ai{align-self:flex-start}
+.stbar{width:min(280px,80%);height:8px;border-radius:999px;background:var(--soft);overflow:hidden;margin-top:6px}
+.stbar i{display:block;height:100%;width:0;background:var(--accent);border-radius:999px;transition:width .35s ease-out}
+.ststeps{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;text-align:left;font-size:14px;color:var(--mut)}
+.ststeps li{display:flex;gap:8px;align-items:center}
+.ststeps li.now{color:var(--fg);font-weight:600}
+.ststeps li.done{color:var(--fg)}
+.ststeps li.done .sti{color:#2fbf71}
+.sti{width:16px;text-align:center;flex:none}
+.stb > *{flex:none}
+.stcast{display:flex;gap:12px;overflow-x:auto;margin:0 -16px;padding:4px 16px 4px;scrollbar-width:none}
+.stcast::-webkit-scrollbar{display:none}
+.stc{display:flex;flex-direction:column;align-items:center;gap:4px;flex:none;width:52px}
+.stc small{font-size:11px;color:var(--mut);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stc .mavw{font-size:14px}
+.stc .mavw.got{box-shadow:0 0 0 2px #2fbf71}
+.stc .mavw.wait{box-shadow:0 0 0 2px var(--accent)}
+.stph{display:grid;gap:6px}
+.stph.n2{grid-template-columns:1fr 1fr}
+.stph.n3{grid-template-columns:1fr 1fr 1fr}
+.stph img{display:block;width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:12px;background:var(--soft);cursor:zoom-in}
+.stph.n1 img{aspect-ratio:16/10}
 .stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
 .stf{display:flex;gap:10px}
 .stf[hidden]{display:none}
@@ -4057,28 +4156,54 @@ function storySheet(){
 function openStory(again){
   var ov=storySheet(); ov.querySelector('.stday').textContent=storyKey();
   ov.hidden=false; document.body.style.overflow='hidden';
-  if(!again&&STORY&&STORY.key===storyKey()) return renderStory();
+  if(!again&&STORY&&STORY.key===storyKey()&&STORY.paragraphs) return renderStory();
   writeStory();
 }
 function writeStory(){
   if(STORYBUSY) return; STORYBUSY=true;
-  var ov=storySheet(), body=ov.querySelector('.stb'), i=0, n=document.querySelectorAll('section.person').length;
+  var ov=storySheet(), body=ov.querySelector('.stb'), n=document.querySelectorAll('section.person').length, pct=0, creep=null;
   ov.querySelector('.stf').hidden=true;
-  body.innerHTML='<div class="stwait"><div class="stquill" aria-hidden="true">✍️</div><b>Writing the story of '+n+' '+(n===1?'friend':'friends')+'</b><small class="stline">'+STORY_LINES[0]+'</small></div>';
-  var tick=setInterval(function(){ var l=body.querySelector('.stline'); if(!l){ clearInterval(tick); return; } i=(i+1)%STORY_LINES.length; l.textContent=STORY_LINES[i]; },1800);
+  body.innerHTML='<div class="stwait"><div class="stquill" aria-hidden="true">✍️</div><b>Writing the story of '+n+' '+(n===1?'friend':'friends')+'</b>'+
+    '<div class="stbar" role="progressbar" aria-label="Story progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>'+
+    '<ul class="ststeps"><li data-s="people"><span class="sti">○</span>Athletes</li><li data-s="photos"><span class="sti">○</span><span class="stt">Photos</span></li><li data-s="writing"><span class="sti">○</span>Looking at the photos and writing</li></ul></div>';
+  var bar=body.querySelector('.stbar'), fill=bar.querySelector('i');
+  function set(v){ pct=Math.max(pct,Math.min(100,v)); fill.style.width=pct+'%'; bar.setAttribute('aria-valuenow',Math.round(pct)); }
+  function mark(step,state,text){ var li=body.querySelector('.ststeps [data-s="'+step+'"]'); if(!li) return; li.className=state; li.querySelector('.sti').textContent=state==='done'?'✓':(state==='now'?'●':'○'); if(text){ var t=li.querySelector('.stt'); if(t) t.textContent=text; } }
+  window.__storyProgress=function(p){
+    if(p.step==='people'){ mark('people','done'); mark('photos','now'); set(10); }
+    if(p.step==='photos'){
+      if(!p.total){ mark('photos','done','No photos today'); set(55); return; }
+      var done=p.done>=p.total; mark('photos',done?'done':'now','Photos: '+Math.min(p.done+(done?0:1),p.total)+' of '+p.total+(done?' loaded':''));
+      set(10+45*(p.done/p.total));
+    }
+    if(p.step==='writing'){ mark('photos','done'); mark('writing','now'); set(55); if(!creep) creep=setInterval(function(){ set(pct+(92-pct)*0.05); },400); }
+  };
+  mark('people','now'); set(3);
   var key=storyKey();
   send('story',{lang:aiLang},function(ok,msg){
-    clearInterval(tick); STORYBUSY=false;
+    if(creep) clearInterval(creep); STORYBUSY=false; window.__storyProgress=null;
     if(!ok&&msg==='NEED_KEY'){ body.innerHTML='<p class="keyhelp">✨ The day’s story is written by AI. Add a Claude or OpenAI key in Settings › AI settings.</p><button class="small" data-act="ai-open">AI settings</button>'; return; }
     if(!ok){ body.innerHTML='<p class="mnote">'+escH(msg||'The story couldn’t be written.')+'</p><button class="small" data-act="story-again">Try again</button>'; return; }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
-    STORY={key:key,title:d.title||'',story:d.story||'',by:d.by||'AI'}; renderStory();
+    mark('writing','done'); set(100);
+    STORY={key:key,title:d.title||'',paragraphs:d.paragraphs||[],cast:d.cast||[],by:d.by||'AI',photos:d.photos||0,photosRead:d.photosRead||0};
+    setTimeout(renderStory,350);
   });
 }
+function storyText(){ return (STORY.title?STORY.title+'\\n\\n':'')+STORY.paragraphs.map(function(x){ return x.text; }).join('\\n\\n'); }
 function renderStory(){
   var ov=document.getElementById('storysheet'); if(!ov||!STORY) return;
-  var paras=STORY.story.split(/\\n\\s*\\n|\\n/).filter(function(x){ return x.trim(); });
-  ov.querySelector('.stb').innerHTML=(STORY.title?'<h2 class="sttitle">'+escH(STORY.title)+'</h2>':'')+paras.map(function(x){ return '<p class="stp">'+escH(x.trim())+'</p>'; }).join('')+'<span class="badge-ai">✨ Written by '+escH(STORY.by)+'</span>';
+  var cast='<div class="stcast" aria-label="Starring">'+STORY.cast.map(function(p){
+    return '<span class="stc">'+avH(p,44).replace('class="mavw"','class="mavw'+(p.kudoed?' got':' wait')+'"')+'<small>'+escH(String(p.name||'').split(' ')[0])+'</small></span>';
+  }).join('')+'</div>';
+  var html=cast+(STORY.title?'<h2 class="sttitle">'+escH(STORY.title)+'</h2>':'');
+  STORY.paragraphs.forEach(function(x){
+    html+='<p class="stp">'+escH(x.text)+'</p>';
+    if(x.photos&&x.photos.length) html+='<div class="stph n'+Math.min(3,x.photos.length)+'">'+x.photos.slice(0,3).map(function(u){ return '<img src="'+escH(u)+'" data-photo="1" alt="Photo from the day" loading="lazy" onerror="this.remove()">'; }).join('')+'</div>';
+  });
+  var note=STORY.photos&&!STORY.photosRead?' · this AI model couldn’t look at the photos':'';
+  html+='<span class="badge-ai">✨ Written by '+escH(STORY.by)+(STORY.photosRead?' · looked at '+STORY.photosRead+' photo'+(STORY.photosRead===1?'':'s'):'')+escH(note)+'</span>';
+  ov.querySelector('.stb').innerHTML=html;
   ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
 }
 function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
@@ -4102,7 +4227,8 @@ function lbGo(i){
   sc.scrollTo({left:i*sc.clientWidth,behavior:'smooth'});
 }
 function openPhotos(img){
-  var imgs=[].slice.call(img.closest('.photos').querySelectorAll('img'));
+  var box=img.closest('.stb')||img.closest('.photos');   // the story's photos swipe as one set
+  var imgs=[].slice.call(box.querySelectorAll('img[data-photo]'));
   var i=Math.max(0,imgs.indexOf(img)), lb=document.getElementById('lb'), sc=lb.querySelector('.lbs');
   sc.innerHTML='';
   imgs.forEach(function(x){ var d=document.createElement('div'); d.className='lbi'; var im=document.createElement('img'); im.src=x.src; im.alt='Activity photo'; d.appendChild(im); sc.appendChild(d); });
@@ -4187,7 +4313,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='story') return openStory(false);
   if(t.dataset.act==='story-again') return openStory(true);
   if(t.dataset.act==='story-close') return closeStory();
-  if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:(STORY.title?STORY.title+'\\n\\n':'')+STORY.story}); return; }
+  if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:storyText()}); return; }
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
   if(t.dataset.act==='mine-back'){ MINEVIEW='main'; renderMine(); return; }
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
