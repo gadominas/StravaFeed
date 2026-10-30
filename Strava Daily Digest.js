@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.23.0';
+const VERSION = '1.23.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -356,6 +356,13 @@ async function main() {
     if (head === 'refresh') { await showDay(true); return; }
     if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); track('day_viewed', { days_back: daysBack }); await showDay(false); return; }
     if (head === 'usage-consent') { setUsage(p.on === '1'); flushUsage(); return; }
+    if (head === 'usage-test') {
+      let ok = false, msg = '';
+      if (!usageOn()) msg = 'Turn on Share anonymous usage first.';
+      else { track('usage_test'); const r = await flushUsage(); ok = !!(r && r.ok); msg = usageStatus() || 'Nothing was sent.'; }
+      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+      return;
+    }
     if (head === 'style-stop') { styleStop = true; await js(`window.__done(${JSON.stringify(p.req)}, true, '')`); return; }
     if (head === 'style-learn' || head === 'style-clear') {
       let ok = true, msg = '';
@@ -1231,20 +1238,44 @@ function track(event, props = {}) {
     usageQueue.push({ event, timestamp: new Date().toISOString(),
       properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app_version: VERSION, $lib: 'strava-daily-digest' }, props) });
     if (usageQueue.length >= 25) flushUsage();
-    else if (!usageTimer) usageTimer = Timer.schedule(8000, false, () => { usageTimer = null; flushUsage(); });
+    else if (!usageTimer) usageTimer = Timer.schedule(3000, false, () => { usageTimer = null; flushUsage(); });
   } catch (e) {}
 }
-// Sends what's queued in one request. Never waits on the app and never retries: if it fails, those counts are gone.
+// A PostHog project lives in the EU or the US cloud, and its key only works there: try the one that worked last,
+// then the other when the key is refused.
+const USAGE_HOSTS = ['https://eu.i.posthog.com', 'https://us.i.posthog.com'];
+let usageLast = null;   // { at, events, ok, status, host, error }: shown in Settings › Privacy
+async function postUsage(host, batch) {
+  const r = new Request(host + '/batch/');
+  r.method = 'POST'; r.timeoutInterval = 10; r.headers = { 'Content-Type': 'application/json' };
+  r.body = JSON.stringify({ api_key: USAGE.KEY, batch });
+  let body = '';
+  try { body = await r.loadString(); } catch (e) { return { ok: false, status: 0, host, error: String(e.message || e) }; }
+  const status = (r.response && r.response.statusCode) || 0;
+  return { ok: status >= 200 && status < 300, status, host, error: status >= 200 && status < 300 ? '' : String(body || '').slice(0, 200) };
+}
+// Sends what's queued in one request. Never slows the app; if it fails, those counts are gone (and the log says why).
 async function flushUsage() {
-  if (!usageQueue.length) return;
-  if (!usageOn()) { usageQueue = []; return; }
+  if (!usageQueue.length) return usageLast;
+  if (!usageOn()) { usageQueue = []; return usageLast; }
   const batch = usageQueue.splice(0, usageQueue.length);
-  try {
-    const r = new Request(USAGE.HOST + '/batch/');
-    r.method = 'POST'; r.timeoutInterval = 8; r.headers = { 'Content-Type': 'application/json' };
-    r.body = JSON.stringify({ api_key: USAGE.KEY, batch });
-    await r.loadString();
-  } catch (e) {}
+  const hosts = settings.usageHost && USAGE_HOSTS.includes(settings.usageHost) ? [settings.usageHost, ...USAGE_HOSTS.filter(h => h !== settings.usageHost)] : USAGE_HOSTS;
+  let res = null;
+  for (const host of hosts) {
+    res = await postUsage(host, batch);
+    if (res.ok) { if (settings.usageHost !== host) { settings.usageHost = host; saveSettings(); } break; }
+    if (res.status !== 401 && res.status !== 403 && res.status !== 404) break;   // only a refused key means "try the other cloud"
+  }
+  usageLast = Object.assign({ at: Date.now(), events: batch.length }, res);
+  try { startLog(`usage: ${batch.length} event${batch.length === 1 ? '' : 's'} → ${res.ok ? 'sent to ' + res.host.replace('https://', '') : 'not sent: ' + (res.status ? 'HTTP ' + res.status + ' ' : '') + res.error}`); } catch (e) {}
+  return usageLast;
+}
+function usageStatus() {
+  const u = usageLast;
+  if (!u) return '';
+  const t = new Date(u.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return u.ok ? `Last sent ${t}: ${u.events} event${u.events === 1 ? '' : 's'}, accepted (${u.host.includes('//eu.') ? 'EU' : 'US'} cloud)`
+              : `Last try ${t} failed: ${u.status ? 'HTTP ' + u.status + ' ' : ''}${u.error}`;
 }
 function setUsage(on) {
   settings.shareUsage = !!on; settings.usageAsked = true; saveSettings();
@@ -1372,7 +1403,7 @@ function settingsState() {
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
     defaultRules: DEFAULT_COMMENT_RULES, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
-    usageAvailable: usageAvailable(),
+    usageAvailable: usageAvailable(), usageStatus: usageStatus(),
   };
 }
 
@@ -4139,7 +4170,8 @@ function renderCfg(){
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
     writingHTML()+
     (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
-      swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.'):'')+
+      swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
+      '<div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">'+escH(SET.usageStatus||'Sends one test event now and shows PostHog’s answer.')+'</small></div><button class="sm" data-act="usage-test">Send test</button></div>':'')+
     '<h3 class="sec">Updates</h3>'+
       swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
       '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
@@ -4167,6 +4199,7 @@ function cfgAction(t,act){
   if(act==='updcheck'){ var um=document.getElementById('updmsg'); t.disabled=true; if(um) um.textContent='Checking…';
     send('update-check',{},function(ok,res){ t.disabled=false; if(um) um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); return; }
   if(act==='openurl'){ send('openurl',{v:v}); return; }
+  if(act==='usage-test'){ var um=document.getElementById('usagemsg'); if(um) um.textContent='Sending…'; t.disabled=true; send('usage-test',{},function(ok,msg){ t.disabled=false; var m=document.getElementById('usagemsg'); if(m) m.textContent=(ok?'✓ ':'✗ ')+msg; }); return; }
   if(act==='startlog'){   // safe-startup: the last 40 lines of the start-up log
     var pre=document.getElementById('startlog');
     if(!pre.hidden){ pre.hidden=true; t.textContent='Show'; return; }
@@ -4748,7 +4781,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn','style-stop'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
