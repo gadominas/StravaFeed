@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.24.1",
+      "date": "2026-10-31",
+      "title": "Counted by name",
+      "highlights": [
+        {
+          "icon": "🏷️",
+          "title": "Counts say which app",
+          "text": "Anonymous usage counts now name Daily Digest, so they stay separate from other apps in the same place."
+        },
+        {
+          "icon": "🔤",
+          "title": "Text size respected",
+          "text": "The one-time sharing question follows your text size setting."
+        },
+        {
+          "icon": "🧩",
+          "title": "Built with",
+          "text": "Settings › Built with now lists Anonymous usage analytics."
+        }
+      ],
+      "changes": [
+        "Every anonymous usage event carries app = stravafeed",
+        "Settings › Built with lists Anonymous usage analytics 1.1.0"
+      ],
+      "fixes": [
+        "The sharing question's text ignored the text size setting"
+      ]
+    },
+    {
       "version": "1.24.0",
       "date": "2026-10-31",
       "title": "Night owl friendly",

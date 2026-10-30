@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.24.1 (2026-10-31): Counted by name
+
+- 🏷️ **Counts say which app**: Anonymous usage counts now name Daily Digest, so they stay separate from other apps in the same place.
+- 🔤 **Text size respected**: The one-time sharing question follows your text size setting.
+- 🧩 **Built with**: Settings › Built with now lists Anonymous usage analytics.
+
+**Changes**
+
+- Every anonymous usage event carries app = stravafeed
+- Settings › Built with lists Anonymous usage analytics 1.1.0
+
+**Fixes**
+
+- The sharing question's text ignored the text size setting
+
 ## 1.24.0 (2026-10-31): Night owl friendly
 
 - 🌙 **Yesterday after midnight**: Open the app after midnight before anyone has posted, and it shows yesterday instead of an empty today.
