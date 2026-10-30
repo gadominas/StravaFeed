@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.17.0 (2026-10-30): Route maps on every card
+
+- 🗺️ **See the route**: Runs, rides and walks show their route map right on the card, between the stats and the photos.
+- ✏️ **Drawn when Strava sends no picture**: When Strava only sends the route line, the digest draws it, with start and finish marked.
+- 👆 **Tap for details**: Tap the map to open the activity's details, where the same map appears.
+
+**Changes**
+
+- Route map on each activity card (Comfortable, and Compact or Tiny once expanded); indoor activities show none
+- The route is drawn from Strava's encoded route line when there is no map picture, or when the picture fails to load
+- The details sheet shows the card's map instead of a separate picture
+
+**Fixes**
+
+- The details sheet sometimes showed one of the activity's photos as its "route map"; the page preview picture is now used only when it really is a map
+
 ## 1.16.0 (2026-10-30): Opens every time, and shows what AI adds
 
 - 🚀 **Opens every time**: No more blank screen when opening from the widget, after quick taps or with slow iCloud.

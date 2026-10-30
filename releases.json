@@ -3,6 +3,36 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.17.0",
+      "date": "2026-10-30",
+      "title": "Route maps on every card",
+      "highlights": [
+        {
+          "icon": "🗺️",
+          "title": "See the route",
+          "text": "Runs, rides and walks show their route map right on the card, between the stats and the photos."
+        },
+        {
+          "icon": "✏️",
+          "title": "Drawn when Strava sends no picture",
+          "text": "When Strava only sends the route line, the digest draws it, with start and finish marked."
+        },
+        {
+          "icon": "👆",
+          "title": "Tap for details",
+          "text": "Tap the map to open the activity's details, where the same map appears."
+        }
+      ],
+      "changes": [
+        "Route map on each activity card (Comfortable, and Compact or Tiny once expanded); indoor activities show none",
+        "The route is drawn from Strava's encoded route line when there is no map picture, or when the picture fails to load",
+        "The details sheet shows the card's map instead of a separate picture"
+      ],
+      "fixes": [
+        "The details sheet sometimes showed one of the activity's photos as its \"route map\"; the page preview picture is now used only when it really is a map"
+      ]
+    },
+    {
       "version": "1.16.0",
       "date": "2026-10-30",
       "title": "Opens every time, and shows what AI adds",
