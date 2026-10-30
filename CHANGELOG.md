@@ -16,12 +16,15 @@ All notable changes to Strava Daily Digest. Generated from `releases.json`; edit
 - Without an AI key, an invitation card appears at most every 3 days (weekly after four "Later"s), never over another sheet or an update offer; "Don't remind me again" stops it for good
 - Turn on AI opens AI settings with Add key highlighted; removing your last key brings the invitation back from the next launch
 - Settings › Updates has a Start-up log row with the last 40 lines
+- If a saved file turns out to be damaged, the digest keeps a copy of it, starts that file fresh and tells you so
 
 **Fixes**
 
 - Opening the digest could stay on a blank screen, most often from the widget or with slow iCloud
 - A comment history or settings file that iCloud hadn't delivered could be saved over with an empty one
 - If opening stalls, the screen now says so and shows the start-up log instead of staying blank
+- A damaged comment history or settings file no longer stops the digest from saving your changes
+- Turn on AI now highlights Add key for the provider in use, not always Claude's
 
 ## 1.15.2 (2026-10-29): Learns from more of your comments
 
