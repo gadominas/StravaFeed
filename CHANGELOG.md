@@ -2,6 +2,25 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.0 (2026-10-30): Stories with photos
+
+- 📸 **The AI looks at the photos**: Up to three photos per person go into the day's story, and the AI writes about what it sees in them.
+- 🖼️ **Photos and faces in the story**: The cast's profile pictures sit at the top, and the photos appear right where the story talks about them.
+- 📊 **Watch it come together**: A progress bar shows athletes gathered, photos loaded and the story being written.
+
+**Changes**
+
+- The day's story sends up to three photos per person (twelve in all, spread so more people get one) for the AI to look at, shrunk to about 768 px
+- The AI places each photo under the paragraph it belongs to; tap one to open it full screen and swipe through the story's photos
+- Cast row with profile pictures: an orange ring for people still waiting for your kudos, green for those who have it
+- Progress bar with three steps: Athletes, Photos (with a count) and Looking at the photos and writing
+- Another take reuses the photos already loaded
+- If the chosen AI model can't read photos, the story is written without them and says so
+
+**Fixes**
+
+- Replies with line breaks inside the AI's JSON are repaired before reading
+
 ## 1.18.0 (2026-10-30): The day's story
 
 - 📖 **The day's story**: Tap 📖 before Today and the AI writes one funny story starring everyone in the day's digest.

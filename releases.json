@@ -3,6 +3,39 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.19.0",
+      "date": "2026-10-30",
+      "title": "Stories with photos",
+      "highlights": [
+        {
+          "icon": "📸",
+          "title": "The AI looks at the photos",
+          "text": "Up to three photos per person go into the day's story, and the AI writes about what it sees in them."
+        },
+        {
+          "icon": "🖼️",
+          "title": "Photos and faces in the story",
+          "text": "The cast's profile pictures sit at the top, and the photos appear right where the story talks about them."
+        },
+        {
+          "icon": "📊",
+          "title": "Watch it come together",
+          "text": "A progress bar shows athletes gathered, photos loaded and the story being written."
+        }
+      ],
+      "changes": [
+        "The day's story sends up to three photos per person (twelve in all, spread so more people get one) for the AI to look at, shrunk to about 768 px",
+        "The AI places each photo under the paragraph it belongs to; tap one to open it full screen and swipe through the story's photos",
+        "Cast row with profile pictures: an orange ring for people still waiting for your kudos, green for those who have it",
+        "Progress bar with three steps: Athletes, Photos (with a count) and Looking at the photos and writing",
+        "Another take reuses the photos already loaded",
+        "If the chosen AI model can't read photos, the story is written without them and says so"
+      ],
+      "fixes": [
+        "Replies with line breaks inside the AI's JSON are repaired before reading"
+      ]
+    },
+    {
       "version": "1.18.0",
       "date": "2026-10-30",
       "title": "The day's story",
