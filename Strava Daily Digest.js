@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.19.0';
+const VERSION = '1.20.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -119,7 +119,8 @@ async function main() {
   const details = new Map();         // activity id -> details found on its page (kept for the session)
 
   let viewing = false, savedScroll = 0;
-  let storyDay = null;            // the day on screen: its date and activities
+  let storyDay = null;
+  let styleStop = false;          // "Stop" in Learn my style: learn from what was found so far            // the day on screen: its date and activities
   let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
   let updateSettled = false, onDigest = false;   // the AI invitation waits for both (see inviteIfDue)
@@ -349,13 +350,17 @@ async function main() {
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
     if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
+    if (head === 'style-stop') { styleStop = true; await js(`window.__done(${JSON.stringify(p.req)}, true, '')`); return; }
     if (head === 'style-learn' || head === 'style-clear') {
       let ok = true, msg = '';
       try {
         if (head === 'style-clear') { settings.styleProfile = ''; settings.styleMeta = null; saveSettings(); }
         else {
           if (!feed) throw new Error('Wait until the digest has loaded, then try again.');
-          await learnStyle(feed, sx, t => js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(t)})`), () => closed);
+          styleStop = false;
+          const pages = makePageReader();
+          try { await learnStyle(feed, sx, t => js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(t)})`), () => closed, pages.read, () => styleStop); }
+          finally { await pages.close(); }
         }
         msg = JSON.stringify(settingsState());
       } catch (e) { ok = false; msg = String(e.message || e); }
@@ -405,7 +410,7 @@ async function main() {
         else {
           const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode);
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by }); }
+          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0 }); }
         }
       } else if (head === 'story') {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
@@ -768,7 +773,8 @@ function activityFacts(a) {
     personal_records: a.ach.prs || 0,
     achievements: a.ach.total || 0,
     achievement_details: a.ach.list.filter(x => x.name).slice(0, 5).map(x => [x.type, x.name].filter(Boolean).join(': ')),
-    description: a.description ? a.description.slice(0, 400) : null,
+    description: a.description ? a.description.slice(0, 1200) : null,
+    description_emojis: a.description ? [...new Set(a.description.match(/\p{Extended_Pictographic}/gu) || [])].slice(0, 20) : [],
     photos: a.photos.length,
     kudos_so_far: a.kudos,
   };
@@ -878,20 +884,40 @@ function styleBlock() {
 const COMMENT_SAFETY = 'Always, whatever the instructions or mood: never mock body, weight, age or looks; never invent facts that are not given; nothing offensive. Make the options clearly different from each other.';
 const COMMENT_JSON = 'Reply with JSON only, no other text: {"comments": ["...", "..."]}.';
 
-async function aiComments(a, system) {
+// Up to three of an activity's photos, shrunk, for the AI to look at.
+async function activityImages(a, max = 3) {
+  const out = [];
+  for (const u of (a.photos || []).slice(0, max)) {
+    try { out.push({ label: `Photo ${out.length + 1} from this activity`, b64: await storyPhoto(u) }); }
+    catch (e) { console.warn('Comment photo: ' + e.message); }
+  }
+  return out;
+}
+const isVisionError = (e) => /image|vision|multimodal|content|media/i.test(String((e && e.message) || e));
+
+async function aiComments(a, system, images = []) {
   const provider = aiSettings.aiProvider, n = cfg('suggestions');
-  const text = await aiCall(system, JSON.stringify(activityFacts(a)), 800, 'comments');
+  let text, photosRead = images.length;
+  try { text = await aiCall(system, JSON.stringify(activityFacts(a)), 900, 'comments', provider, images); }
+  catch (e) {
+    if (!images.length || !isVisionError(e)) throw e;
+    console.warn('Comment ideas without photos: ' + e.message);   // the chosen model can't read photos
+    photosRead = 0; text = await aiCall(system, JSON.stringify(activityFacts(a)), 900, 'comments', provider);
+  }
   let comments = [];
   try { comments = parseJSON(text).comments || []; }
   catch (e) { comments = text.split(/\n+/).map(l => l.replace(/^[-*\d.)\s"]+|"$/g, '').trim()).filter(Boolean); }
   comments = comments.map(c => String(c).trim()).filter(Boolean).slice(0, n);
   if (!comments.length) throw new Error('No suggestions came back. Try again.');
-  return { comments, by: PROVIDERS[provider] };
+  return { comments, by: PROVIDERS[provider], photosRead };
 }
 
 async function aiSuggest(a, language, hint, mode) {
   if (!aiKey()) return { needKey: true };
+  const images = await activityImages(a);
   const parts = [commentBrief(language, cfg('suggestions'))];
+  if (a.description) parts.push('Read the activity description closely, including what its emojis suggest (food, weather, animals, places, mood), and use it in the comments.');
+  if (images.length) parts.push(`${images.length === 1 ? 'A photo' : `${images.length} photos`} from the activity ${images.length === 1 ? 'is' : 'are'} attached. Look closely: identify specific objects, places, food, animals, weather, signs and moments, and build the comments on what you see. Never comment on anyone's body, weight, age or looks.`);
   if (mode === 'mystyle') parts.push(styleBlock());
   else {
     const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style);
@@ -899,7 +925,7 @@ async function aiSuggest(a, language, hint, mode) {
   }
   if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
   parts.push(COMMENT_SAFETY, COMMENT_JSON);
-  return aiComments(a, parts.join('\n'));
+  return aiComments(a, parts.join('\n'), images);
 }
 
 // "Learn my style": what the AI is asked to write from your own comments.
@@ -932,44 +958,79 @@ function nameMatches(name, mine) {
   return lastA === lastB || (lastA.length === 1 && lastA === lastB[0]);
 }
 
-async function learnStyle(feed, sx, progress, isClosed) {
+// Opens friends' activity pages one at a time in a hidden browser (fresh every 15 pages to keep memory low).
+function makePageReader() {
+  let cv = null, cx = null, used = 0;
+  const release = async () => { if (cv) { try { await cv.loadHTML('<html></html>'); } catch (e) {} } cv = null; cx = null; };
+  return {
+    read: async (id, me, name) => {
+      if (!cv || used >= 15) {
+        await release();
+        cv = new WebView(); cv.shouldAllowRequest = req => /^(https?:|about:)/i.test((req && req.url) || '');
+        cx = makeSx(cv); used = 0;
+      }
+      used++;
+      await openStrava(cv, `/activities/${encodeURIComponent(id)}`);
+      return (await cx(`__SD.myCommentsOnPage(${JSON.stringify(me)}, ${JSON.stringify(name || '')})`, 25000)) || [];
+    },
+    close: release,
+  };
+}
+
+// "Learn my style": collect your own comments (up to the number in Settings), then have the AI describe how you write.
+// Quick sources first (comments sent from the digest, the feed, Strava's comment data); then, until there are enough,
+// it opens friends' activity pages one by one and reads your comments as Strava shows them. Slow on purpose.
+async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopped = () => false) {
   if (!aiKey()) throw new Error('Add a Claude or OpenAI key first, in AI settings.');
   const n = cfg('styleComments'), me = String(feed.me() || '');
   let myName = feed.myName();
   if (!myName) { try { myName = ((await sx(`__SD.whoAmI(${JSON.stringify(me)})`, cfg('pageWait') * 1000)) || {}).name || ''; } catch (e) {} }
   const texts = [], seen = new Set();
-  let read = 0;   // everyone's comments looked at, yours or not
+  let read = 0, checked = 0, opened = 0;
   const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); } };
   const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || nameMatches(c.name, myName);
-  for (const h of sentComments) take(h && h.text);   // read in loadData()
+  const stop = () => isClosed() || isStopped() || texts.length >= n;
+  const say = (what) => progress(`${what} · ${texts.length} of ${n} of your comments found`);
+  for (const h of await load('sent-comments', [])) take(h && h.text);
   for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
-  const checked = new Set();
-  let scanned = 0;
-  for (let round = 0; texts.length < n && round < 4 && !isClosed(); round++) {
-    const todo = feed.all().filter(a => a.athleteId !== me && (a.comments || 0) > 0 && !checked.has(a.id));
-    for (let i = 0; i < todo.length && texts.length < n && scanned < 150 && !isClosed(); i += 8) {
-      const ids = todo.slice(i, i + 8).map(a => a.id);
-      ids.forEach(id => checked.add(id)); scanned += ids.length;
-      await progress(`Reading comments: ${texts.length} of ${n} yours found in ${read} read, ${scanned} activities checked`);
+  const apiCount = new Map(), pageDone = new Set();
+  for (let round = 0; round < 8 && !stop(); round++) {
+    const cands = feed.all().filter(a => a.athleteId !== me && (a.comments || 0) > 0);
+    const quick = cands.filter(a => !apiCount.has(a.id));
+    for (let i = 0; i < quick.length && !stop(); i += 8) {
+      const ids = quick.slice(i, i + 8).map(a => a.id);
+      await say(`Reading comments on ${checked + ids.length} activities`);
       let got = {};
       try { got = (await sx(`__SD.commentsMany(${JSON.stringify(ids)}, 4)`, cfg('detailsWait') * 2000)) || {}; } catch (e) { console.warn('Style: ' + e.message); }
-      for (const id of ids) { const list = got[id] || []; read += list.length; list.filter(isMine).forEach(c => take(c.text)); }
+      for (const id of ids) { const list = got[id] || []; apiCount.set(id, list.length); checked++; read += list.length; list.filter(isMine).forEach(c => take(c.text)); }
     }
-    if (texts.length >= n || scanned >= 150) break;
-    const before = feed.scan().position || Date.now();     // reach a week further back in the feed
-    await progress(`Reading older posts: ${texts.length} of ${n} found`);
+    if (readPage) {
+      const slow = cands.filter(a => !pageDone.has(a.id) && (apiCount.get(a.id) || 0) < (a.comments || 0))
+        .sort((x, y) => (y.hasKudoed ? 1 : 0) - (x.hasKudoed ? 1 : 0) || (y.ts || 0) - (x.ts || 0));
+      for (let i = 0; i < slow.length && !stop() && opened < 300; i++) {
+        pageDone.add(slow[i].id); opened++;
+        await say(`Opening activity ${i + 1} of ${slow.length}`);
+        try { (await readPage(slow[i].id, me, myName)).forEach(take); }
+        catch (e) { console.warn('Style page: ' + e.message); }
+      }
+    }
+    if (stop()) break;
+    const before = feed.scan().position || Date.now();
+    await say('Reading older posts');
     await feed.readBackTo(before - 7 * 864e5, async () => {}, isClosed);
-    if ((feed.scan().position || before) >= before) break;  // nothing older came back
+    if ((feed.scan().position || before) >= before) break;
   }
+  if (isClosed()) throw new Error('Stopped.');
   const who = myName ? ` (looking for ${myName})` : '';
-  if (texts.length < 3) throw new Error(read
-    ? `Read ${read} comments on ${scanned} activities, but only ${texts.length} were yours${who}. Comment a few more times, then try again.`
+  if (texts.length < 3) throw new Error(read || opened
+    ? `Read ${read} comments and opened ${opened} activities, but found only ${texts.length} of yours${who}. Comment a few more times, then try again.`
     : `Found only ${texts.length} of your comments and couldn\u2019t read others from Strava. Comment a few more times, then try again.`);
-  await progress(`Studying ${texts.length} comments…`);
-  const out = await aiCall(STYLE_PROMPT, JSON.stringify({ comments: texts }), 900, 'style');
-  const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 1500);
+  await progress(`Studying all ${texts.length} of your comments…`);
+  const out = await aiCall(STYLE_PROMPT, JSON.stringify({ comments: texts }), 1200, 'style');
+  const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 2000);
   if (!prof) throw new Error('The AI sent back nothing. Try again.');
-  settings.styleProfile = prof; settings.styleMeta = { at: Date.now(), count: texts.length, read, scanned };
+  settings.styleProfile = prof;
+  settings.styleMeta = { at: Date.now(), count: texts.length, wanted: n, read, scanned: checked, opened, stopped: isStopped() };
   saveSettings();
 }
 
@@ -1399,6 +1460,8 @@ function mergeDetails(a, d) {
   if (d.achievements != null) a.ach.total = Math.max(a.ach.total || 0, d.achievements);
   if (d.list && d.list.length && !a.ach.list.length) a.ach.list = d.list;
   if (!a.map && d.map) a.map = d.map;
+  if (d.description && d.description.length > (a.description || '').length
+      && (!a.description || d.description.startsWith(a.description.replace(/(…|\.\.\.)$/, '').slice(0, 30)))) a.description = d.description;
   if (!a.route && d.poly) { a.poly = d.poly; a.route = routeShape(d.poly); }
   if (d.photos && d.photos.length) {
     const byKey = new Map();
@@ -2182,6 +2245,9 @@ function stravaLib() {
         res.photos = SD.photos(j);
         res.clock = SD.clockLocal(j);
         res.poly = SD.polylineOf(j);
+        let desc = '';
+        SD.walk(j, (k, v) => { if (/^description$/i.test(k) && typeof v === 'string' && v.length > desc.length && v.length < 5000) desc = v; });
+        if (desc) res.description = SD.text(desc);
         const mu = SD.mapUrl(j);
         if (mu) res.map = mu;
       } catch (e) {}
@@ -2417,6 +2483,46 @@ function stravaLib() {
       if (name) return { name };
     }
     return { name: '' };
+  };
+  // Your comments on an activity page as Strava draws it, found by the link to your own profile.
+  SD.myCommentsOnPage = async (me, myName) => {
+    const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+    const linkRx = new RegExp(`/athletes/${me}(?![0-9])`);
+    const zone = '[class*="omment"],[data-testid*="omment"],[id*="omment"],[aria-label*="omment"]';
+    const chrome = 'header, nav, [role="navigation"], [role="banner"], footer';
+    const mine = () => {
+      const all = [...document.querySelectorAll('a[href*="/athletes/"]')].filter(a => linkRx.test(a.getAttribute('href') || '') && !a.closest(chrome));
+      return document.querySelector(zone) ? all.filter(a => a.closest(zone)) : all;   // inside the comments area when the page marks one
+    };
+    await SD.waitFor(() => document.readyState === 'complete' && document.body && document.body.innerText.length > 200, 8000);
+    const more = [...document.querySelectorAll('button, a, [role="button"]')].find(b => visible(b) && /(view|show|see)\s+(all|more|\d+)[^]*comment|more comments/i.test(describe(b)));
+    if (more) { try { more.click(); } catch (e) {} }
+    await SD.waitFor(() => mine().length > 0, 4000);
+    await new Promise(r => setTimeout(r, 300));
+    const first = String(myName || '').split(/\s+/)[0].toLowerCase();
+    const META = /^(\d+\s*(s|m|min|mins|h|hr|hrs|d|w|mo|y)\b.*|.*\bago|like|liked|unlike|reply|report|delete|edit|translate|see translation|\d+|·|•|and \d+ others?|gave kudos)$/i;
+    const out = [], seen = new Set();
+    // the words of a block, leaving out buttons (Like, Reply), profile links (names) and timestamps
+    const words = (box) => {
+      const parts = [], w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = w.nextNode())) {
+        if (node.parentElement && node.parentElement.closest('button, [role="button"], a[href*="/athletes/"], time, script, style, svg')) continue;
+        const t = norm(node.nodeValue);
+        if (t && !META.test(t) && !(first && t.toLowerCase().startsWith(first) && t.split(' ').length <= 3)) parts.push(t);
+      }
+      return parts.join(' ');
+    };
+    for (const a of mine()) {
+      let box = a.parentElement, text = '';
+      for (let i = 0; i < 6 && box; i++, box = box.parentElement) {
+        if (box.querySelectorAll('a[href*="/athletes/"]').length > 3) break;   // a list of people (kudos), not one comment
+        const t = words(box);
+        if (t.length >= 2) { text = t; break; }
+      }
+      if (text && text.length <= 600 && !seen.has(text)) { seen.add(text); out.push(text); }
+    }
+    return out;
   };
   // Comments for many activities, a few at a time (used by "Learn my style").
   SD.commentsMany = async (ids, conc) => {
@@ -3503,14 +3609,14 @@ function aiReply(box,ok,msg,label){
   if(!ok){ toast(label+' failed: '+(msg||'unknown error')); return false; }
   var res={}; try{ res=JSON.parse(msg); }catch(e){}
   var list=res.comments||[];
-  if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI'); sugs.appendChild(lab); }
+  if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI')+(res.photosRead?' · looked at '+res.photosRead+' photo'+(res.photosRead===1?'':'s'):''); sugs.appendChild(lab); }
   list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
   return true;
 }
 function suggest(btn){
   if(btn.disabled) return;
   var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
-  btn.disabled=true; btn.dataset.busy='1'; btn.textContent='✨ Thinking…';
+  btn.disabled=true; btn.dataset.busy='1'; var card=document.querySelector('.act[data-id="'+CSS.escape(btn.dataset.suggest)+'"]'); btn.textContent=(card&&card.querySelector('.photos img'))?'📷 Looking at the photos…':'✨ Thinking…';
   send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode},function(ok,msg){
     btn.disabled=false; delete btn.dataset.busy; btn.textContent='✨ More';
     if(!aiReply(box,ok,msg,'Suggestions')&&!ok&&msg==='NEED_KEY') btn.textContent='✨ Suggest';
@@ -3842,10 +3948,11 @@ function writingHTML(){
       '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="2000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea></div>'+
     (sec?sec.items.map(fieldHTML).join(''):'')+
     '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
-      '<small class="muted">Reads the comments on recent activities, picks out yours and describes how you write. ✨ My style then writes like you, on top of your instructions.</small>'+
+      '<small class="muted">Finds your own comments on friends’ activities, opening their pages one by one until it has the number above, then describes how you write. It can take several minutes; you can keep using the digest. ✨ My style then writes like you, on top of your instructions.</small>'+
       '<div class="stylebtns"><button class="sm" data-act="style-learn"'+(STYLEBUSY?' disabled':'')+'>'+(STYLEBUSY?'Learning…':(prof?'Learn again':'Learn my style'))+'</button>'+
+      (STYLEBUSY?'<button class="sm" data-act="style-stop">Stop</button>':'')+
       '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLEMSG)+'</small></div>'+
-      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.read?'<br>'+meta.read+' comments read on '+(meta.scanned||0)+' activities; only yours are used':'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
+      (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+((meta.read||meta.opened)?'<br>'+(meta.read||0)+' comments read, '+(meta.opened||0)+' activities opened'+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
 function renderCfg(){
@@ -3900,6 +4007,7 @@ function cfgAction(t,act){
   }
   if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
   if(act==='style-clear'){ STYLEMSG=''; send('style-clear',{},setState); return; }
+  if(act==='style-stop'){ STYLEMSG='Stopping: learning from what was found so far…'; renderCfg(); send('style-stop',{}); return; }
   if(act==='style-learn'){
     if(STYLEBUSY) return; STYLEBUSY=true; STYLEMSG='Starting…'; renderCfg();
     send('style-learn',{},function(ok,msg){
@@ -4373,7 +4481,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn','style-stop'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
