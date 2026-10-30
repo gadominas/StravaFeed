@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.24.0';
+const VERSION = '1.24.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -76,6 +76,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.16.0' },
+  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.24.1' },
 ];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
@@ -1224,13 +1225,13 @@ const settings = {
 };
 const saveSettings = () => write("settings", settings);
 
-// ── Anonymous usage counts (opt-in), sent to PostHog's US cloud ──
+// ── Anonymous usage counts (opt-in), sent to PostHog's US cloud (app-blueprints · usage-analytics) ──
 // Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
 // (made on this iPhone, not linked to Strava), the app version and counts: never names, athlete IDs,
 // comments, photos, descriptions or anything from the feed. Events are anonymous (no person profiles).
 // The key is PostHog's project key, made to sit in public apps: it can only add events.
 // HOST must be the region the project lives in: PostHog's other region answers "accepted" and then drops the events.
-const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };
+const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };   // the shared project (blueprint Step 0)
 const KC_INSTALL = 'strava-digest-install-id';
 let usageQueue = [], usageTimer = null;
 const usageAvailable = () => !!USAGE.KEY;
@@ -1245,7 +1246,7 @@ function track(event, props = {}) {
   if (!usageOn()) return;
   try {
     usageQueue.push({ event, timestamp: new Date().toISOString(),
-      properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app_version: VERSION, $lib: 'strava-daily-digest' }, props) });
+      properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app: APP_ID, app_version: VERSION, $lib: APP_ID }, props) });
     if (usageQueue.length >= 25) flushUsage();
     else if (!usageTimer) usageTimer = Timer.schedule(3000, false, () => { usageTimer = null; flushUsage(); });
   } catch (e) {}
@@ -3220,8 +3221,8 @@ body.loading .loadst{display:block}
 #nightnote p{flex:1;margin:0;font-size:14px;line-height:1.35;color:var(--mut)}
 #nightnote button{flex:none;white-space:nowrap}
 #usageask{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin:0 0 14px}
-#usageask b{font-size:16px}
-#usageask p{margin:6px 0 12px;color:var(--mut);font-size:14px;line-height:1.4}
+#usageask b{font-size:calc(16px * var(--ts))}
+#usageask p{margin:6px 0 12px;color:var(--mut);font-size:calc(14px * var(--ts));line-height:1.4}
 .uabtns{display:flex;gap:10px}
 .uabtns button{flex:1}
 #csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
