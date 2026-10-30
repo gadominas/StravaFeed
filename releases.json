@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.22.0",
+      "date": "2026-10-30",
+      "title": "Post the day's story",
+      "highlights": [
+        {
+          "icon": "📸",
+          "title": "Story as a picture",
+          "text": "Turn the day's story into a 1080×1920 image, ready for Instagram, with the cast, title, story and photos."
+        },
+        {
+          "icon": "🔳",
+          "title": "Scan to get the app",
+          "text": "Every image carries a Made with Strava Daily Digest mark and a QR code that opens the app's GitHub page."
+        },
+        {
+          "icon": "📤",
+          "title": "Straight to the share sheet",
+          "text": "Save it to Photos or post it to Instagram from the iPhone share sheet."
+        }
+      ],
+      "changes": [
+        "📸 Image in the day's story makes a 1080×1920 picture: app logo and date, cast with kudos rings, title, the story (text size fitted to the space) and up to three of its photos",
+        "Footer with the app logo, Made with Strava Daily Digest, and a QR code to github.com/gadominas/StravaFeed (built into the app, no network needed)",
+        "Photos and profile pictures are loaded by the app so the page can draw them; the finished picture opens in the iPhone share sheet"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.21.0",
       "date": "2026-10-30",
       "title": "Sunshine while you wait",

@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.22.0 (2026-10-30): Post the day's story
+
+- 📸 **Story as a picture**: Turn the day's story into a 1080×1920 image, ready for Instagram, with the cast, title, story and photos.
+- 🔳 **Scan to get the app**: Every image carries a Made with Strava Daily Digest mark and a QR code that opens the app's GitHub page.
+- 📤 **Straight to the share sheet**: Save it to Photos or post it to Instagram from the iPhone share sheet.
+
+**Changes**
+
+- 📸 Image in the day's story makes a 1080×1920 picture: app logo and date, cast with kudos rings, title, the story (text size fitted to the space) and up to three of its photos
+- Footer with the app logo, Made with Strava Daily Digest, and a QR code to github.com/gadominas/StravaFeed (built into the app, no network needed)
+- Photos and profile pictures are loaded by the app so the page can draw them; the finished picture opens in the iPhone share sheet
+
 ## 1.21.0 (2026-10-30): Sunshine while you wait
 
 - ☀️ **Your friend, shining**: While comment ideas are written, the composer turns into a sky with your friend's photo as the sun.
