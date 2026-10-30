@@ -3,6 +3,33 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.24.0",
+      "date": "2026-10-31",
+      "title": "Night owl friendly",
+      "highlights": [
+        {
+          "icon": "🌙",
+          "title": "Yesterday after midnight",
+          "text": "Open the app after midnight before anyone has posted, and it shows yesterday instead of an empty today."
+        },
+        {
+          "icon": "💬",
+          "title": "Says so",
+          "text": "A small note explains why you're looking at yesterday."
+        },
+        {
+          "icon": "👆",
+          "title": "One tap back",
+          "text": "Show today switches back whenever you like."
+        }
+      ],
+      "changes": [
+        "Opening the app before 6 AM with nothing posted today shows yesterday, with a 🌙 note and a Show today button",
+        "Only when the app opens: refreshing or tapping Today later shows today as before"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.23.2",
       "date": "2026-10-31",
       "title": "Usage counts reach the project",

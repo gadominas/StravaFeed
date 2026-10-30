@@ -2,6 +2,17 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.24.0 (2026-10-31): Night owl friendly
+
+- 🌙 **Yesterday after midnight**: Open the app after midnight before anyone has posted, and it shows yesterday instead of an empty today.
+- 💬 **Says so**: A small note explains why you're looking at yesterday.
+- 👆 **One tap back**: Show today switches back whenever you like.
+
+**Changes**
+
+- Opening the app before 6 AM with nothing posted today shows yesterday, with a 🌙 note and a Show today button
+- Only when the app opens: refreshing or tapping Today later shows today as before
+
 ## 1.23.2 (2026-10-31): Usage counts reach the project
 
 - 🎯 **Right place**: Anonymous usage counts now go to the PostHog project's own region, the US cloud.
