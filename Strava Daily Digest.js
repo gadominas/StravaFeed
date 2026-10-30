@@ -75,7 +75,7 @@ const BLUEPRINTS = [
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
-  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.0', since: '1.16.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.16.0' },
 ];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
@@ -123,6 +123,7 @@ async function main() {
   let pendingUpdate = null, updateChecked = false;
   let updateSettled = false, onDigest = false;   // the AI invitation waits for both (see inviteIfDue)
   let icloudNote = false;                        // a data file didn't arrive from iCloud: say so once the digest is up
+  let repairNote = false;                        // a data file arrived damaged and was started fresh: say so once the digest is up
   // Show the update pitch over the digest (it is re-shown after day switches until answered).
   const offerUpdate = () => { if (pendingUpdate && !viewing && !closed) js(`window.__showUpdate && window.__showUpdate(${JSON.stringify(pendingUpdate)})`); };   // true while a Strava activity page is shown inside the digest
   // One offer per launch, and an update wins: call this once the update check has settled.
@@ -217,6 +218,7 @@ async function main() {
       offerUpdate();
       if (!onDigest) { onDigest = true; if (updateSettled) inviteIfDue(); }   // AI invitation: once the digest is up and the update check has settled
       if (icloudNote) { icloudNote = false; js(`window.toast && toast(${JSON.stringify("Some of your data is still coming from iCloud. Nothing will be saved until you reopen Daily Digest.")})`); }
+      else if (repairNote) { repairNote = false; js(`window.toast && toast(${JSON.stringify("Some of your data couldn't be read, so Daily Digest kept a copy and started it fresh.")})`); }
       enrich(acts, token, +dayStart, +dayEnd).catch(e => console.warn('Details: ' + e));
       fillMine(token).catch(e => console.warn('Your activities: ' + e));
     } catch (e) {
@@ -436,7 +438,7 @@ async function main() {
     const t0 = Date.now();
     startLog(`Daily Digest ${VERSION}: reading data`);
     await loadData();
-    startLog(`data read in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${sentComments.length} sent comments${loadIssues.length ? '; missing: ' + loadIssues.join(', ') : ''}`);
+    startLog(`data read in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${sentComments.length} sent comments${loadIssues.length ? '; missing: ' + loadIssues.join(', ') : ''}${loadRepaired.length ? '; started fresh: ' + loadRepaired.join(', ') : ''}`);
     if (isClosed()) return;
     // Nothing is handed over in pieces (window.__parts stays empty): the digest arrives as its own page.
     await ev(`window.__boot(${JSON.stringify({ status: 'Opening your feed' })})`);
@@ -444,6 +446,7 @@ async function main() {
     try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight`, 5000); } catch (e) { seen = String(e.message || e); }
     startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
     if (loadIssues.length) icloudNote = true;   // toasted once the digest is on screen
+    else if (loadRepaired.length) repairNote = true;   // damaged file(s) copied aside and started fresh: toasted the same way
     // Deferred work, once the first screen is drawn: the feed, then updates (and the AI invitation), then the widget's icon.
     // The feed loads even when a data file is missing: it comes from Strava, and write() saves nothing over unread files.
     Timer.schedule(700, false, () => {
@@ -919,18 +922,35 @@ function startLog(msg) {
     lfm.writeString(LOG_PATH, old.concat(line).join("\n"));
   } catch (e) {}
 }
-const loadIssues = [];   // files iCloud didn't hand over in time
+const loadIssues = [];    // files that didn't arrive (iCloud too slow, or unreadable): never written this run
+const loadRepaired = [];  // files that arrived damaged: kept aside as <name>.broken-<time>.json, then started fresh
 async function load(n, def, waitMs = 10000) {
   const p = P(n);
   if (!fm.fileExists(p)) return def;
+  let txt;
   try {
     if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) {
       // iCloud can take a long time (or forever, offline): never let start-up hang on it
       await Promise.race([fm.downloadFileFromiCloud(p), new Promise(r => Timer.schedule(waitMs, false, r))]);
       if (!fm.isFileDownloaded(p)) { loadIssues.push(n); startLog(`iCloud didn't deliver ${n}.json in ${waitMs / 1000} s`); return def; }
     }
-    return JSON.parse(fm.readString(p));
-  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // a broken file falls back to defaults, never crashes
+    txt = fm.readString(p);
+  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // not read: never saved over
+  try { return JSON.parse(txt); }
+  catch (e) { keepBroken(fm, p, n, txt); return def; }
+}
+// It arrived but is damaged: keep a copy next to it, then start this file fresh so saving can carry on (safe-startup 1.1.0).
+// Without this, one damaged file stopped the app from ever saving again. The widget reads the data on every refresh
+// and never saves, so a copy that's already there is not made again. The parse error isn't logged: it can quote the file.
+function keepBroken(fm, p, n, txt) {
+  try {
+    const base = p.replace(/\.json$/, ""), dir = p.slice(0, p.lastIndexOf("/")), pre = base.slice(dir.length + 1) + ".broken-";
+    let kept = false;
+    try { kept = fm.listContents(dir).some(f => f.startsWith(pre) && fm.readString(fm.joinPath(dir, f)) === txt); } catch (_) {}
+    if (!kept) fm.writeString(base + ".broken-" + Date.now() + ".json", txt);
+    if (!loadRepaired.includes(n)) loadRepaired.push(n);
+    startLog(`${n}.json was damaged (not valid JSON); ${kept ? "a copy was already kept" : "kept a copy"} and started it fresh`);
+  } catch (e) { loadIssues.push(n); startLog(`${n}.json was damaged and couldn't be copied aside`); }   // no copy, no overwrite
 }
 // Data files are only written once they were read, so a slow start can never save an empty list over them.
 // settingsOk is set by loadSettings() (settings that were never read are never saved over).
@@ -943,7 +963,7 @@ const write = (n, v) => {
 // The feed itself comes from Strava; the AI settings and usage are small local files (ai-configuration), read as before.
 let sentComments = [];   // comments you posted through the digest, newest first: the surest examples of your style
 async function loadData() {
-  loadIssues.length = 0;
+  loadIssues.length = 0;   // loadRepaired is kept, so a damaged settings.json (read before this) still gets its toast
   sentComments = await load("sent-comments", []);
   if (!Array.isArray(sentComments)) sentComments = [];
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
@@ -3814,7 +3834,9 @@ function closeInvite(what) {
     window.__aiOpen();   // the same thing the Settings row's "ai-open" action does
     var n = 0;
     (function nudge() {   // this app's AI sheet draws its cards once its state arrives, so wait for Add key (at most 3 s)
-      var add = document.querySelector('#aisheet [data-aiact="aikey"]');   // the provider in use comes first
+      // The Add key of the provider in use: its card is the one marked .active (never "the first button", which
+      // is the wrong provider in any app whose sheet doesn't put the provider in use first).
+      var add = document.querySelector('#aisheet .aicard.active [data-aiact="aikey"]') || document.querySelector('#aisheet [data-aiact="aikey"]');
       if (!add) { if (++n < 20) setTimeout(nudge, 150); return; }
       add.classList.add("aiinv-nudge"); if (add.scrollIntoView) add.scrollIntoView({ block: "center" }); setTimeout(function () { add.classList.remove("aiinv-nudge"); }, 2600);
     })();
