@@ -2,6 +2,17 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.25.0 (2026-10-31): Clearer Settings
+
+- 🗂️ **Sections you can see**: Each Settings section now sits in its own card, so you can tell where it starts and ends.
+- 🔤 **Quieter headings**: Section names are small grey capitals, so they no longer look like settings.
+- 🎨 **In every palette**: The cards follow your colours, text size and layout, light or dark.
+
+**Changes**
+
+- Settings (app-blueprints · settings 1.1.0): each section's rows sit in one card, with a thin border and a slightly lighter background, under a small muted uppercase heading
+- The changed-count line and a section's explanation sit outside the cards; Built with is a card too
+
 ## 1.24.1 (2026-10-31): Counted by name
 
 - 🏷️ **Counts say which app**: Anonymous usage counts now name Daily Digest, so they stay separate from other apps in the same place.
