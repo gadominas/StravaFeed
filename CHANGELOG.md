@@ -2,6 +2,27 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.16.0 (2026-10-30): Opens every time, and shows what AI adds
+
+- 🚀 **Opens every time**: No more blank screen when opening from the widget, after quick taps or with slow iCloud.
+- ✦ **See what AI adds**: Without a key, a short card now and then shows what AI adds to your comments.
+- 🩺 **Start-up log**: Settings › Updates › Start-up log shows what happened the last times it opened.
+
+**Changes**
+
+- The digest opens on an empty dark window first, then the launch screen, then reads its data, so a page is always drawn
+- Quick taps on the widget open one window, not several
+- Your Strava feed starts loading just after the first screen is up; the update check follows a few seconds later
+- Without an AI key, an invitation card appears at most every 3 days (weekly after four "Later"s), never over another sheet or an update offer; "Don't remind me again" stops it for good
+- Turn on AI opens AI settings with Add key highlighted; removing your last key brings the invitation back from the next launch
+- Settings › Updates has a Start-up log row with the last 40 lines
+
+**Fixes**
+
+- Opening the digest could stay on a blank screen, most often from the widget or with slow iCloud
+- A comment history or settings file that iCloud hadn't delivered could be saved over with an empty one
+- If opening stalls, the screen now says so and shows the start-up log instead of staying blank
+
 ## 1.15.2 (2026-10-29): Learns from more of your comments
 
 - 🔎 **Finds your comments**: Learn my style now recognises far more of your own comments among everything it reads.
