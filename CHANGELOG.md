@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.23.1 (2026-10-30): Usage counts that arrive
+
+- 🌍 **Finds the right cloud**: Works whether the PostHog project lives in the EU or the US cloud, and remembers which.
+- 🧪 **Send test**: Settings › Privacy has a Send test button that shows PostHog's answer straight away.
+- 🧾 **Logged**: Every send, and any error from PostHog, is noted in the start-up log.
+
+**Changes**
+
+- Settings › Privacy shows when counts were last sent and whether PostHog accepted them, with a Send test button
+- Counts are sent after 3 seconds instead of 8
+
+**Fixes**
+
+- Usage counts were sent only to PostHog's EU cloud, so a project in the US cloud never received them
+- PostHog's answer was ignored, so a refused request looked the same as a successful one
+
 ## 1.23.0 (2026-10-30): Help shape the app
 
 - 📊 **Anonymous usage, if you agree**: A one-time question asks whether to share anonymous counts, like app opens, kudos and AI features used.

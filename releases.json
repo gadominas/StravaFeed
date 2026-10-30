@@ -3,6 +3,36 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.23.1",
+      "date": "2026-10-30",
+      "title": "Usage counts that arrive",
+      "highlights": [
+        {
+          "icon": "🌍",
+          "title": "Finds the right cloud",
+          "text": "Works whether the PostHog project lives in the EU or the US cloud, and remembers which."
+        },
+        {
+          "icon": "🧪",
+          "title": "Send test",
+          "text": "Settings › Privacy has a Send test button that shows PostHog's answer straight away."
+        },
+        {
+          "icon": "🧾",
+          "title": "Logged",
+          "text": "Every send, and any error from PostHog, is noted in the start-up log."
+        }
+      ],
+      "changes": [
+        "Settings › Privacy shows when counts were last sent and whether PostHog accepted them, with a Send test button",
+        "Counts are sent after 3 seconds instead of 8"
+      ],
+      "fixes": [
+        "Usage counts were sent only to PostHog's EU cloud, so a project in the US cloud never received them",
+        "PostHog's answer was ignored, so a refused request looked the same as a successful one"
+      ]
+    },
+    {
       "version": "1.23.0",
       "date": "2026-10-30",
       "title": "Help shape the app",
