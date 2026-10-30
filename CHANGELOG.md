@@ -2,6 +2,24 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.18.0 (2026-10-30): The day's story
+
+- 📖 **The day's story**: Tap 📖 before Today and the AI writes one funny story starring everyone in the day's digest.
+- 👍 **Kudos included**: Everyone's in it, whether they're still waiting for your kudos or already have it, with their real activities.
+- 🔁 **Another take, or share**: Not funny enough? Ask for another take, or share the story with your friends.
+
+**Changes**
+
+- 📖 button at the left of the day switcher writes a story about everyone in the day's digest, in one AI request, in your comment language
+- The story uses each person's activities (titles, sports, times, places, PRs, early starts, photos) and who has your kudos
+- Another take writes a fresh story; Share opens the iPhone share sheet; reopening shows the same story without asking the AI again
+- Route maps no longer appear on the cards; they're in the activity's details sheet
+- AI settings › usage lists the day's story separately
+
+**Fixes**
+
+- Story replies with line breaks inside the AI's JSON are read correctly
+
 ## 1.17.0 (2026-10-30): Route maps on every card
 
 - 🗺️ **See the route**: Runs, rides and walks show their route map right on the card, between the stats and the photos.
