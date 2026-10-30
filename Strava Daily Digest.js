@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.23.2';
+const VERSION = '1.24.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -120,6 +120,7 @@ async function main() {
 
   let viewing = false, savedScroll = 0;
   let storyDay = null;
+  let nightNote = false;          // opened on yesterday because today was still empty after midnight
   let styleStop = false;          // "Stop" in Learn my style: learn from what was found so far            // the day on screen: its date and activities
   let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
@@ -211,11 +212,18 @@ async function main() {
       if (!feed.covers(+dayStart)) await feed.readBackTo(+dayStart, status, () => token !== viewToken, count);
       if (token !== viewToken || closed) return;
       const acts = feed.day(+dayStart, +dayEnd);
+      // Just after midnight "today" is still empty: on opening, show yesterday instead, and say so.
+      if (booting && daysBack === 0 && !acts.length && new Date().getHours() < NIGHT_UNTIL && maxBack() >= 1) {
+        daysBack = 1; nightNote = true;
+        startLog('after midnight and today is empty: opening yesterday');
+        return showDay(false, booting);
+      }
       acts.forEach(a => { if (details.has(a.id)) mergeDetails(a, details.get(a.id)); derive(a); });
       viewing = false;
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       storyDay = { dayStart, acts };   // what "The day's story" writes about
-      await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList() }));
+      await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList(), night: nightNote && daysBack === 1 }));
+      nightNote = false;
       if (booting) {
         startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
         track('app_open', { layout: settings.density, theme: settings.theme, ai_key: !!aiKey(), language: settings.aiLang, has_style: !!settings.styleProfile });
@@ -2874,7 +2882,10 @@ function mineHtml(list) {
   return `<section id="mine" class="n${list.length}" aria-label="Your activities"><div class="mineh"><span>Your activities</span><small>Today &amp; yesterday</small></div><div class="minet">${tiles}</div></section>`;
 }
 
-function renderDigest({ dayStart, daysBack, scan, people, count, mine }) {
+// Before this hour, an empty "today" opens yesterday instead.
+const NIGHT_UNTIL = 6;
+
+function renderDigest({ dayStart, daysBack, scan, people, count, mine, night }) {
   const df = new DateFormatter(); df.dateFormat = 'EEEE, d MMMM';
   const summary = summaryText(people, count);
   const open = people.filter(p => !p.kudoed && p.primary.canKudo).length;
@@ -2887,6 +2898,7 @@ function renderDigest({ dayStart, daysBack, scan, people, count, mine }) {
   return page(`
     ${appHeader(daysBack, open, people.length)}
     <div class="top"><div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div></div>
+    ${night ? `<section id="nightnote" role="status"><span aria-hidden="true">🌙</span><p>It’s just after midnight and nobody has posted today yet, so here’s yesterday.</p><button class="ghost small" data-day="0">Show today</button></section>` : ''}
     ${usageAvailable() && !settings.usageAsked && !settings.shareUsage ? `<section id="usageask" aria-label="Anonymous usage"><b>Help improve Daily Digest?</b><p>Share anonymous counts, like app opens, kudos given and AI features used. Never names, comments, photos or your Strava account. You can change this in Settings.</p><div class="uabtns"><button data-act="usage-yes">Yes, share</button><button class="ghost" data-act="usage-no">No thanks</button></div></section>` : ''}
     ${mineHtml(mine || [])}
     ${body}
@@ -3203,6 +3215,10 @@ body.loading .loadst{display:block}
 .ktitle{color:#fff;font-size:calc(19px * var(--ts));font-weight:700;margin-top:22px}
 .ksub{color:rgba(255,255,255,.7);font-size:calc(14px * var(--ts));margin-top:4px;min-height:1.3em}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
+#nightnote{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin:0 0 14px}
+#nightnote span{font-size:20px;flex:none}
+#nightnote p{flex:1;margin:0;font-size:14px;line-height:1.35;color:var(--mut)}
+#nightnote button{flex:none;white-space:nowrap}
 #usageask{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin:0 0 14px}
 #usageask b{font-size:16px}
 #usageask p{margin:6px 0 12px;color:var(--mut);font-size:14px;line-height:1.4}
