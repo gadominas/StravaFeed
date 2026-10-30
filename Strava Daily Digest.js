@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.22.0';
+const VERSION = '1.23.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -216,7 +216,10 @@ async function main() {
       if (booting) { await status(`Ready: ${acts.length} ${acts.length === 1 ? 'activity' : 'activities'} to read`); await sleep(550); }
       storyDay = { dayStart, acts };   // what "The day's story" writes about
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList() }));
-      if (booting) startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
+      if (booting) {
+        startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
+        track('app_open', { layout: settings.density, theme: settings.theme, ai_key: !!aiKey(), language: settings.aiLang, has_style: !!settings.styleProfile });
+      }
       saveSnapshot(feed);
       offerUpdate();
       if (!onDigest) { onDigest = true; if (updateSettled) inviteIfDue(); }   // AI invitation: once the digest is up and the update check has settled
@@ -293,7 +296,8 @@ async function main() {
     }
     if (head === 'update-now') {
       let ok = false, msg = '';
-      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); }
+      const toVersion = pendingUpdate && (pendingUpdate.latest || pendingUpdate.version);
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; track('app_updated', { from: VERSION, to: toVersion || '' }); flushUsage(); if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE); }
       catch (e) { msg = String(e.message || e); }
       await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
       return;
@@ -311,7 +315,8 @@ async function main() {
     if (head === 'settings-get' || head === 'set' || head === 'cfg') {
       let ok = true, msg = '';
       try {
-        if (head === 'set') {
+        if (head === 'set' && p.k === 'shareUsage') setUsage(p.v === true || p.v === 'true' || p.v === '1');
+        else if (head === 'set') {
           const effect = setSetting(p.k, p.v);
           if (effect === null) throw new Error('That setting can’t be changed here.');
           if (effect && effect !== settingsEffect) settingsEffect = settingsEffect === 'reload' ? 'reload' : effect;
@@ -349,7 +354,8 @@ async function main() {
     if (head === 'retry') { await boot(); return; }
     if (!feed) return;
     if (head === 'refresh') { await showDay(true); return; }
-    if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); await showDay(false); return; }
+    if (head === 'day') { daysBack = Math.min(maxBack(), Math.max(0, parseInt(p.back, 10) || 0)); track('day_viewed', { days_back: daysBack }); await showDay(false); return; }
+    if (head === 'usage-consent') { setUsage(p.on === '1'); flushUsage(); return; }
     if (head === 'style-stop') { styleStop = true; await js(`window.__done(${JSON.stringify(p.req)}, true, '')`); return; }
     if (head === 'style-learn' || head === 'style-clear') {
       let ok = true, msg = '';
@@ -361,6 +367,8 @@ async function main() {
           const pages = makePageReader();
           try { await learnStyle(feed, sx, t => js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(t)})`), () => closed, pages.read, () => styleStop); }
           finally { await pages.close(); }
+          const m = settings.styleMeta || {};
+          track('style_learned', { found: m.count || 0, wanted: m.wanted || 0, pages_opened: m.opened || 0, stopped: !!m.stopped });
         }
         msg = JSON.stringify(settingsState());
       } catch (e) { ok = false; msg = String(e.message || e); }
@@ -382,6 +390,7 @@ async function main() {
           kudoers, comments: comments.map(c => Object.assign({}, c, { ago: agoLabel(c.at) })), likeable: !likeUnsupported,
         };
       }
+      if (data.ok) track('own_activity_opened');
       await js(`window.__done(${JSON.stringify(p.req)}, ${!!data.ok}, ${JSON.stringify(JSON.stringify(data))})`);
       return;
     }
@@ -390,6 +399,7 @@ async function main() {
       try { r = await likeComment(sx, String(p.aid), String(p.cid || ''), String(p.text || ''), p.on === '1'); }
       catch (e) { r = { ok: false, error: e.message }; }
       if (r.unsupported) likeUnsupported = true;
+      if (r.ok) track('comment_liked', { like: p.on === '1' });
       if (r.via) console.log('Comment like sent via ' + r.via);
       await js(`window.__done(${JSON.stringify(p.req)}, ${!!r.ok}, ${JSON.stringify(r.ok ? '' : (r.unsupported ? 'UNSUPPORTED' : (r.error || 'Like not sent')))})`);
       return;
@@ -398,12 +408,12 @@ async function main() {
     try {
       if (head === 'kudo') {
         const r = await sx(`__SD.kudo(${JSON.stringify(p.id)})`, cfg('pageWait') * 1000); ok = !!r.ok; msg = r.error || '';
-        if (ok) { feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; }); saveSnapshot(feed); }
+        if (ok) { feed.update(p.id, a => { a.hasKudoed = true; a.kudos++; }); saveSnapshot(feed); track('kudos_sent'); }
       } else if (head === 'comment') {
         const r = await postComment(sx, String(p.id), String(p.text || ''));
         ok = !!r.ok; msg = r.error || '';
         if (r.via) console.log('Comment sent via ' + r.via);
-        if (ok) { feed.update(p.id, a => { a.comments++; }); rememberSent(String(p.text || '').trim()); }
+        if (ok) { feed.update(p.id, a => { a.comments++; }); rememberSent(String(p.text || '').trim()); track('comment_posted'); }
       } else if (head === 'suggest') {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
@@ -411,7 +421,7 @@ async function main() {
           const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode,
             (step, done, total) => js(`window.__ideaProgress && window.__ideaProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0 }); }
+          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0 }); track('ai_ideas', { mode: p.mode || settings.aiMode, language: p.lang || settings.aiLang, photos: r.photosRead || 0, provider: aiSettings.aiProvider }); }
         }
       } else if (head === 'story') {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
@@ -420,7 +430,7 @@ async function main() {
           const r = await aiStory(people, storyDay.dayStart, p.lang || settings.aiLang,
             (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify(r); }
+          else { ok = true; msg = JSON.stringify(r); track('story_made', { people: r.count, photos: r.photosRead || 0 }); }
         }
       } else if (head === 'story-assets') {
         // the page may not draw Strava's pictures into an image, so they travel as data the page can use
@@ -435,7 +445,7 @@ async function main() {
         if (!b64) msg = 'The image wasn\u2019t made. Try again.';
         else {
           const img = Image.fromData(Data.fromBase64String(String(b64)));
-          await ShareSheet.present([img]); ok = true;
+          await ShareSheet.present([img]); ok = true; track('story_image');
         }
       } else if (head === 'share') {
         await ShareSheet.present([String(p.text || '')]); ok = true;
@@ -501,7 +511,7 @@ async function main() {
   await ui.loadHTML('<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:#0E1116"></body></html>');
   const presented = ui.present(true);
   holdLock();
-  presented.then(() => { closed = true; releaseLock(); });
+  presented.then(() => { closed = true; releaseLock(); flushUsage(); });
   await pause(300);                          // let the window finish appearing
   startLog('window on screen');
   await Promise.race([ui.loadHTML(bootScreen('Opening your feed')), pause(15000)]);   // the launch screen, drawn on screen
@@ -1194,9 +1204,53 @@ const settings = {
   aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key,   // remembered picks, also set in the composer
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
   styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
+  shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
   cfg: {},
 };
 const saveSettings = () => write("settings", settings);
+
+// ── Anonymous usage counts (opt-in), sent to PostHog's EU cloud ──
+// Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
+// (made on this iPhone, not linked to Strava), the app version and counts: never names, athlete IDs,
+// comments, photos, descriptions or anything from the feed. Events are anonymous (no person profiles).
+// The key is PostHog's project key, made to sit in public apps: it can only add events.
+const USAGE = { HOST: 'https://eu.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };
+const KC_INSTALL = 'strava-digest-install-id';
+let usageQueue = [], usageTimer = null;
+const usageAvailable = () => !!USAGE.KEY;
+const usageOn = () => usageAvailable() && !!settings.shareUsage;
+function installId() {
+  if (Keychain.contains(KC_INSTALL)) return Keychain.get(KC_INSTALL);
+  const id = UUID.string().toLowerCase();
+  Keychain.set(KC_INSTALL, id);
+  return id;
+}
+function track(event, props = {}) {
+  if (!usageOn()) return;
+  try {
+    usageQueue.push({ event, timestamp: new Date().toISOString(),
+      properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app_version: VERSION, $lib: 'strava-daily-digest' }, props) });
+    if (usageQueue.length >= 25) flushUsage();
+    else if (!usageTimer) usageTimer = Timer.schedule(8000, false, () => { usageTimer = null; flushUsage(); });
+  } catch (e) {}
+}
+// Sends what's queued in one request. Never waits on the app and never retries: if it fails, those counts are gone.
+async function flushUsage() {
+  if (!usageQueue.length) return;
+  if (!usageOn()) { usageQueue = []; return; }
+  const batch = usageQueue.splice(0, usageQueue.length);
+  try {
+    const r = new Request(USAGE.HOST + '/batch/');
+    r.method = 'POST'; r.timeoutInterval = 8; r.headers = { 'Content-Type': 'application/json' };
+    r.body = JSON.stringify({ api_key: USAGE.KEY, batch });
+    await r.loadString();
+  } catch (e) {}
+}
+function setUsage(on) {
+  settings.shareUsage = !!on; settings.usageAsked = true; saveSettings();
+  if (on) track('usage_opt_in');
+  else { usageQueue = []; if (Keychain.contains(KC_INSTALL)) Keychain.remove(KC_INSTALL); }   // a fresh ID if switched on again
+}
 
 // Every key the page may change, with its check and what closing Settings must then do.
 const SET_KEYS = {
@@ -1204,7 +1258,7 @@ const SET_KEYS = {
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
-  commentRules: ["rules", ""],
+  commentRules: ["rules", ""], shareUsage: ["bool", ""],
 };
 // Returns the effect ('', 'render', 'reload'), or null when the key or value isn't allowed.
 function setSetting(k, v) {
@@ -1318,6 +1372,7 @@ function settingsState() {
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
     defaultRules: DEFAULT_COMMENT_RULES, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
+    usageAvailable: usageAvailable(),
   };
 }
 
@@ -2807,6 +2862,7 @@ function renderDigest({ dayStart, daysBack, scan, people, count, mine }) {
   return page(`
     ${appHeader(daysBack, open, people.length)}
     <div class="top"><div><h1>${esc(df.string(dayStart))}</h1><div class="sub">${esc(summary)}</div></div></div>
+    ${usageAvailable() && !settings.usageAsked && !settings.shareUsage ? `<section id="usageask" aria-label="Anonymous usage"><b>Help improve Daily Digest?</b><p>Share anonymous counts, like app opens, kudos given and AI features used. Never names, comments, photos or your Strava account. You can change this in Settings.</p><div class="uabtns"><button data-act="usage-yes">Yes, share</button><button class="ghost" data-act="usage-no">No thanks</button></div></section>` : ''}
     ${mineHtml(mine || [])}
     ${body}
     <p class="ver">Daily Digest v${VERSION}</p>`);
@@ -3122,6 +3178,11 @@ body.loading .loadst{display:block}
 .ktitle{color:#fff;font-size:calc(19px * var(--ts));font-weight:700;margin-top:22px}
 .ksub{color:rgba(255,255,255,.7);font-size:calc(14px * var(--ts));margin-top:4px;min-height:1.3em}
 @media (prefers-reduced-motion:reduce){.kpc,.kaw,.ka.hit{animation:none}}
+#usageask{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin:0 0 14px}
+#usageask b{font-size:16px}
+#usageask p{margin:6px 0 12px;color:var(--mut);font-size:14px;line-height:1.4}
+.uabtns{display:flex;gap:10px}
+.uabtns button{flex:1}
 #csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #csheet[hidden]{display:none}
 #ideaov{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;overflow:hidden;color:#fff;border-radius:20px 20px 0 0;
@@ -4077,6 +4138,8 @@ function renderCfg(){
       pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
     writingHTML()+
+    (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
+      swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.'):'')+
     '<h3 class="sec">Updates</h3>'+
       swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
       '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
@@ -4620,6 +4683,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.mine) return openMine(t);
   if(t.dataset.clike!==undefined) return likeMine(t);
   if(t.dataset.act==='mine-close') return closeMine();
+  if(t.dataset.act==='usage-yes'||t.dataset.act==='usage-no'){ send('usage-consent',{on:t.dataset.act==='usage-yes'?'1':'0'}); var ua=document.getElementById('usageask'); if(ua) ua.remove(); toast(t.dataset.act==='usage-yes'?'Thank you! Change it any time in Settings.':'No problem. Nothing is shared.'); return; }
   if(t.dataset.act==='story') return openStory(false);
   if(t.dataset.act==='story-again') return openStory(true);
   if(t.dataset.act==='story-close') return closeStory();

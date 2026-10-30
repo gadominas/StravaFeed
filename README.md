@@ -200,11 +200,12 @@ Strava Daily Digest checks this repository for a new version each time it opens.
 
 ## Privacy and security
 
-- **Everything runs on your phone.** There is no server in between and nothing is collected. Settings live in iCloud Drive › Scriptable › StravaFeed; the widget summary, AI settings and token usage stay in Scriptable's local storage on this iPhone.
+- **Everything runs on your phone.** There is no server in between, and nothing is collected unless you agree to share anonymous usage (below). Settings live in iCloud Drive › Scriptable › StravaFeed; the widget summary, AI settings and token usage stay in Scriptable's local storage on this iPhone.
 - **Your Strava login** stays in Scriptable's private browser storage, exactly as if you had logged in to strava.com.
 - **✨ Suggest** sends that one activity's details (title, stats, PRs, description, start time) and the athlete's first name, with your instructions and learned style, to the provider marked “In use”, and only when you tap it. **Learn my style** sends only your own comments. Comments you post through the digest are kept (the latest 50) in `sent-comments.json` next to `settings.json` as examples of your style.
 - AI keys stay in the iOS Keychain and are only sent to their own provider.
 - The update check only downloads `releases.json` from this repository.
+- **Anonymous usage, only if you agree.** A one-time question (and **Settings › Privacy › Share anonymous usage**) decides whether the app sends anonymous counts to PostHog's EU cloud: app opens, kudos given, comments posted, AI features used, stories made, the app version and a few display settings. Each event carries a random install ID made on your phone, not linked to Strava. Never sent: names, athlete IDs, comments, descriptions, photos or anything else from your feed. Turning it off stops sending and deletes the install ID.
 
 ## How it works
 
