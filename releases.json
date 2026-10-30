@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.23.0",
+      "date": "2026-10-30",
+      "title": "Help shape the app",
+      "highlights": [
+        {
+          "icon": "📊",
+          "title": "Anonymous usage, if you agree",
+          "text": "A one-time question asks whether to share anonymous counts, like app opens, kudos and AI features used."
+        },
+        {
+          "icon": "🔒",
+          "title": "Nothing personal",
+          "text": "Only a random install ID and counts: never names, comments, photos or your Strava account."
+        },
+        {
+          "icon": "⚙️",
+          "title": "Your choice, any time",
+          "text": "Settings › Privacy turns it on or off; off also deletes the install ID."
+        }
+      ],
+      "changes": [
+        "One-time question at the top of the digest: Yes, share or No thanks",
+        "Settings › Privacy › Share anonymous usage",
+        "When on, sends counts to PostHog's EU cloud: app opens (version, layout, theme, language, whether an AI key and a learned style exist), days viewed, kudos sent, comments posted and liked, AI ideas (mood, language, photos looked at), stories and story images made, style learning results, your own activities opened, and updates",
+        "Events are anonymous, sent in small batches, and never slow the app; if sending fails they're dropped"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.22.0",
       "date": "2026-10-30",
       "title": "Post the day's story",

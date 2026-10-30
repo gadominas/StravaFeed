@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.23.0 (2026-10-30): Help shape the app
+
+- 📊 **Anonymous usage, if you agree**: A one-time question asks whether to share anonymous counts, like app opens, kudos and AI features used.
+- 🔒 **Nothing personal**: Only a random install ID and counts: never names, comments, photos or your Strava account.
+- ⚙️ **Your choice, any time**: Settings › Privacy turns it on or off; off also deletes the install ID.
+
+**Changes**
+
+- One-time question at the top of the digest: Yes, share or No thanks
+- Settings › Privacy › Share anonymous usage
+- When on, sends counts to PostHog's EU cloud: app opens (version, layout, theme, language, whether an AI key and a learned style exist), days viewed, kudos sent, comments posted and liked, AI ideas (mood, language, photos looked at), stories and story images made, style learning results, your own activities opened, and updates
+- Events are anonymous, sent in small batches, and never slow the app; if sending fails they're dropped
+
 ## 1.22.0 (2026-10-30): Post the day's story
 
 - 📸 **Story as a picture**: Turn the day's story into a 1080×1920 image, ready for Instagram, with the cast, title, story and photos.
