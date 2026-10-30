@@ -69,29 +69,26 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 ## Install
 
 1. Get **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** (free) on your iPhone or iPad.
-2. In Scriptable, tap **+**, paste the contents of [`Install Strava Daily Digest.js`](Install%20Strava%20Daily%20Digest.js) and tap **Run** (▶). **Strava Daily Digest** now appears in your Scripts list.
-3. Run **Strava Daily Digest** and log in to Strava once (see [First run](#first-run)).
+2. In Scriptable, tap **+**, paste these two lines, name the script *Strava Daily Digest Installer*, and tap **▶**:
+   ```js
+   const code = await new Request("https://raw.githubusercontent.com/gadominas/StravaFeed/main/install.js").loadString();
+   await eval("(async () => {" + code + "\n})()");
+   ```
+3. Tap **Open Strava Daily Digest** and log in to Strava once (see [First run](#first-run)).
 
-To update, tap **Update now** when the digest offers a new version, or run the installer again; your settings are kept.
+To update, tap **Update now** when Strava Daily Digest offers a new version, or run *Strava Daily Digest Installer* again. Your settings are kept.
 
 <details>
 <summary><b>Install by hand</b></summary>
 
-Either of these works:
-
-- **Download the file:** download [`Strava Daily Digest.js`](Strava%20Daily%20Digest.js) and save it to **iCloud Drive › Scriptable**. It shows up in Scriptable automatically.
-- **Copy and paste:** in Scriptable, tap **+**, paste the whole script, and name it *Strava Daily Digest*.
+Rather not use the loader? Paste [`install.js`](install.js) or [`Strava Daily Digest.js`](Strava%20Daily%20Digest.js) into a new script in Scriptable yourself.
 
 </details>
 
-What you need:
+What else you need:
 
-- **iPhone or iPad** with the free **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** app from the App Store.
 - **A Strava account** that follows other athletes. A free account is enough; no Strava subscription is needed.
 - **Optional: the Strava app**, if you want to open posts there.
-- **Optional: a Claude or OpenAI API key**, for ✨ comment ideas (see [AI](#ai)).
-
-You don't need a computer, developer account, or Strava API application.
 
 ## How to use it
 

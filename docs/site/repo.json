@@ -1,5 +1,26 @@
 {
   "description": "Catch up. Cheer. Move on. Your Strava following feed as one page per day, grouped by athlete, with one-tap kudos, AI comment ideas and a kudos widget. A Scriptable app.",
   "homepage": "https://github.com/gadominas/StravaFeed#readme",
-  "topics": ["scriptable", "scriptable-app", "ios", "iphone", "javascript", "app-blueprints", "ai", "claude", "openai", "strava", "running", "cycling", "kudos", "fitness", "activity-feed", "ios-widget"]
+  "topics": [
+    "scriptable",
+    "scriptable-app",
+    "ios",
+    "iphone",
+    "javascript",
+    "app-blueprints",
+    "ai",
+    "claude",
+    "openai",
+    "strava",
+    "running",
+    "cycling",
+    "kudos",
+    "fitness",
+    "activity-feed",
+    "ios-widget"
+  ],
+  "install": {
+    "kept": "Your settings are kept.",
+    "firstRun": "Open it and log in to Strava once."
+  }
 }
