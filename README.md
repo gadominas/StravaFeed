@@ -38,7 +38,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 - **AI comment ideas.** 💬 opens a composer that writes comment ideas from the activity's real details, in ✨ My style or a mood (Funny, Energetic, Serious, Funky), in English or Lithuanian. Ideas also take in the activity's description, emojis included, and up to three of its photos.
 - **Comments that sound like you.** Write your instructions once in Settings, and let **Learn my style** study your own past comments, so ✨ My style writes the way you do. It opens friends' activities one by one until it has the number you set, up to 50, so it can take a few minutes.
 - **Early-riser badges.** The 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs get a badge, and the day's summary counts the early risers.
-- **The day's story.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it. It looks at up to three photos per person and weaves them in, with everyone's profile pictures at the top.
+- **The day's story.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it. It looks at up to three photos per person and weaves them in, with everyone's profile pictures at the top. Tap **📸 Image** to turn it into a picture for Instagram, with a QR code back to this page.
 - **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map (drawn from Strava's route line when there's no map picture), every stat, PRs, the description and photos.
 - **Your activities on top.** Your latest activities sit above everyone else's. Tap one to see who gave kudos, read the comments and like them.
 - **Kudos widget, launch screen, settings, updates.** A Home Screen and Lock Screen widget shows who is still waiting for your kudos; the digest opens on its logo; colours, layout and text size are in Settings; new versions are offered in the app.
@@ -63,6 +63,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 <p align="center">
   <img src="docs/screenshots/13-dark-mode.png" width="31%" alt="The digest in dark mode with the Tiny layout: one line per athlete with indicators and a round kudos button">
   <img src="docs/screenshots/14-kudos-widget.png" width="31%" alt="The medium kudos widget: 6 people waiting, with Jonas, Tomas and Ada listed with their sports">
+  <img src="docs/screenshots/15-story-image.jpg" width="31%" alt="The day's story as a picture for Instagram: cast with kudos rings, title, story, three photos, and a QR code to this page">
 </p>
 
 ## Install

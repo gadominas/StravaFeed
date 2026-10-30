@@ -62,7 +62,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.21.0';
+const VERSION = '1.22.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -421,6 +421,21 @@ async function main() {
             (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
           else { ok = true; msg = JSON.stringify(r); }
+        }
+      } else if (head === 'story-assets') {
+        // the page may not draw Strava's pictures into an image, so they travel as data the page can use
+        let urls = [], avs = [];
+        try { urls = JSON.parse(p.urls || '[]'); avs = JSON.parse(p.avs || '[]'); } catch (e) {}
+        const out = { photos: {}, avatars: {} };
+        for (const u of urls.slice(0, 3)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 1080); } catch (e) { console.warn('Story image photo: ' + e.message); } }
+        for (const u of avs.slice(0, 12)) { try { out.avatars[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 200); } catch (e) { console.warn('Story image avatar: ' + e.message); } }
+        ok = true; msg = JSON.stringify(out);
+      } else if (head === 'story-image') {
+        const b64 = await ui.evaluateJavaScript('window.__storyImg || ""');
+        if (!b64) msg = 'The image wasn\u2019t made. Try again.';
+        else {
+          const img = Image.fromData(Data.fromBase64String(String(b64)));
+          await ShareSheet.present([img]); ok = true;
         }
       } else if (head === 'share') {
         await ShareSheet.present([String(p.text || '')]); ok = true;
@@ -781,6 +796,11 @@ function activityFacts(a) {
   };
 }
 
+// The app's GitHub page as a QR code (version 3, 29×29, error correction M), rows of 1s and 0s.
+// Made once from the fixed link, so the image export needs no QR library and no network.
+const REPO_URL = 'https://github.com/gadominas/StravaFeed';
+const QR_REPO = '11111110111011100010001111111|10000010111111000101101000001|10111010101001100001101011101|10111010011111001100101011101|10111010110010111011001011101|10000010000110100100101000001|11111110101010101010101111111|00000000010111000001100000000|10011111111110111101010010111|10110000011110110111010110110|10001011011110010110000110100|11100000010110010101111101001|11100010001111110001101100001|01010001010100111110001111111|11111110100000110101111010101|01011001011101101011000110101|01000110011100010001110001000|11011000110100010111000010110|11111011010111111111000011001|11100101000001010001001001100|11001011010011010100111111110|00000000101111010000100011000|11111110101001010011101011000|10000010110011000101100010010|10111010101101010011111111001|10111010110010111110010000001|10111010010101110100110110111|10000010001010111000001101101|11111110110101011101101010000';
+
 // ── The day's story: everyone in the digest, with or without your kudos, in one funny tale ──
 const STORY_PROMPT = (language, n, photos) => [
   `You are a witty, warm storyteller. Write one short, funny story (about 200 to 300 words) in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
@@ -796,11 +816,13 @@ const STORY_PROMPT = (language, n, photos) => [
 
 // Downloaded and shrunk story photos, kept while the app is open so "Another take" doesn't load them again.
 const storyPhotoCache = new Map();
-async function storyPhoto(url) {
-  if (storyPhotoCache.has(url)) return storyPhotoCache.get(url);
+const storyPhoto = (url) => shrinkImage(url, 768);
+async function shrinkImage(url, max) {
+  const key = max + ' ' + url;
+  if (storyPhotoCache.has(key)) return storyPhotoCache.get(key);
   const r = new Request(url); r.timeoutInterval = 20;
   const img = await r.loadImage();
-  const w = img.size.width, h = img.size.height, k = Math.min(1, 768 / Math.max(w, h, 1));
+  const w = img.size.width, h = img.size.height, k = Math.min(1, max / Math.max(w, h, 1));
   let small = img;
   if (k < 1) {
     const dc = new DrawContext();
@@ -809,8 +831,8 @@ async function storyPhoto(url) {
     small = dc.getImage();
   }
   const b64 = Data.fromJPEG(small).toBase64String();
-  if (storyPhotoCache.size > 40) storyPhotoCache.delete(storyPhotoCache.keys().next().value);
-  storyPhotoCache.set(url, b64);
+  if (storyPhotoCache.size > 60) storyPhotoCache.delete(storyPhotoCache.keys().next().value);
+  storyPhotoCache.set(key, b64);
   return b64;
 }
 
@@ -3256,7 +3278,7 @@ section.person .route{display:none}
 .stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
 .stf{display:flex;gap:10px}
 .stf[hidden]{display:none}
-.stf button{flex:1}
+.stf button{flex:1;padding-left:8px;padding-right:8px;white-space:nowrap}
 @media (prefers-reduced-motion: reduce){.stquill{animation:none}}
 .route [hidden]{display:none}
 .rmap{display:block;width:100%;aspect-ratio:2/1;object-fit:cover;cursor:pointer}
@@ -4338,7 +4360,7 @@ function storySheet(){
   var ov=document.getElementById('storysheet');
   if(!ov){
     ov=document.createElement('div'); ov.id='storysheet'; ov.hidden=true;
-    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button data-act="story-share">Share</button></div></div>';
+    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button class="ghost" data-act="story-image">📸 Image</button><button data-act="story-share">Share</button></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',function(e){ if(e.target===ov) closeStory(); });
   }
@@ -4396,6 +4418,103 @@ function renderStory(){
   html+='<span class="badge-ai">✨ Written by '+escH(STORY.by)+(STORY.photosRead?' · looked at '+STORY.photosRead+' photo'+(STORY.photosRead===1?'':'s'):'')+escH(note)+'</span>';
   ov.querySelector('.stb').innerHTML=html;
   ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
+}
+// ── The story as a 1080×1920 picture for Instagram, with the app's mark and a QR code to its GitHub page ──
+var QR_REPO='${QR_REPO}', REPO_LABEL='github.com/gadominas/StravaFeed';
+function loadImg(src){ return new Promise(function(res){ if(!src) return res(null); var i=new Image(); i.onload=function(){ res(i); }; i.onerror=function(){ res(null); }; i.src=src; }); }
+function wrapLines(ctx,text,maxW){
+  var words=String(text).split(' '), lines=[], line='';
+  words.forEach(function(w){ if(!w) return; var t=line?line+' '+w:w; if(line&&ctx.measureText(t).width>maxW){ lines.push(line); line=w; } else line=t; });
+  if(line) lines.push(line); return lines;
+}
+function rrect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function cover(ctx,img,x,y,w,h){ var k=Math.max(w/img.width,h/img.height), sw=w/k, sh=h/k; ctx.drawImage(img,(img.width-sw)/2,(img.height-sh)/2,sw,sh,x,y,w,h); }
+function drawQR(ctx,x,y,size){
+  var rows=QR_REPO.split('|'), n=rows.length, m=Math.floor(size/(n+4)), q=Math.round((size-m*n)/2);
+  ctx.fillStyle='#ffffff'; rrect(ctx,x,y,size,size,18); ctx.fill(); ctx.fillStyle='#000000';
+  rows.forEach(function(r,j){ for(var i=0;i<n;i++) if(r.charAt(i)==='1') ctx.fillRect(x+q+i*m,y+q+j*m,m,m); });
+}
+var FONT='-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
+// the app logo (route digest), drawn from the same shapes as the header logo, on its dark tile
+function drawLogo(ctx,x,y,size){
+  var k=size/240; ctx.save(); ctx.translate(x,y); ctx.scale(k,k);
+  ctx.fillStyle='#0E1116'; rrect(ctx,0,0,240,240,54); ctx.fill();
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle='rgba(246,247,249,.35)'; ctx.lineWidth=7; ctx.stroke(new Path2D('M140 162 H196 M152 186 H196'));
+  ctx.strokeStyle='#F6F7F9'; ctx.lineWidth=13; ctx.stroke(new Path2D('M62 184 C62 138 112 150 120 120 C128 90 176 102 176 58'));
+  ctx.fillStyle='#FB7185'; ctx.strokeStyle='#0E1116'; ctx.lineWidth=8; ctx.beginPath(); ctx.arc(176,56,20,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#2DD4BF'; ctx.beginPath(); ctx.arc(62,184,12,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawStoryCard(assets){
+  var W=1080,H=1920,P=80, cv=document.createElement('canvas'); cv.width=W; cv.height=H; var ctx=cv.getContext('2d');
+  var urls=[]; STORY.paragraphs.forEach(function(x){ (x.photos||[]).forEach(function(u){ if(urls.length<3&&urls.indexOf(u)<0) urls.push(u); }); });
+  var cast=STORY.cast.slice(0,8);
+  return Promise.all([Promise.all(urls.map(function(u){ return loadImg((assets.photos||{})[u]); })), Promise.all(cast.map(function(c){ return loadImg((assets.avatars||{})[c.avatar]); }))]).then(function(res){
+    var photos=res[0].filter(Boolean), faces=res[1];
+    // sky-dark background with a warm glow
+    var g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#101320'); g.addColorStop(1,'#1d1f2b'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    var glow=ctx.createRadialGradient(W-120,120,10,W-120,120,620); glow.addColorStop(0,'rgba(252,76,2,.42)'); glow.addColorStop(1,'rgba(252,76,2,0)'); ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
+    ctx.textBaseline='alphabetic';
+    // header: logo, app name, date
+    drawLogo(ctx,P,88,60);
+    ctx.font='800 40px '+FONT; ctx.fillStyle='#ffffff'; ctx.fillText('Daily',P+78,132);
+    ctx.fillStyle='#FB7185'; ctx.fillText('Digest',P+78+ctx.measureText('Daily ').width,132);
+    ctx.fillStyle='rgba(255,255,255,.65)'; ctx.font='500 32px '+FONT; ctx.textAlign='right'; ctx.fillText(STORY.key||'',W-P,132); ctx.textAlign='left';
+    ctx.fillStyle='#ff8a4c'; ctx.font='800 30px '+FONT; ctx.fillText('THE DAY’S STORY',P,226);
+    // cast
+    var y=262, d=104, gap=22;
+    cast.forEach(function(c,i){
+      var x=P+i*(d+gap), cx=x+d/2, cy=y+d/2;
+      ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,d/2,0,Math.PI*2); ctx.clip();
+      if(faces[i]) cover(ctx,faces[i],x,y,d,d); else { ctx.fillStyle='#2b2d39'; ctx.fillRect(x,y,d,d); ctx.fillStyle='#d9d9e3'; ctx.font='800 36px '+FONT; ctx.textAlign='center'; ctx.fillText(initialsOf(c.name),cx,cy+13); ctx.textAlign='left'; }
+      ctx.restore();
+      ctx.strokeStyle=c.kudoed?'#2fbf71':'#fc4c02'; ctx.lineWidth=6; ctx.beginPath(); ctx.arc(cx,cy,d/2+4,0,Math.PI*2); ctx.stroke();
+      ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='600 24px '+FONT; ctx.textAlign='center'; ctx.fillText(String(c.name||'').split(' ')[0].slice(0,9),cx,y+d+38); ctx.textAlign='left';
+    });
+    y+=d+80;
+    // title
+    ctx.fillStyle='#ffffff'; ctx.font='800 70px '+FONT;
+    var tl=wrapLines(ctx,STORY.title||'',W-2*P).slice(0,3); tl.forEach(function(l){ y+=74; ctx.fillText(l,P,y); }); y+=44;
+    // footer and photos are fixed at the bottom; the story fills what's left, its size chosen to fit
+    var footTop=H-300, photoH=photos.length?(photos.length===1?420:340):0, photoTop=footTop-50-photoH, textBottom=(photos.length?photoTop-44:footTop-44);
+    var paras=STORY.paragraphs.map(function(x){ return x.text; }), size, layout;
+    for(size=54;size>=24;size-=2){
+      ctx.font='400 '+size+'px '+FONT; var lh=Math.round(size*1.42), h=0; layout=[];
+      paras.forEach(function(t,i){ var ls=wrapLines(ctx,t,W-2*P); layout.push(ls); h+=ls.length*lh+(i?Math.round(size*0.7):0); });
+      if(y+h<=textBottom) break;
+    }
+    ctx.fillStyle='rgba(255,255,255,.92)'; ctx.font='400 '+size+'px '+FONT; var lh2=Math.round(size*1.42), full=false;
+    layout.forEach(function(ls,i){ if(full) return; if(i) y+=Math.round(size*0.7);
+      for(var k=0;k<ls.length;k++){ if(y+lh2>textBottom){ var last=ls[k]; while(last&&ctx.measureText(last+' …').width>W-2*P) last=last.slice(0,-1); ctx.fillText((last||'')+' …',P,y+lh2-Math.round(size*0.35)); full=true; return; }
+        y+=lh2; ctx.fillText(ls[k],P,y-Math.round(size*0.35)); } });
+    // photos
+    if(photos.length){ var pw=(W-2*P-(photos.length-1)*18)/photos.length;
+      photos.forEach(function(im,i){ var x=P+i*(pw+18); ctx.save(); rrect(ctx,x,photoTop,pw,photoH,28); ctx.clip(); cover(ctx,im,x,photoTop,pw,photoH); ctx.restore(); }); }
+    // footer: watermark and the QR code to the app
+    ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(P,footTop); ctx.lineTo(W-P,footTop); ctx.stroke();
+    var qs=210; drawQR(ctx,W-P-qs,footTop+44,qs);
+    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='500 28px '+FONT; ctx.fillText('Made with',P,footTop+92);
+    drawLogo(ctx,P,footTop+108,48);
+    ctx.fillStyle='#ffffff'; ctx.font='800 46px '+FONT; ctx.fillText('Strava Daily Digest',P+64,footTop+148);
+    ctx.fillStyle='#ff8a4c'; ctx.font='700 28px '+FONT; ctx.fillText('Scan to get the app  →',P,footTop+200);
+    ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='500 24px '+FONT; ctx.fillText(REPO_LABEL,P,footTop+240);
+    return cv.toDataURL('image/jpeg',0.92);
+  });
+}
+function storyImage(btn){
+  if(!STORY||btn.disabled) return;
+  var was=btn.textContent; btn.disabled=true; btn.textContent='Making it…';
+  var urls=[]; STORY.paragraphs.forEach(function(x){ (x.photos||[]).forEach(function(u){ if(urls.length<3&&urls.indexOf(u)<0) urls.push(u); }); });
+  var avs=STORY.cast.slice(0,8).map(function(c){ return c.avatar; }).filter(Boolean);
+  function done(err){ btn.disabled=false; btn.textContent=was; if(err) toast(err); }
+  send('story-assets',{urls:JSON.stringify(urls),avs:JSON.stringify(avs)},function(ok,msg){
+    var a={}; try{ a=JSON.parse(msg); }catch(e){}
+    drawStoryCard(a).then(function(url){
+      window.__storyImg=url.split(',')[1];
+      send('story-image',{},function(ok2,m2){ window.__storyImg=null; done(ok2?'':(m2||'Couldn’t share the image')); });
+    }).catch(function(e){ done('Couldn’t make the image: '+(e&&e.message||e)); });
+  });
 }
 function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
@@ -4505,6 +4624,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='story-again') return openStory(true);
   if(t.dataset.act==='story-close') return closeStory();
   if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:storyText()}); return; }
+  if(t.dataset.act==='story-image') return storyImage(t);
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
   if(t.dataset.act==='mine-back'){ MINEVIEW='main'; renderMine(); return; }
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
