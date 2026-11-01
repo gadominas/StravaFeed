@@ -3,6 +3,24 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.29.1",
+      "date": "2026-11-01",
+      "title": "Where in the world",
+      "highlights": [
+        {
+          "icon": "🇱🇹",
+          "title": "The country, nothing more",
+          "text": "Tiny lines show the activity's country and flag after its title, never the city."
+        }
+      ],
+      "changes": [
+        "When the title is long, only the flag shows, so the title keeps its room; a long press names the country",
+        "Works when Strava writes only a city and region: the region (apskritis, novads, maakond) or the activity's time zone tells the country",
+        "Comment ideas know the country too"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.29.0",
       "date": "2026-11-01",
       "title": "Tiny lines, put to work",

@@ -2,6 +2,16 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.29.1 (2026-11-01): Where in the world
+
+- 🇱🇹 **The country, nothing more**: Tiny lines show the activity's country and flag after its title, never the city.
+
+**Changes**
+
+- When the title is long, only the flag shows, so the title keeps its room; a long press names the country
+- Works when Strava writes only a city and region: the region (apskritis, novads, maakond) or the activity's time zone tells the country
+- Comment ideas know the country too
+
 ## 1.29.0 (2026-11-01): Tiny lines, put to work
 
 - 💬 **Comment from the line**: Each Tiny line has a 💬 that opens the comment sheet straight away, no expanding.
