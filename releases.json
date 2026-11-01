@@ -3,6 +3,39 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.30.0",
+      "date": "2026-11-01",
+      "title": "The day's story, as a comic",
+      "highlights": [
+        {
+          "icon": "💥",
+          "title": "Comic pages",
+          "text": "💥 Comic turns the day's story into comic pages: a cover, panels and THE END."
+        },
+        {
+          "icon": "📚",
+          "title": "The whole story, every time",
+          "text": "Long stories run over as many pages as they need; nothing is cut off any more."
+        },
+        {
+          "icon": "🖼️",
+          "title": "Save them all at once",
+          "text": "The share sheet's Save Images keeps every page in Photos, ready to post later."
+        }
+      ],
+      "changes": [
+        "Pages are 1080×1350, a shape Strava and Instagram show in full",
+        "The cover has the title on a sun-burst and everyone starring, with kudos rings",
+        "Each paragraph is a panel: a caption box, its photos, or the friends it mentions, and a sound effect (SPLASH!, ZOOM!, STOMP!…) picked from what happens",
+        "A paragraph too long for one panel continues in the next; spare room goes to the pictures",
+        "Up to nine of the story's photos now make it into the pages (before: three)",
+        "THE END panel carries the app's mark and the QR code; every page is numbered"
+      ],
+      "fixes": [
+        "A long story didn't fit the single picture and was cut off with …"
+      ]
+    },
+    {
       "version": "1.29.2",
       "date": "2026-11-01",
       "title": "The weather, back for real",

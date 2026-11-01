@@ -2,6 +2,25 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.30.0 (2026-11-01): The day's story, as a comic
+
+- 💥 **Comic pages**: 💥 Comic turns the day's story into comic pages: a cover, panels and THE END.
+- 📚 **The whole story, every time**: Long stories run over as many pages as they need; nothing is cut off any more.
+- 🖼️ **Save them all at once**: The share sheet's Save Images keeps every page in Photos, ready to post later.
+
+**Changes**
+
+- Pages are 1080×1350, a shape Strava and Instagram show in full
+- The cover has the title on a sun-burst and everyone starring, with kudos rings
+- Each paragraph is a panel: a caption box, its photos, or the friends it mentions, and a sound effect (SPLASH!, ZOOM!, STOMP!…) picked from what happens
+- A paragraph too long for one panel continues in the next; spare room goes to the pictures
+- Up to nine of the story's photos now make it into the pages (before: three)
+- THE END panel carries the app's mark and the QR code; every page is numbered
+
+**Fixes**
+
+- A long story didn't fit the single picture and was cut off with …
+
 ## 1.29.2 (2026-11-01): The weather, back for real
 
 - 🌧️ **Weather on every outdoor line**: When Strava keeps no weather, the app fetches the hour's weather where the activity started.
