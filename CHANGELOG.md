@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.27.1 (2026-11-01): LT means Lithuanian
+
+- 🇱🇹 **Your language pick wins**: Tap LT and every idea is in Lithuanian, even for an English title like Lunch Hike.
+- ⬆️ **Post in the header**: Post sits next to ✕ at the top, so the comment box gets the full width.
+
+**Changes**
+
+- EN and LT now override any language rule in your instructions; Auto still follows the activity title
+- If ideas still come back in the wrong language, the app asks once more before showing them
+- Post is dimmed until there is something to post, and lights up when you tap an idea
+
+**Fixes**
+
+- With LT picked, ideas for an English-titled activity came back in English
+
 ## 1.27.0 (2026-11-01): Learning you can watch
 
 - ✍️ **Learning in its own window**: Learn my style opens a window with a live count of your comments found so far.

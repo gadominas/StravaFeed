@@ -3,6 +3,31 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.27.1",
+      "date": "2026-11-01",
+      "title": "LT means Lithuanian",
+      "highlights": [
+        {
+          "icon": "🇱🇹",
+          "title": "Your language pick wins",
+          "text": "Tap LT and every idea is in Lithuanian, even for an English title like Lunch Hike."
+        },
+        {
+          "icon": "⬆️",
+          "title": "Post in the header",
+          "text": "Post sits next to ✕ at the top, so the comment box gets the full width."
+        }
+      ],
+      "changes": [
+        "EN and LT now override any language rule in your instructions; Auto still follows the activity title",
+        "If ideas still come back in the wrong language, the app asks once more before showing them",
+        "Post is dimmed until there is something to post, and lights up when you tap an idea"
+      ],
+      "fixes": [
+        "With LT picked, ideas for an English-titled activity came back in English"
+      ]
+    },
+    {
       "version": "1.27.0",
       "date": "2026-11-01",
       "title": "Learning you can watch",
