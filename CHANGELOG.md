@@ -2,6 +2,16 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.29.0 (2026-11-01): Tiny lines, put to work
+
+- 💬 **Comment from the line**: Each Tiny line has a 💬 that opens the comment sheet straight away, no expanding.
+- 🌧️ **The weather at a glance**: When Strava has the weather, Tiny lines show it above 💬: rain, sun or snow, and the temperature.
+
+**Changes**
+
+- Weather shows as one emoji (☀️ ⛅ ☁️ 🌧️ ❄️ ⛈️ 🌫️ 💨) and the temperature; VoiceOver and a long press read it in full, feels-like included
+- Long names in Tiny lines end in … instead of running under the buttons
+
 ## 1.28.0 (2026-11-01): Stories in your language
 
 - 📖 **Your language, from the start**: The day's story is written in the language set in Settings, not guessed from titles.

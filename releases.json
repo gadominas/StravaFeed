@@ -3,6 +3,28 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.29.0",
+      "date": "2026-11-01",
+      "title": "Tiny lines, put to work",
+      "highlights": [
+        {
+          "icon": "💬",
+          "title": "Comment from the line",
+          "text": "Each Tiny line has a 💬 that opens the comment sheet straight away, no expanding."
+        },
+        {
+          "icon": "🌧️",
+          "title": "The weather at a glance",
+          "text": "When Strava has the weather, Tiny lines show it above 💬: rain, sun or snow, and the temperature."
+        }
+      ],
+      "changes": [
+        "Weather shows as one emoji (☀️ ⛅ ☁️ 🌧️ ❄️ ⛈️ 🌫️ 💨) and the temperature; VoiceOver and a long press read it in full, feels-like included",
+        "Long names in Tiny lines end in … instead of running under the buttons"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.28.0",
       "date": "2026-11-01",
       "title": "Stories in your language",
