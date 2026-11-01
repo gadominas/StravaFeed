@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.26.1 (2026-11-01): Whole instructions
+
+- 📜 **Nothing cut off**: Instructions for every AI comment now take up to 4,000 characters, as promised.
+- 🩹 **Repaired for you**: Instructions cut off at 2,000 characters are made whole again when the app opens.
+
+**Changes**
+
+- Settings › Comment writing shows how many of the 4,000 characters the instructions use
+
+**Fixes**
+
+- The instructions box still stopped at 2,000 characters, so pasting the new default cut it off mid-sentence
+- 1.26.0 checked the new default instructions in the wrong place, so a first start could skip moving very old settings out of the Keychain
+
 ## 1.26.0 (2026-11-01): Comments that notice things
 
 - 👆 **One button to start**: Tap ✨ Suggest comments; tone, language and ↻ sit in one tidy row to reshape the ideas.

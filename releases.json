@@ -3,6 +3,30 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.26.1",
+      "date": "2026-11-01",
+      "title": "Whole instructions",
+      "highlights": [
+        {
+          "icon": "📜",
+          "title": "Nothing cut off",
+          "text": "Instructions for every AI comment now take up to 4,000 characters, as promised."
+        },
+        {
+          "icon": "🩹",
+          "title": "Repaired for you",
+          "text": "Instructions cut off at 2,000 characters are made whole again when the app opens."
+        }
+      ],
+      "changes": [
+        "Settings › Comment writing shows how many of the 4,000 characters the instructions use"
+      ],
+      "fixes": [
+        "The instructions box still stopped at 2,000 characters, so pasting the new default cut it off mid-sentence",
+        "1.26.0 checked the new default instructions in the wrong place, so a first start could skip moving very old settings out of the Keychain"
+      ]
+    },
+    {
       "version": "1.26.0",
       "date": "2026-11-01",
       "title": "Comments that notice things",
