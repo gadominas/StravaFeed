@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.26.2';
+const VERSION = '1.27.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -168,7 +168,8 @@ async function main() {
   let viewing = false, savedScroll = 0;
   let storyDay = null;
   let nightNote = false;          // opened on yesterday because today was still empty after midnight
-  let styleStop = false;          // "Stop" in Learn my style: learn from what was found so far            // the day on screen: its date and activities
+  let styleStop = false;          // "Stop" in Learn my style: learn from what was found so far
+  let styleRun = null;            // Learn my style in progress: { found, wanted, text } (the page asks for it after a redraw)            // the day on screen: its date and activities
   let likeUnsupported = false;   // set once Strava's page offers no way to like a comment
   let pendingUpdate = null, updateChecked = false;
   let updateSettled = false, onDigest = false;   // the AI invitation waits for both (see inviteIfDue)
@@ -271,6 +272,7 @@ async function main() {
       storyDay = { dayStart, acts };   // what "The day's story" writes about
       await ui.loadHTML(renderDigest({ dayStart, daysBack, scan: feed.scan(), people: groupByAthlete(acts), count: acts.length, mine: mineList(), night: nightNote && daysBack === 1 }));
       nightNote = false;
+      if (styleRun) js(`window.__styleResume && window.__styleResume(${JSON.stringify(styleRun)})`);   // Learn my style keeps going
       if (booting) {
         startLog(`digest on screen in ${((Date.now() - runStart) / 1000).toFixed(1)} s: ${acts.length} activities`);
         track('app_open', { layout: settings.density, theme: settings.theme, ai_key: !!aiKey(), language: settings.aiLang, has_style: !!settings.styleProfile });
@@ -419,22 +421,32 @@ async function main() {
       return;
     }
     if (head === 'style-stop') { styleStop = true; await js(`window.__done(${JSON.stringify(p.req)}, true, '')`); return; }
-    if (head === 'style-learn' || head === 'style-clear') {
+    if (head === 'style-clear') {
+      settings.styleProfile = ''; settings.styleMeta = null; saveSettings();
+      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(JSON.stringify(settingsState()))})`);
+      return;
+    }
+    // Learn my style runs in the background: the page shows a pop-up that can be hidden while you keep using the app.
+    // Progress and the result go to whatever page is on screen (window.__styleProgress / __styleDone), so a redraw loses nothing.
+    if (head === 'style-learn') {
+      if (styleRun) { await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(JSON.stringify(styleRun))})`); return; }
+      if (!feed) { await js(`window.__done(${JSON.stringify(p.req)}, false, ${JSON.stringify('Wait until the digest has loaded, then try again.')})`); return; }
+      styleStop = false;
+      styleRun = { found: 0, wanted: cfg('styleComments'), text: 'Starting…', at: Date.now() };
+      await js(`window.__done(${JSON.stringify(p.req)}, true, ${JSON.stringify(JSON.stringify(styleRun))})`);
       let ok = true, msg = '';
+      const pages = makePageReader();
       try {
-        if (head === 'style-clear') { settings.styleProfile = ''; settings.styleMeta = null; saveSettings(); }
-        else {
-          if (!feed) throw new Error('Wait until the digest has loaded, then try again.');
-          styleStop = false;
-          const pages = makePageReader();
-          try { await learnStyle(feed, sx, t => js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(t)})`), () => closed, pages.read, () => styleStop); }
-          finally { await pages.close(); }
-          const m = settings.styleMeta || {};
-          track('style_learned', { found: m.count || 0, wanted: m.wanted || 0, pages_opened: m.opened || 0, stopped: !!m.stopped });
-        }
+        await learnStyle(feed, sx, async (u) => {
+          Object.assign(styleRun, { found: u.found, wanted: u.wanted, text: u.text });
+          await js(`window.__styleProgress && window.__styleProgress(${JSON.stringify(u)})`);
+        }, () => closed, pages.read, () => styleStop);
+        const m = settings.styleMeta || {};
+        track('style_learned', { found: m.count || 0, wanted: m.wanted || 0, pages_opened: m.opened || 0, stopped: !!m.stopped });
         msg = JSON.stringify(settingsState());
       } catch (e) { ok = false; msg = String(e.message || e); }
-      await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+      finally { try { await pages.close(); } catch (e) {} styleRun = null; }
+      await js(`window.__styleDone && window.__styleDone(${ok}, ${JSON.stringify(msg)})`);
       return;
     }
     if (head === 'mine-open') {
@@ -1142,6 +1154,20 @@ async function rememberSent(text) {
   } catch (e) { console.warn('Comment history: ' + e); }
 }
 
+// The emojis and a word or two from each comment found, for the Learn my style animation.
+const STYLE_STOP = new Set('that this with have from your what just like they been were will when there then than very much also into more some only over about after really good nice well done great kaip labai tikrai buvo dabar kada arba nors toks tokia šitas šitą jau dar tavo mano savo visai vienas viena gerai'.split(' '));
+function styleWords(list) {
+  const out = [];
+  for (const t of list) {
+    const em = [...new Set(String(t).match(/\p{Extended_Pictographic}/gu) || [])].slice(0, 2);
+    em.forEach(e => out.push({ e }));
+    const words = [...new Set(String(t).toLowerCase().match(/\p{L}[\p{L}'’-]{3,}/gu) || [])].filter(w => !STYLE_STOP.has(w) && w.length <= 16)
+      .sort((a, b) => b.length - a.length).slice(0, em.length ? 1 : 2);
+    words.forEach(w => out.push({ w }));
+  }
+  return out.slice(0, 16);
+}
+
 // "Learn my style": collect your latest comments, then have the AI describe how you write.
 // Is this commenter you? Same first name, and the same surname or its initial ("Gediminas S."), accents ignored.
 function nameMatches(name, mine) {
@@ -1184,15 +1210,17 @@ async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopp
   if (!myName) { try { myName = ((await sx(`__SD.whoAmI(${JSON.stringify(me)})`, cfg('pageWait') * 1000)) || {}).name || ''; } catch (e) {} }
   const texts = [], seen = new Set();
   let read = 0, checked = 0, opened = 0;
-  const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); } };
+  const fresh = [];   // found since the last report: their words and emojis float up in the pop-up
+  const take = (t) => { t = String(t || '').trim(); const k = t.toLowerCase(); if (t && texts.length < n && !seen.has(k)) { seen.add(k); texts.push(t); fresh.push(t); } };
   const isMine = (c) => (c.athleteId && me && String(c.athleteId) === me) || nameMatches(c.name, myName);
   const stop = () => isClosed() || isStopped() || texts.length >= n;
-  const say = (what) => progress(`${what} · ${texts.length} of ${n} of your comments found`);
+  const say = (what) => progress({ text: what, found: texts.length, wanted: n, items: styleWords(fresh.splice(0)) });
   for (const h of await load('sent-comments', [])) take(h && h.text);
   for (const a of feed.all()) (a.cmts || []).filter(isMine).forEach(c => take(c.text));
   const apiCount = new Map(), pageDone = new Set();
   let oldest = null, fromData = 0, fromPages = 0;
   startLog(`Learn my style: looking for ${n} comments by ${myName || 'you'} (${me}); ${texts.length} already from the digest and the feed`);
+  await say(texts.length ? 'Found some in the digest and your feed' : 'Looking through your feed');
   for (let round = 0; round < 8 && !stop(); round++) {
     // every friend's activity: Strava's feed doesn't always say how many comments one has
     const cands = feed.all().filter(a => a.athleteId !== me);
@@ -1230,7 +1258,7 @@ async function learnStyle(feed, sx, progress, isClosed, readPage = null, isStopp
   if (texts.length < 3) throw new Error(read || opened
     ? `Read ${read} comments and opened ${opened} activities, but found only ${texts.length} of yours${who}. Comment a few more times, then try again.`
     : `Found only ${texts.length} of your comments and couldn\u2019t read others from Strava. Comment a few more times, then try again.`);
-  await progress(`Studying all ${texts.length} of your comments…`);
+  await progress({ text: `Studying all ${texts.length} of your comments…`, found: texts.length, wanted: n, items: styleWords(fresh.splice(0)), studying: true });
   const out = await aiCall(STYLE_PROMPT, JSON.stringify({ comments: texts }), 1200, 'style');
   const prof = String(out || '').replace(/^```\w*\n?|```$/g, '').trim().slice(0, 2000);
   if (!prof) throw new Error('The AI sent back nothing. Try again.');
@@ -3467,6 +3495,37 @@ body.loading .loadst{display:block}
 #usageask p{margin:6px 0 12px;color:var(--mut);font-size:calc(14px * var(--ts));line-height:1.4}
 .uabtns{display:flex;gap:10px}
 .uabtns button{flex:1}
+#stylepop{position:fixed;inset:0;z-index:58;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+#stylepop[hidden]{display:none}
+.spp{position:relative;width:100%;max-width:560px;max-height:94vh;overflow-y:auto;background:var(--bg);color:var(--fg);border-radius:22px 22px 0 0;animation:up .22s ease-out;padding-bottom:env(safe-area-inset-bottom,0px)}
+.spsky{position:relative;height:min(250px,32vh);overflow:hidden;border-radius:22px 22px 0 0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;
+  background:radial-gradient(120% 90% at 50% 110%,#ffcf7a 0%,#f08a5d 30%,#7a4fa0 62%,#2a2457 100%)}
+.spsky::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(180deg,rgba(255,255,255,.07) 0 1px,transparent 1px 26px);pointer-events:none}
+.sprise{position:absolute;inset:0;overflow:hidden;pointer-events:none;display:flex;flex-wrap:wrap;align-content:flex-end;justify-content:center;gap:6px;padding:12px}
+.spw,.spe{position:absolute;bottom:-44px;white-space:nowrap;animation:sprise linear forwards;will-change:transform,opacity}
+.spw{font-weight:700;font-size:calc(15px * var(--ts));padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.spe{font-size:34px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.3))}
+@keyframes sprise{0%{transform:translate(0,0) rotate(0) scale(.7);opacity:0}12%{opacity:1;transform:translate(0,-40px) rotate(var(--r)) scale(1)}85%{opacity:.9}100%{transform:translate(var(--dx),-330px) rotate(calc(var(--r) * -1));opacity:0}}
+.spcount{position:relative;z-index:1;display:flex;align-items:baseline;gap:8px;text-shadow:0 2px 12px rgba(0,0,0,.35)}
+.spn{font-size:64px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.spof{font-size:20px;font-weight:700;opacity:.85}
+.spcap{position:relative;z-index:1;margin-top:4px;font-size:13px;font-weight:600;opacity:.85}
+.spbody{padding:16px 18px 18px}
+.spbody h3{margin:0 0 10px;font-size:calc(19px * var(--ts))}
+.spbar{height:8px;border-radius:999px;background:var(--soft);overflow:hidden}
+.spbar i{display:block;height:100%;width:0;border-radius:999px;background:var(--accent);transition:width .5s ease-out}
+.spstat{margin:10px 0 0;color:var(--mut);font-size:calc(14px * var(--ts));line-height:1.4;min-height:1.4em}
+.spnote{display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:11px 12px;border-radius:14px;background:color-mix(in srgb,var(--accent) 10%,var(--bg));border:1px solid color-mix(in srgb,var(--accent) 28%,transparent)}
+.spnote span{font-size:20px;line-height:1.2}
+.spnote p{margin:0;font-size:calc(13.5px * var(--ts));line-height:1.4}
+.spp.fin .spnote{display:none}
+.spbtns{display:flex;gap:8px;margin-top:16px}
+.spbtns button{flex:1;padding:12px 10px}
+#stylepill{position:fixed;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:57;display:flex;align-items:center;gap:7px;padding:9px 14px;font-size:calc(13px * var(--ts));font-weight:700;background:var(--fg);color:var(--bg);box-shadow:0 6px 18px rgba(0,0,0,.3);animation:up .25s ease-out}
+#stylepill b{font-variant-numeric:tabular-nums}
+.spdot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:spdot 1.2s ease-in-out infinite}
+@keyframes spdot{50%{transform:scale(.55);opacity:.5}}
+@media (prefers-reduced-motion: reduce){.spdot,.spw,.spe{animation:none}.spw,.spe{opacity:1}}
 #csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #csheet[hidden]{display:none}
 #ideaov{--sun:clamp(76px,14vh,112px);position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;padding:24px;text-align:center;overflow-x:hidden;overflow-y:auto;color:#fff;border-radius:20px 20px 0 0;
@@ -4334,7 +4393,7 @@ window.setCount=function(n){
   document.body.appendChild(ptr);
   var icon=ptr.querySelector('.ptri'), label=ptr.querySelector('.ptrt');
   var y0=null, x0=0, dist=0, armed=false, TH=75;
-  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet','csheet','storysheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
+  function overlayOpen(){ return cfgOpen||['lb','sendov','sheet','det','upd','kov','msheet','csheet','storysheet','stylepop'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; }); }
   function reset(){ y0=null; dist=0; armed=false; ptr.classList.remove('ready'); ptr.style.transform=''; ptr.style.opacity=0; icon.style.transform=''; label.textContent='Pull to refresh'; }
   document.addEventListener('touchstart',function(e){
     if(window.scrollY>0||overlayOpen()||document.body.classList.contains('loading')||e.target.closest('.hdr,.photos,textarea,input')){ y0=null; return; }
@@ -4461,8 +4520,106 @@ function builtWithHTML(){
     SET.blueprints.map(function(b){ return '<button class="srow bp" data-act="openurl" data-v="'+escH(bpLink(b))+'"><div class="grow"><b>'+escH(b.name)+'</b><small class="muted">Blueprint '+escH(b.version)+' · since '+escH(SET.appName)+' '+escH(b.since)+'</small></div><span class="chev" aria-hidden="true">›</span></button>'; }).join('')+
     '<button class="srow bp" data-act="openurl" data-v="'+escH(SET.blueprintsRepo)+'"><div class="grow"><b>All blueprints</b><small class="muted">'+escH(SET.blueprintsRepo.replace('https://',''))+'</small></div><span class="chev" aria-hidden="true">›</span></button>';
 }
-var STYLEBUSY=false, STYLEMSG='';
-window.__styleProgress=function(t){ STYLEMSG=t; var sm=document.getElementById('stylemsg'); if(sm) sm.textContent=t; };
+var STYLE=null, STYLEMSG='';   // STYLE: Learn my style in progress { found, wanted, text }
+// ── Learn my style: a pop-up you can hide; a small pill brings it back; the app must stay open ──
+var SP={ queue:[], qt:null, seen:[], loop:null, li:0, done:null };
+function spEl(){
+  var ov=document.getElementById('stylepop');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='stylepop'; ov.hidden=true;
+    ov.innerHTML='<div class="spp" role="dialog" aria-modal="true" aria-labelledby="sptitle">'+
+      '<div class="spsky" aria-hidden="true"><div class="sprise"></div><div class="spcount"><b class="spn">0</b><span class="spof">of 20</span></div><div class="spcap">of your comments found</div></div>'+
+      '<div class="spbody"><h3 id="sptitle">Learning how you write</h3>'+
+      '<div class="spbar" role="progressbar" aria-label="Learn my style progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>'+
+      '<p class="spstat" aria-live="polite">Starting…</p>'+
+      '<div class="spnote"><span aria-hidden="true">📱</span><p><b>Keep Daily Digest open.</b> You can hide this window and keep using the app. Closing the app, or letting the phone lock, stops the learning.</p></div>'+
+      '<div class="spbtns"></div></div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click',function(e){ if(e.target===ov) hideStylePop(); });   // a tap outside hides it; learning goes on
+  }
+  return ov;
+}
+function spButtons(){
+  var b=spEl().querySelector('.spbtns');
+  if(SP.done) b.innerHTML='<button data-act="sp-close">'+(SP.done.ok?'Done':'Close')+'</button>';
+  else b.innerHTML='<button class="ghost" data-act="sp-stop"'+(STYLE&&STYLE.stopping?' disabled':'')+'>'+(STYLE&&STYLE.stopping?'Stopping…':'Stop, use these')+'</button><button data-act="sp-hide">Hide window</button>';
+}
+function spPaint(){
+  var ov=spEl(), st=STYLE||{found:0,wanted:20,text:''};
+  ov.querySelector('.spn').textContent=st.found||0;
+  ov.querySelector('.spof').textContent='of '+(st.wanted||20);
+  var pct=st.studying?92:Math.min(88,Math.round(88*(st.found||0)/(st.wanted||20)));
+  ov.querySelector('.spbar i').style.width=pct+'%'; ov.querySelector('.spbar').setAttribute('aria-valuenow',pct);
+  if(st.text) ov.querySelector('.spstat').textContent=st.text;
+  var pill=document.getElementById('stylepill');
+  if(STYLE&&ov.hidden){
+    if(!pill){ pill=document.createElement('button'); pill.id='stylepill'; pill.dataset.act='sp-open'; document.body.appendChild(pill); }
+    pill.innerHTML='<span class="spdot" aria-hidden="true"></span>✍️ Learning your style <b>'+(st.found||0)+'/'+(st.wanted||20)+'</b>';
+    pill.setAttribute('aria-label','Learning your style, '+(st.found||0)+' of '+(st.wanted||20)+' comments found. Show progress');
+  } else if(pill) pill.remove();
+  var sm=document.getElementById('stylemsg'); if(sm&&STYLE) sm.textContent=st.text||'';
+}
+// words and emojis from the comments found rise through the sky, one after another
+function spFloat(it, again){
+  var still=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches, rise=spEl().querySelector('.sprise');
+  if(still){ if(!again){ var c=document.createElement('span'); c.className=it.e?'spe':'spw'; c.textContent=it.e||it.w; c.style.position='static'; rise.appendChild(c); if(rise.children.length>14) rise.removeChild(rise.firstChild); } return; }
+  var b=document.createElement('span'); b.className=it.e?'spe':'spw'; b.textContent=it.e||it.w;
+  b.style.left=(6+Math.random()*70)+'%'; b.style.setProperty('--dx',(Math.random()*50-25)+'px'); b.style.setProperty('--r',(Math.random()*16-8)+'deg');
+  b.style.animationDuration=(again?4.2:3.2)+Math.random()*1.4+'s'; if(again) b.style.opacity='.55';
+  rise.appendChild(b); setTimeout(function(){ b.remove(); },6000);
+}
+function spEnqueue(items){
+  (items||[]).forEach(function(it){ if(it&&(it.e||it.w)){ SP.queue.push(it); SP.seen.push(it); if(SP.seen.length>60) SP.seen.shift(); } });
+  if(!SP.qt) (function drain(){ var it=SP.queue.shift(); if(!it){ SP.qt=null; return; } spFloat(it,false); SP.qt=setTimeout(drain,420); })();
+  // while nothing new turns up, earlier finds drift by now and then, so the sky never goes still
+  if(!SP.loop) SP.loop=setInterval(function(){ if(!STYLE){ clearInterval(SP.loop); SP.loop=null; return; } if(!SP.queue.length&&SP.seen.length&&!spEl().hidden) spFloat(SP.seen[SP.li++%SP.seen.length],true); },1500);
+}
+function openStylePop(){
+  var ov=spEl(); ov.hidden=false; document.body.style.overflow='hidden';
+  ov.querySelector('.spp').classList.toggle('fin',!!SP.done); spButtons(); spPaint();
+}
+function hideStylePop(){
+  var ov=document.getElementById('stylepop'); if(!ov) return; ov.hidden=true;
+  var busy=['det','csheet','msheet','storysheet'].some(function(id){ var el=document.getElementById(id); return el&&!el.hidden; });
+  if(!busy&&!cfgOpen) document.body.style.overflow='';
+  if(SP.done){ SP.done=null; ov.querySelector('.spp').classList.remove('fin'); }
+  spPaint();
+}
+function startStyle(){
+  if(STYLE){ openStylePop(); return; }
+  STYLE={found:0,wanted:(SET&&SET.cfg&&SET.cfg.styleComments)||20,text:'Starting…'}; STYLEMSG='';
+  SP.done=null; SP.seen=[]; SP.queue=[]; var r=spEl().querySelector('.sprise'); r.innerHTML='';
+  openStylePop(); if(cfgOpen) renderCfg();
+  send('style-learn',{},function(ok,msg){
+    if(!ok){ window.__styleDone(false,msg); return; }
+    try{ var st=JSON.parse(msg); if(st&&st.wanted){ STYLE.wanted=st.wanted; spPaint(); } }catch(e){}
+  });
+}
+window.__styleProgress=function(u){
+  if(typeof u==='string') u={text:u};
+  if(!STYLE) STYLE={found:0,wanted:20,text:''};
+  ['found','wanted','text','studying'].forEach(function(k){ if(u[k]!=null) STYLE[k]=u[k]; });
+  if(u.studying) STYLE.text='✨ Studying all '+(u.found||STYLE.found)+' of your comments…';
+  spPaint(); spEnqueue(u.items);
+};
+window.__styleResume=function(st){ STYLE=st; spPaint(); };
+window.__styleDone=function(ok,msg){
+  var was=STYLE; STYLE=null;
+  var res=null; if(ok){ try{ res=JSON.parse(msg); }catch(e){} if(res){ SET=res; } }
+  var n=res&&res.styleMeta?res.styleMeta.count:(was?was.found:0);
+  STYLEMSG=ok?'Done. ✨ My style now writes like you.':(msg||'Couldn’t learn your style');
+  var ov=spEl(), shown=!ov.hidden;
+  SP.done={ok:ok};
+  ov.querySelector('.spp').classList.add('fin');
+  ov.querySelector('#sptitle').textContent=ok?'Got it. Now it writes like you':'Learning stopped';
+  ov.querySelector('.spstat').textContent=ok?('Learned from '+n+' of your comments. ✨ My style uses it in every idea, and the other tones keep your habits.'):STYLEMSG;
+  ov.querySelector('.spbar i').style.width=ok?'100%':ov.querySelector('.spbar i').style.width;
+  if(ok){ ov.querySelector('.spn').textContent=n; spEnqueue([{e:'✨'},{e:'✍️'},{e:'🎉'}]); }
+  spButtons();
+  if(!shown){ SP.done=null; ov.querySelector('.spp').classList.remove('fin'); toast(ok?'✨ Learned your style from '+n+' comments':STYLEMSG); }
+  var pill=document.getElementById('stylepill'); if(pill) pill.remove();
+  if(cfgOpen) renderCfg();
+};
 function writingHTML(){
   var rules=SET.settings.commentRules||'', changed=rules!==SET.defaultRules, prof=SET.styleProfile||'', meta=SET.styleMeta||{};
   var sec=SET.cfgSchema.filter(function(x){ return x.title==='Comments'; })[0];
@@ -4474,10 +4631,10 @@ function writingHTML(){
       '<small class="muted rcount">'+rulesCount(rules.length)+'</small></div>'+
     (sec?sec.items.map(fieldHTML).join(''):'')+
     '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
-      '<small class="muted">Finds your own comments on friends’ activities, opening their pages one by one until it has the number above, then describes how you write. It can take several minutes; you can keep using the digest. ✨ My style then writes like you, on top of your instructions.</small>'+
-      '<div class="stylebtns"><button class="sm" data-act="style-learn"'+(STYLEBUSY?' disabled':'')+'>'+(STYLEBUSY?'Learning…':(prof?'Learn again':'Learn my style'))+'</button>'+
-      (STYLEBUSY?'<button class="sm" data-act="style-stop">Stop</button>':'')+
-      '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLEMSG)+'</small></div>'+
+      '<small class="muted">Finds your own comments on friends’ activities, opening their pages one by one until it has the number above, then describes how you write. It can take several minutes: hide its window and keep using the digest, but keep the app open. ✨ My style then writes like you, on top of your instructions.</small>'+
+      '<div class="stylebtns"><button class="sm" data-act="style-learn">'+(STYLE?'Show progress':(prof?'Learn again':'Learn my style'))+'</button>'+
+      (STYLE?'<button class="sm" data-act="style-stop">Stop</button>':'')+
+      '<small id="stylemsg" class="muted" aria-live="polite">'+escH(STYLE?(STYLE.found+' of '+STYLE.wanted+' found. '+(STYLE.text||'')):STYLEMSG)+'</small></div>'+
       (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.opened!=null?'<br>'+(meta.read||0)+' comments read, '+meta.opened+' activities opened'+(meta.oldest?', back to '+escH(new Date(meta.oldest).toLocaleDateString(undefined,{day:'numeric',month:'short'})):'')+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
@@ -4552,16 +4709,13 @@ function cfgAction(t,act){
   }
   if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
   if(act==='style-clear'){ STYLEMSG=''; send('style-clear',{},setState); return; }
-  if(act==='style-stop'){ STYLEMSG='Stopping: learning from what was found so far…'; renderCfg(); send('style-stop',{}); return; }
-  if(act==='style-learn'){
-    if(STYLEBUSY) return; STYLEBUSY=true; STYLEMSG='Starting…'; renderCfg();
-    send('style-learn',{},function(ok,msg){
-      STYLEBUSY=false;
-      if(ok){ STYLEMSG='Done. ✨ My style now writes like you.'; setState(true,msg); }
-      else { STYLEMSG=msg||'Couldn’t learn your style'; renderCfg(); }
-    });
-    return;
-  }
+  if(act==='style-stop'){ styleStop(); return; }
+  if(act==='style-learn'){ startStyle(); return; }
+}
+function styleStop(){
+  if(!STYLE||STYLE.stopping) return;
+  STYLE.stopping=true; STYLE.text='Stopping: learning from what was found so far…'; spButtons(); spPaint(); if(cfgOpen) renderCfg();
+  send('style-stop',{});
 }
 function rulesCount(n){ return n.toLocaleString()+' of 4,000 characters'+(n>=4000?' (full)':''); }
 document.addEventListener('input',function(e){
@@ -4679,7 +4833,7 @@ window.__aiInvite = function (c) {
     // Never over the launch screen, another sheet, or a task the app says can't be interrupted.
     var busy = document.querySelector("#splash:not(.gone)") || document.getElementById("upd") || document.getElementById("aiinv") ||
       document.querySelector(".sheet.open, #cfgsheet.open, #aisheet.open") ||
-      document.querySelector("#csheet:not([hidden]), #msheet:not([hidden]), #det:not([hidden]), #sheet:not([hidden]), #lb:not([hidden]), #kov:not([hidden]), #sendov:not([hidden])") ||
+      document.querySelector("#stylepop:not([hidden]), #csheet:not([hidden]), #msheet:not([hidden]), #det:not([hidden]), #sheet:not([hidden]), #lb:not([hidden]), #kov:not([hidden]), #sendov:not([hidden])") ||
       (window.canInvite && !window.canInvite());
     if (busy) { if (++tries < 40) setTimeout(wait, 500); return; }   // gives up after 20 s; it comes back another day
     setTimeout(function () { if (!document.getElementById("aiinv")) showInvite(c); }, 600);
@@ -5061,6 +5215,9 @@ document.addEventListener('click',function(e){
     return;
   }
   var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
+  if(t.dataset.act==='sp-open') return openStylePop();
+  if(t.dataset.act==='sp-hide'||t.dataset.act==='sp-close') return hideStylePop();
+  if(t.dataset.act==='sp-stop') return styleStop();
   if(t.dataset.detail) return openDetail(t.dataset.detail);
   if(t.dataset.mine) return openMine(t);
   if(t.dataset.clike!==undefined) return likeMine(t);
