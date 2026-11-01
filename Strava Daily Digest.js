@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.29.1';
+const VERSION = '1.29.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -307,6 +307,12 @@ async function main() {
   async function enrich(acts, token, dayStart, dayEnd) {
     if (!settings.enrich) return;
     const todo = acts.filter(a => !details.has(a.id)).map(a => a.id);
+    const had = acts.filter(a => details.has(a.id) && !a.weather && !a.weatherText && !a.wxTried);
+    if (had.length && await fillWeather(had).catch(() => 0)) {
+      if (token !== viewToken || closed) return;
+      const keys = new Set(had.filter(a => a.weather).map(personKey)), people = groupByAthlete(feed.day(dayStart, dayEnd));
+      for (const p of people) if (keys.has(p.id)) await js(`window.__patchPerson(${JSON.stringify(p.id)}, ${JSON.stringify(personHtml(p))})`);
+    }
     if (!todo.length) return;
     if (!dv) { dv = new WebView(); await dv.loadURL(`${STRAVA}/robots.txt`); dx = makeSx(dv); }
     for (let i = 0; i < todo.length; i += cfg('enrichConcurrency')) {
@@ -318,6 +324,7 @@ async function main() {
       if (token !== viewToken || closed) return;
       const touched = new Set();
       chunk.forEach(id => { const a = feed.get(id); if (a) { mergeDetails(a, details.get(id)); derive(a); touched.add(personKey(a)); } });
+      try { await fillWeather(chunk.map(id => feed.get(id)).filter(Boolean)); } catch (e) { console.warn('Weather: ' + e.message); }
       const dayActs = feed.day(dayStart, dayEnd), people = groupByAthlete(dayActs);
       for (const p of people) if (touched.has(p.id)) await js(`window.__patchPerson(${JSON.stringify(p.id)}, ${JSON.stringify(personHtml(p))})`);
       await js(`window.__patchSummary(${JSON.stringify(summaryText(people, dayActs.length))})`);
@@ -501,6 +508,7 @@ async function main() {
               try { const det = (await sx(`__SD.enrich(${JSON.stringify([a.id])}, 1)`, cfg('detailsWait') * 1000)) || {}; if (det[a.id] && !det[a.id].error) { details.set(a.id, det[a.id]); mergeDetails(a, det[a.id]); derive(a); } }
               catch (e) { console.warn('Comment ideas, details: ' + e.message); }
             }
+            try { await fillWeather([a]); } catch (e) {}
             if ((a.comments || 0) > (a.cmts || []).length) {
               try { const soc = await sx(`__SD.social(${JSON.stringify(String(a.id))})`, cfg('detailsWait') * 1000); if (soc && soc.comments && soc.comments.length) a.cmts = soc.comments; }
               catch (e) { console.warn('Comment ideas, comments: ' + e.message); }
@@ -1816,6 +1824,44 @@ function decodePolyline(str) {
     pts.push([lat / 1e5, lng / 1e5]);
   }
   return pts;
+}
+
+// ── Weather where Strava has none: Open-Meteo (free, no key) for the hour and place the activity started ──
+// Only the start point rounded to about 1 km and the date leave the phone; one request per place and day.
+const WMO = [[0, 'clear'], [1, 'mainly clear'], [2, 'partly cloudy'], [3, 'overcast'], [45, 'fog'], [48, 'fog'], [51, 'light drizzle'], [53, 'drizzle'], [55, 'heavy drizzle'],
+  [56, 'freezing drizzle'], [57, 'freezing drizzle'], [61, 'light rain'], [63, 'rain'], [65, 'heavy rain'], [66, 'freezing rain'], [67, 'freezing rain'],
+  [71, 'light snow'], [73, 'snow'], [75, 'heavy snow'], [77, 'snow grains'], [80, 'rain showers'], [81, 'rain showers'], [82, 'heavy rain showers'],
+  [85, 'snow showers'], [86, 'snow showers'], [95, 'thunderstorm'], [96, 'thunderstorm with hail'], [99, 'thunderstorm with hail']];
+const wxDays = new Map();   // "lat,lng,date" → Open-Meteo's hourly answer (a promise, so equal places share one request)
+async function fillWeather(list) {
+  if (!settings.enrich) return 0;
+  let n = 0;
+  await Promise.all((list || []).map(async (a) => {
+    if (!a || a.weather || a.weatherText || a.wxTried || !a.start || !a.poly) return;
+    a.wxTried = true;
+    let pt; try { pt = decodePolyline(String(a.poly))[0]; } catch (e) { return; }
+    if (!pt || !isFinite(pt[0]) || !isFinite(pt[1])) return;
+    const day = new Date(a.start).toISOString().slice(0, 10), key = `${pt[0].toFixed(2)},${pt[1].toFixed(2)},${day}`;
+    if (!wxDays.has(key)) wxDays.set(key, (async () => {
+      const r = new Request(`https://api.open-meteo.com/v1/forecast?latitude=${pt[0].toFixed(2)}&longitude=${pt[1].toFixed(2)}`
+        + `&hourly=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&start_date=${day}&end_date=${day}&timezone=GMT`);
+      r.timeoutInterval = 12;
+      return r.loadJSON();
+    })().catch(e => { console.warn('Weather: ' + e.message); return null; }));
+    const j = await wxDays.get(key), h = j && j.hourly;
+    if (!h || !Array.isArray(h.time)) return;
+    const at = new Date(a.start + 30 * 60000).getUTCHours();   // the hour the activity was mostly in
+    const pick = (k, i) => (h[k] || [])[i];
+    if (pick('temperature_2m', at) == null) return;
+    const rain = Math.max(+pick('precipitation', at) || 0, +pick('precipitation', Math.min(at + 1, 23)) || 0);
+    const code = +pick('weather_code', at);
+    let cond = (WMO.find(([c]) => c === code) || [0, ''])[1];
+    if (rain >= 0.3 && code < 50) cond = 'rain showers';   // wet, though the hour's code says cloudy
+    a.weather = { condition: cond, temperature: Math.round(pick('temperature_2m', at) * 10) / 10, apparentTemperature: Math.round(pick('apparent_temperature', at) * 10) / 10,
+      precipitation_mm: Math.round(rain * 10) / 10, wind_kmh: Math.round(+pick('wind_speed_10m', at) || 0), source: 'Open-Meteo, the hour it started' };
+    n++;
+  }));
+  return n;
 }
 
 // The route as an SVG path in a 600×300 box, north up, kept to scale.
@@ -3344,6 +3390,7 @@ function actHtml(a, p) {
     + (a.hr && !a.hrInStats ? `<div class="st hr"><b>${esc(a.hr)}</b><small>Heart rate</small></div>` : '');
   const badges = [];
   if (e) badges.push(`<span class="early ${e.cls}">${e.icon} ${e.label}</span>`);
+  { const w = weatherChip(a); if (w) badges.push(`<span class="early wx" title="${esc(w.label)}">${w.e} ${esc(w.label.replace(/^Weather, /, ''))}</span>`); }
   if (a.ach.prs) badges.push(`<span class="pr">🏆 ${a.ach.prs} PR${a.ach.prs > 1 ? 's' : ''}</span>`);
   if (a.ach.total > (a.ach.prs || 0)) badges.push(`<span class="pr soft">${a.ach.total} achievement${a.ach.total > 1 ? 's' : ''}</span>`);
   const achList = a.ach.list.filter(x => x.name).slice(0, 5)
