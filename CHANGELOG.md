@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.33.0 (2026-11-02): Log out of Strava
+
+- 🚪 **Log out in Settings**: Settings › Account › Log out of Strava signs the app out of strava.com in two taps.
+- 🔄 **Switch accounts**: The login page comes straight back, so you can sign in again or with another account.
+- 🧳 **Your setup stays**: Settings, AI keys, instructions and learned style are kept; only the account is forgotten.
+
+**Changes**
+
+- Logging out forgets the remembered athlete ID, the cached activities and the names on the widget
+- If Strava keeps the phone signed in, the app opens Strava's page so you can tap Log Out there, and carries on by itself
+- The first tap arms the button (Log out?), the second logs out, like 👍 All
+
 ## 1.32.1 (2026-11-01): Tidier story and weather
 
 - 🧹 **Small things, fixed**: The story's title fits beside its language buttons, and the weather badge is easy to read.

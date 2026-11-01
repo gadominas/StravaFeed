@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.33.0",
+      "date": "2026-11-02",
+      "title": "Log out of Strava",
+      "highlights": [
+        {
+          "icon": "🚪",
+          "title": "Log out in Settings",
+          "text": "Settings › Account › Log out of Strava signs the app out of strava.com in two taps."
+        },
+        {
+          "icon": "🔄",
+          "title": "Switch accounts",
+          "text": "The login page comes straight back, so you can sign in again or with another account."
+        },
+        {
+          "icon": "🧳",
+          "title": "Your setup stays",
+          "text": "Settings, AI keys, instructions and learned style are kept; only the account is forgotten."
+        }
+      ],
+      "changes": [
+        "Logging out forgets the remembered athlete ID, the cached activities and the names on the widget",
+        "If Strava keeps the phone signed in, the app opens Strava's page so you can tap Log Out there, and carries on by itself",
+        "The first tap arms the button (Log out?), the second logs out, like 👍 All"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.32.1",
       "date": "2026-11-01",
       "title": "Tidier story and weather",
