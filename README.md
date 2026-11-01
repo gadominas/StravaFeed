@@ -6,7 +6,7 @@
 
 **Catch up. Cheer. Move on.**
 
-Your Strava following feed as one tidy page per day: grouped by athlete, with one-tap kudos and AI-assisted comments.<br>An iPhone and iPad app for [Scriptable](https://scriptable.app). One file, no server, no sign-up.
+Your Strava following feed as one tidy page per day: grouped by athlete, with one-tap kudos, AI-assisted comments and the day told as a comic.<br>An iPhone and iPad app for [Scriptable](https://scriptable.app). One file, no server, no sign-up.
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgadominas%2FStravaFeed%2Fmain%2Freleases.json&query=%24.releases%5B0%5D.version&label=version&color=FB7185&labelColor=0E1116&style=flat-square)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-171B22?style=flat-square&labelColor=0E1116)](https://apps.apple.com/app/scriptable/id1405459188)
@@ -18,52 +18,54 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 </div>
 
 <p align="center">
-  <img src="docs/screenshots/01-daily-digest.png" width="31%" alt="The digest for today: a header with the day switcher and a kudos-to-all button, your own activities on top, then the first athlete waiting for kudos with stats, heart rate, PRs and photos">
-  <img src="docs/screenshots/02-kudos-to-everyone.png" width="31%" alt="Kudos to everyone: six athletes' avatars in a circle around a big thumbs-up, each with a green check, and the title Kudos sent to 6">
-  <img src="docs/screenshots/03-ai-comment-ideas.png" width="31%" alt="The comment composer for a friend's sunrise run, with the My style mood selected and three comment ideas by Claude, the first one copied into the comment box">
+  <img src="docs/screenshots/01-daily-digest.png" width="31%" alt="The digest for today: a header with the day switcher and a kudos-to-all button, your own activities on top, then the first athlete waiting for kudos with stats, heart rate, weather, PRs and photos">
+  <img src="docs/screenshots/02-ai-comment-ideas.png" width="31%" alt="The comment sheet for a friend's sunrise run, Post in its header, three ideas by Claude with the emojis it spotted, and the tone, language and new-ideas row below">
+  <img src="docs/screenshots/03-story-comic.png" width="31%" alt="The day's story as comic pages: a sun-burst cover titled The Great Thursday Relay with everyone starring, then a page with a caption box, a sunrise photo and a BAM! burst">
 </p>
 
 > [!NOTE]
-> Screenshots are rendered from the app's real interface with invented sample data. The athletes, activities and comments are invented, the avatars are drawn initials, and the photos and route maps are drawn illustrations.
+> Screenshots are rendered from the app's real interface with invented sample data. The athletes, activities, comments, weather and story are invented, the avatars are drawn initials, and the photos and route maps are drawn illustrations. The comic pages are the app's own output for that story.
 
 > [!IMPORTANT]
 > **Unofficial.** Not affiliated with Strava, Inc. Automated access may not be permitted by Strava's terms, so use it with your own account and at your own risk. See [Disclaimer](#disclaimer).
 
 ## Highlights
 
-- **One page per day.** Each person you follow appears once, with all of that day's activities underneath and the numbers that matter at the top: distance, pace or speed, time, elevation, heart rate, PRs, achievements and photos.
-- **Waiting for kudos first.** Each day is split into people still waiting for your kudos and people you've already cheered, each with a count.
-- **Kudos to everyone, in two taps.** **👍 All** sits in the pinned header. Tap it, then **Send?**, and each person in the day's digest gets one kudos, with a small celebration as Strava confirms each one.
-- **One kudos per person.** When someone logs several activities, only their main one gets the kudos, so you never spam a friend's notifications. You can still give kudos to any activity on its own.
+- **One page per day.** Each person you follow appears once, with all of that day's activities underneath and the numbers that matter at the top: distance, pace or speed, time, elevation, heart rate, weather, PRs, achievements and photos.
 - **AI comment ideas.** 💬 opens a composer with one **✨ Suggest comments** button. Ideas are built from everything the activity page knows: stats and telemetry (elapsed time, climbing, cadence, power, calories, race or not), the weather, the description and the comments already on it, plus up to three photos. While they are written, what was spotted rises up the screen as emojis (🐕 🌧️ 🌅). Then a tone (✨ My style, Funny, Energetic, Serious, Funky) or language (Auto, EN, LT) reshapes them in one tap.
+- **The day's story, as a comic.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it. It looks at up to three photos per person and weaves them in. Tap **💥 Comic**, pick a look (**💥 Pop**, **😎 Cool** or **📜 Old paper**) and it becomes comic pages (1080×1350 each): a cover with the title and the cast, panels with caption boxes, photos and sound effects, and THE END with a QR code back to this page. Save them all to Photos in one go and share them anywhere.
+- **The story your way.** It is written in the language set in Settings; tap **Auto**, **EN** or **LT** at the top of the story to rewrite it in another. Its tone, length and style follow your own instructions in **Settings › The day's story**, with one-tap lines (⚡ More energetic, 🎯 More specific, 😂 Funnier, 💬 More dialogue, ✂️ Shorter, 📖 Longer, 🫶 Gentler); the same buttons under a story rewrite just that one.
+- **Kudos to everyone, in two taps.** **👍 All** sits in the pinned header. Tap it, then **Send?**, and each person in the day's digest gets one kudos, with a small celebration as Strava confirms each one.
+- **Waiting for kudos first.** Each day is split into people still waiting for your kudos and people you've already cheered, each with a count.
+- **One kudos per person.** When someone logs several activities, only their main one gets the kudos, so you never spam a friend's notifications. You can still give kudos to any activity on its own.
 - **Comments that sound like you.** Write your instructions once in Settings, and let **Learn my style** study your own past comments. Your learned style and your latest posted comments go into every idea: ✨ My style writes the way you do, and the other tones keep your habits. It opens friends' activities one by one until it has the number you set, up to 50, so it can take a few minutes. It runs in a window you can hide (a small ✍️ pill brings it back) while the words and emojis it finds float up; keep the app open until it is done.
+- **Weather and country.** Each activity shows the weather it was done in (Strava's own, or from Open-Meteo for the hour it started) and the Tiny layout adds the country with its flag and a 💬 to comment straight from the line.
 - **Early-riser badges.** The 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs get a badge, and the day's summary counts the early risers.
-- **The day's story.** Tap **📖** before **Today** and the AI writes one funny story starring everyone in the day's digest, those waiting for your kudos and those who already have it. It looks at up to three photos per person and weaves them in, with everyone's profile pictures at the top. Tap **💥 Comic**, pick a look (**💥 Pop**, **😎 Cool** or **📜 Old paper**) and it becomes comic pages (1080×1350 each): a cover with the title and the cast, panels with caption boxes, photos and sound effects, and THE END with a QR code back to this page. Save them all to Photos in one go and share them anywhere. It is written in the language set in Settings; tap **Auto**, **EN** or **LT** at the top of the story to rewrite it in another. Its tone, length and style follow your own instructions in **Settings › The day's story**, with one-tap lines (⚡ More energetic, 🎯 More specific, 😂 Funnier, 💬 More dialogue, ✂️ Shorter, 📖 Longer, 🫶 Gentler); the same buttons under a story rewrite just that one.
-- **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map (drawn from Strava's route line when there's no map picture), every stat, PRs, the description and photos.
+- **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map (drawn from Strava's route line when there's no map picture), every stat, PRs, the weather, the description and photos.
 - **Your activities on top.** Your latest activities sit above everyone else's. Tap one to see who gave kudos, read the comments and like them.
 - **Kudos widget, launch screen, settings, updates.** A Home Screen and Lock Screen widget shows who is still waiting for your kudos; the digest opens on its logo; colours, layout and text size are in Settings; new versions are offered in the app.
 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/04-one-kudos-per-person.png" width="31%" alt="An athlete with three activities, a ride, a run and a swim; the run is marked gets the kudos">
-  <img src="docs/screenshots/05-early-riser-badges.png" width="31%" alt="A 4:48 trail run with the 4 AM club badge, three achievements, a description and mountain photos">
-  <img src="docs/screenshots/06-photo-viewer.png" width="31%" alt="The full-screen photo viewer showing photo 1 of 3, with thumbnails and a Close photo button">
+  <img src="docs/screenshots/04-kudos-to-everyone.png" width="31%" alt="Kudos to everyone: six athletes' avatars in a circle around a big thumbs-up, each with a green check, and the title Kudos sent to 6">
+  <img src="docs/screenshots/05-photo-scan.png" width="31%" alt="Comment ideas being written: the sun holds the photo being read, emojis for what was found rise up the screen and collect under the progress bar">
+  <img src="docs/screenshots/06-days-story.png" width="31%" alt="The day's story sheet: Auto, EN and LT at the top, the cast with kudos rings, the title The Great Thursday Relay, the first paragraphs and a coast photo">
 </p>
 <p align="center">
-  <img src="docs/screenshots/07-activity-details.png" width="31%" alt="The activity details sheet: route map, stats, heart rate, PRs, description and photos, with Open in Strava app and Strava website buttons">
-  <img src="docs/screenshots/08-your-activities.png" width="31%" alt="Your Morning Run sheet: 14 kudos with the first givers' avatars, and three comments with like hearts">
+  <img src="docs/screenshots/07-comic-looks.png" width="31%" alt="The end of the story with the Rewrite it buttons, and the comic picker: Pop, Cool and Old paper with a colour swatch each">
+  <img src="docs/screenshots/08-activity-details.png" width="31%" alt="The activity details sheet: stats, heart rate, the weather badge, PRs, the description, the route map and photos, with Open in Strava app and Strava website buttons">
   <img src="docs/screenshots/09-launch-screen.png" width="31%" alt="The launch screen: the route logo on a dark ground, the name Daily Digest and the tagline Catch up. Cheer. Move on.">
 </p>
 <p align="center">
-  <img src="docs/screenshots/10-settings.png" width="31%" alt="Settings: Appearance with colour palettes, layout, text size and headline font, then the Digest switches and the AI comments row">
-  <img src="docs/screenshots/11-ai-settings.png" width="31%" alt="AI settings: the Claude key in use shown masked, the model picker, the OpenAI card without a key, and the start of token usage">
-  <img src="docs/screenshots/12-update-offer.png" width="31%" alt="The update sheet for a new version with three highlights, Update now and Later, remind me in 2 days">
+  <img src="docs/screenshots/10-settings.png" width="31%" alt="Settings: Appearance with colour palettes, layout, text size and headline font, then the Digest switches">
+  <img src="docs/screenshots/11-story-settings.png" width="31%" alt="Settings, The day's story: the instructions for the story with a character count, and the one-tap tweak buttons below">
+  <img src="docs/screenshots/12-ai-settings.png" width="31%" alt="AI settings: the Claude key in use shown masked, the model picker, the OpenAI card without a key, and the start of token usage">
 </p>
 <p align="center">
-  <img src="docs/screenshots/13-dark-mode.png" width="31%" alt="The digest in dark mode with the Tiny layout: one line per athlete with indicators and a round kudos button">
-  <img src="docs/screenshots/14-kudos-widget.png" width="31%" alt="The medium kudos widget: 6 people waiting, with Jonas, Tomas and Ada listed with their sports">
-  <img src="docs/screenshots/15-story-image.jpg" width="31%" alt="The day's story as a picture for Instagram: cast with kudos rings, title, story, three photos, and a QR code to this page">
+  <img src="docs/screenshots/13-update-offer.png" width="31%" alt="The update sheet for version 1.32.0, Your story, your rules, with three highlights, Update now and Later, remind me in 2 days">
+  <img src="docs/screenshots/14-dark-mode.png" width="31%" alt="The digest in dark mode with the Tiny layout: one line per athlete with a country flag, the weather, a comment button and a round kudos button">
+  <img src="docs/screenshots/15-kudos-widget.png" width="31%" alt="The medium kudos widget: 6 people waiting, with Jonas, Tomas and Ada listed with their sports">
 </p>
 
 ## Install

@@ -20,6 +20,14 @@ const DOCS = '/var/mobile/Library/Mobile Documents/iCloud~dk~simonbs~Scriptable/
 const LOCAL = '/var/mobile/Containers/Data/Application/SCRIPTABLE/Documents';                // emu.paths.local
 const ME = '1000001';
 const MEDIA = 'https://media.digest.example';
+// The drawn pictures are served as JPEG (as Strava's are), 768 px wide, so the story and the comic pages can use them.
+const sharp = require(require.resolve('sharp', { paths: [path.join(ROOT, '..', 'app-blueprints', 'repo-site'), process.cwd()] }));
+const jpegCache = new Map();
+function asJPEG(svg, w, h) {
+  const key = svg.length + ':' + svg.slice(0, 200) + svg.slice(-200) + w;
+  if (!jpegCache.has(key)) jpegCache.set(key, sharp(Buffer.from(svg)).resize(w, h).jpeg({ quality: 86 }).toBuffer());
+  return jpegCache.get(key);
+}
 
 // ───────── a seeded random, so every rebuild draws the same pictures ─────────
 function rnd(seed) {
@@ -218,7 +226,7 @@ const ACTS = [
   { id: 9100107, who: 2000105, d: 0, at: [5, 12], name: 'Sunrise river run', type: 'Run', loc: 'Riverside',
     stats: stats(['Distance', '12.4 km'], ['Pace', '4:38 /km'], ['Time', '57m 31s'], ['Elev Gain', '64 m']), hr: [156, 181], kudos: 18, comments: 4,
     prs: 2, ach: [{ type: 'PR', name: 'Bridge to Bridge', rank: 1 }, { type: 'PR', name: 'Embankment 5K', rank: 1 }, { type: '3rd', name: 'Mill Lane', rank: 3 }],
-    photos: [['river', 'm1'], ['bridge', 'm2']], map: true, desc: 'Alarm at 4:40. No regrets. The river was on fire.' },
+    photos: [['river', 'm1'], ['bridge', 'm2']], map: true, kcal: 812, desc: 'Alarm at 4:40. No regrets. The river was on fire.' },
   { id: 9100108, who: 2000106, d: 0, at: [4, 48], name: 'Headlamp to summit', type: 'TrailRun', loc: 'Pine Ridge',
     stats: stats(['Distance', '21.3 km'], ['Elev Gain', '1,140 m'], ['Time', '2h 46m']), hr: [147, 176], kudos: 24, comments: 5,
     ach: [{ type: 'Top 10', name: 'Ridge Ascent', rank: 6 }, { type: '2nd', name: 'Saddle Descent', rank: 2 }, { type: 'Local Legend', name: 'Pine Ridge Loop' }],
@@ -268,15 +276,31 @@ function feedPage() {
   return { entries: list.map(entry), pagination: { hasMore: false } };
 }
 // The activity page: SD.details reads __NEXT_DATA__ for heart rate and the local start time.
+const WEATHER = {
+  9100101: ['Partly cloudy', 13, 11], 9100102: ['Overcast', 7, 4], 9100103: ['Light rain', 9, 6], 9100104: ['Overcast', 10, 8], 9100106: ['Light rain', 6, 3],
+  9100107: ['Clear', 3, 0], 9100108: ['Fog', 1, -3], 9100109: ['Light rain', 10, 8], 9100110: ['Clear', 11, 10], 9100901: ['Clear', 4, 1],
+};
+const COUNTRY = { 2000101: 'Portugal', 2000106: 'Latvia' };   // everyone else: Lithuania
 function activityPage(id) {
   const a = ACTS.find((x) => String(x.id) === String(id));
-  const data = { props: { pageProps: { activity: a ? { id: a.id, startDateLocal: localOf(a), averageHeartrate: a.hr ? a.hr[0] : null, maxHeartrate: a.hr ? a.hr[1] : null } : {} } } };
+  const w = a && WEATHER[a.id];
+  const km = a ? parseFloat(String((a.stats.find((x) => x.key.endsWith('_subtitle') && x.value === 'Distance') ? a.stats[a.stats.findIndex((x) => x.value === 'Distance') - 1].value : '0')).replace(',', '')) : 0;
+  const act = a ? { id: a.id, distance: Math.round(km * (km > 100 ? 1 : 1000)) || null, startDateLocal: localOf(a), averageHeartrate: a.hr ? a.hr[0] : null, maxHeartrate: a.hr ? a.hr[1] : null,
+    location_country: a.loc ? (COUNTRY[a.who] || 'Lithuania') : null, calories: a.kcal || null,
+    weather: w ? { condition: w[0], temperature: w[1], apparentTemperature: w[2], humidity: 82, windSpeed: 11 } : null } : {};
+  const data = { props: { pageProps: { activity: act } } };
   return `<!doctype html><html><head><meta name="csrf-token" content="demo-csrf"><title>Activity | Strava</title></head><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`;
 }
 
 // Who gave kudos and the comments on your own activities (SD.social).
 const person = (id) => { const [first, ...rest] = PEOPLE[id].split(' '); return { id: Number(id), firstname: first, lastname: rest.join(' '), profile_medium: avatarURL(id) }; };
 const KUDOERS = [2000105, 2000106, 2000102, 2000108, 2000110, 2000104, 2000109, 2000111, 2000112, 2000113, 2000107, 2000114];
+const FRIEND_COMMENTS = {
+  9100107: [
+    { id: 81, who: 2000104, text: 'Who allowed this at 5 AM?', ago: 12 * H, likes: 2 },
+    { id: 82, who: 2000106, text: 'That river photo though 🔥', ago: 11 * H, likes: 1 },
+  ],
+};
 const MY_COMMENTS = {
   9100901: [
     { id: 71, who: 2000105, text: 'Sub 5 pace before breakfast, the river path suits you!', ago: 9.5 * H, likes: 1, liked: true },
@@ -294,17 +318,37 @@ const IDEAS = {
     'Beating the dawn and your own best times before breakfast is the sort of dedication that makes the rest of us hit snooze in shame.',
   ],
 };
+const SEEN = { elements: [{ emoji: '🌅', label: 'sunrise' }, { emoji: '🌊', label: 'river' }, { emoji: '🌉', label: 'bridge' }, { emoji: '🌫️', label: 'morning mist' }, { emoji: '🔥', label: 'orange sky' }],
+  details: ['the sun coming up right over the river', 'a misty footbridge at dawn'], conditions: 'cold, clear, early light' };
+const STORY = {
+  title: 'The Great Thursday Relay',
+  paragraphs: [
+    { text: 'It began in the dark, as all the best Thursdays do. Ines strapped on a headlamp at 4:48 and climbed Pine Ridge through the fog, topping out just as the sun arrived, mostly to check it was still there.', photos: ['P1'] },
+    { text: 'Down at the river, Marta took the baton at 5:12. Two PRs before breakfast, the river glowing like it had been told she was coming. Priya joined the dawn shift in Linden Park, eight kilometres of laps with the rain politely holding off.', photos: ['P2', 'P3'] },
+    { text: 'Tomas, unable to choose a sport, chose three: a commute, a lunch tempo with a fresh Riverside Mile record, and a swim to cool off the legend. Ada did leg day and wisely told nobody about the stairs afterwards.', photos: [] },
+    { text: 'By golden hour the relay reached the coast, where Jonas rode 42 km with a tailwind out and a headwind back, and declared the light worth every metre. Elena, who already has your kudos, spent the morning in Maple Hills collecting autumn colours.', photos: ['P4', 'P5'] },
+    { text: 'Rui ran ten in the drizzle and also has your kudos. Jonas, Tomas, Ada, Priya, Marta and Ines are still waiting for theirs. The relay ends here, on your thumb.', photos: [] },
+  ],
+};
 function aiReply(req) {
   const body = req.json() || {};
   const sys = String(body.system || '');
   let text = 'OK';
-  if (/Strava activity/.test(sys)) {
+  if (/list what is in them/.test(sys)) text = JSON.stringify(SEEN);
+  else if (/You write one story/.test(sys)) text = JSON.stringify(STORY);
+  else if (/Strava activity/.test(sys)) {
     let facts = {}; try { facts = JSON.parse(body.messages[0].content); } catch (e) {}
     const name = facts.friend_first_name || 'Marta';
     text = JSON.stringify({ comments: IDEAS[name] || IDEAS.Marta.map((c) => c.replace(/Marta/g, name)) });
   }
   return { json: { id: 'msg_demo', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], usage: { input_tokens: 1184, output_tokens: 112 } } };
 }
+// The photo scan can be held back, so a shot catches the emojis rising while the ideas are written.
+const aiRoute = (shot) => async (req) => {
+  const sys = String((req.json() || {}).system || '');
+  if (shot.slowScan && /list what is in them/.test(sys)) await sleep(shot.slowScan);
+  return aiReply(req);
+};
 
 // Token usage for AI settings: about two weeks of comment ideas.
 function usageFile() {
@@ -326,13 +370,17 @@ function usageFile() {
 
 // ───────── releases: the repository's own, plus a newer one only for the update sheet ─────────
 const RELEASES = JSON.parse(fs.readFileSync(path.join(ROOT, 'releases.json'), 'utf8'));
-function releasesWithUpdate() {
-  const r = RELEASES.releases;
-  const pick = (v, i) => r.find((x) => x.version === v).highlights[i];
-  return Object.assign({}, RELEASES, { releases: [{
-    version: '1.16.0', date: '2026-10-29', title: 'Comments that sound like you',
-    highlights: [pick('1.15.0', 1), pick('1.15.0', 2), pick('1.14.0', 0)], changes: [], fixes: [],
-  }].concat(r) });
+// The update sheet shows a real release to a copy of the script one version older: the newest one with three highlights,
+// served as the newest (a small fix release on top would only show one).
+const SHOWCASE = RELEASES.releases.findIndex((r) => (r.highlights || []).length >= 3);
+const RELEASES_SHOWN = Object.assign({}, RELEASES, { releases: RELEASES.releases.slice(Math.max(0, SHOWCASE)) });
+const OLDER_SCRIPT = path.join(ROOT, 'docs', 'site', 'raw', 'Strava Daily Digest-previous.js');
+function previousScript() {
+  const src = fs.readFileSync(path.join(ROOT, 'Strava Daily Digest.js'), 'utf8');
+  const prev = RELEASES_SHOWN.releases[1].version;
+  fs.mkdirSync(path.dirname(OLDER_SCRIPT), { recursive: true });
+  fs.writeFileSync(OLDER_SCRIPT, src.replace(/const VERSION = '[^']+';/, `const VERSION = '${prev}';`));
+  return path.relative(ROOT, OLDER_SCRIPT);
 }
 
 // ───────── a DateFormatter that understands the formats the script uses ─────────
@@ -389,7 +437,7 @@ module.exports = {
     const settings = {
       includeMe: false, enrich: true, widgetNames: true, checkUpdates: true,
       theme: 'auto', density: shot.density || 'comfortable', font: 'sans', textSize: 1,
-      aiLang: 'English', aiMode: 'mystyle',
+      aiLang: 'English', aiMode: 'mystyle', storyLang: '', comicStyle: shot.comicStyle || 'pop', usageAsked: true, shareUsage: false,
       styleProfile: LEARNED_STYLE, styleMeta: { at: NOW - 3 * DAY, count: 18, read: 214, scanned: 61 },
       cfg: {},
     };
@@ -416,56 +464,85 @@ module.exports = {
       },
       routes: [
         // the update check and the widget's logo tile
-        { match: /raw\.githubusercontent\.com\/gadominas\/StravaFeed\/main\/releases\.json/, respond: { json: shot.update ? releasesWithUpdate() : RELEASES } },
+        { match: /raw\.githubusercontent\.com\/gadominas\/StravaFeed\/main\/releases\.json/, respond: { json: shot.script ? RELEASES_SHOWN : RELEASES } },
         { match: /docs\/icon-1024\.png/, respond: { file: path.join(ROOT, 'docs', 'icon-1024.png') } },
         // AI
-        { match: 'api.anthropic.com/v1/messages', respond: aiReply },
+        { match: 'api.anthropic.com/v1/messages', respond: aiRoute(shot) },
         // drawn pictures
-        { match: /media\.digest\.example\/pictures\/athletes\/(\d+)\.svg/, respond: (req) => { const id = /athletes\/(\d+)/.exec(req.url)[1]; return { body: avatarSVG(PEOPLE[id] || '?', PIDS.indexOf(id)), contentType: 'image/svg+xml' }; } },
-        { match: /media\.digest\.example\/photos\/(\w+)-(\w+)\.jpg/, respond: (req) => { const m = /photos\/(\w+)-(\w+)\.jpg/.exec(req.url); return { body: photoSVG(m[1], m[2]), contentType: 'image/svg+xml' }; } },
+        { match: /media\.digest\.example\/pictures\/athletes\/(\d+)\.svg/, respond: async (req) => { const id = /athletes\/(\d+)/.exec(req.url)[1]; return { body: await asJPEG(avatarSVG(PEOPLE[id] || '?', PIDS.indexOf(id)), 200, 200), contentType: 'image/jpeg' }; } },
+        { match: /media\.digest\.example\/photos\/(\w+)-(\w+)\.jpg/, respond: async (req) => { const m = /photos\/(\w+)-(\w+)\.jpg/.exec(req.url); return { body: await asJPEG(photoSVG(m[1], m[2]), 768, 576), contentType: 'image/jpeg' }; } },
+        // weather, should the app ask for it (every activity page below already has Strava's own)
+        { match: /api\.open-meteo\.com/, respond: { json: { hourly: { time: Array.from({ length: 24 }, (_, i) => `2026-10-29T${pad(i)}:00`), temperature_2m: Array(24).fill(8), apparent_temperature: Array(24).fill(5), precipitation: Array(24).fill(0), weather_code: Array(24).fill(2), wind_speed_10m: Array(24).fill(12) } } } },
         { match: /media\.digest\.example\/maps\/(\d+)\.png/, respond: (req) => { const id = /maps\/(\d+)/.exec(req.url)[1]; const a = ACTS.find((x) => String(x.id) === id) || {}; return { body: mapSVG(id, /Ride|Swim/.test(a.type) ? false : true), contentType: 'image/svg+xml' }; } },
         // strava.com, as the hidden WebView sees it
         { match: /strava\.com\/robots\.txt/, respond: { body: 'User-agent: *\nDisallow:\n', contentType: 'text/plain' } },
         { match: /strava\.com\/dashboard\/feed\?/, respond: async () => { if (feedDelay) await sleep(feedDelay); return { json: feedPage() }; } },
         { match: /strava\.com\/feed\/activity\/\d+\/kudo$/, respond: async () => { await sleep(120); return { json: {} }; } },
         { match: /strava\.com\/feed\/activity\/(\d+)\/kudos/, respond: (req) => { const id = /activity\/(\d+)/.exec(req.url)[1]; const a = ACTS.find((x) => String(x.id) === id) || { kudos: 0 }; return { json: { athletes: KUDOERS.slice(0, Math.min(a.kudos, KUDOERS.length)).map(person) } }; } },
-        { match: /strava\.com\/feed\/activity\/(\d+)\/comments/, respond: (req) => { const id = /activity\/(\d+)/.exec(req.url)[1];
-          return { json: { comments: (MY_COMMENTS[id] || []).map((c) => ({ id: c.id, text: c.text, athlete: person(c.who), createdAt: new Date(NOW - c.ago).toISOString(), reactionCount: c.likes, hasReacted: !!c.liked })) } }; } },
+        { match: /strava\.com\/(feed\/activity|activities)\/(\d+)\/comments/, respond: (req) => { const id = /\/(\d+)\/comments/.exec(req.url)[1];
+          return { json: { comments: (MY_COMMENTS[id] || FRIEND_COMMENTS[id] || []).map((c) => ({ id: c.id, text: c.text, athlete: person(c.who), createdAt: new Date(NOW - c.ago).toISOString(), reactionCount: c.likes, hasReacted: !!c.liked })) } }; } },
         { match: /strava\.com\/activities\/(\d+)(\?|$)/, respond: (req) => activityPage(/activities\/(\d+)/.exec(req.url)[1]) },
         { match: /strava\.com\/(settings\/profile|dashboard|athlete\/training)/, respond: `<!doctype html><html><head><meta name="csrf-token" content="demo-csrf"></head><body><a href="/athletes/${ME}">You</a></body></html>` },
       ],
+      // the same bubbles and quotes on every rebuild
+      pageInit: '(function(){ var a=20261029; Math.random=function(){ a=(a*16807)%2147483647; return (a-1)/2147483646; }; })();',
       globals: (ctx, emu) => { widgetLayoutFix(emu); return { DateFormatter: makeDateFormatter(ctx.Date) }; },
     };
   },
 
   shots: [
     { id: '01-daily-digest', label: 'One page per day', caption: 'Everyone you follow, once, with the day’s activities, stats and photos.' },
-    { id: '02-kudos-to-everyone', label: 'Kudos to everyone', caption: 'Two taps give each person one kudos, with a little celebration.',
-      run: async (h) => { await h.tap('.allk', { after: 350 }); await h.tap('.allk', { after: 0 }); await h.wait(3300); }, after: 0 },
-    { id: '03-ai-comment-ideas', label: 'AI comment ideas', caption: 'Three ideas from the real stats, written in ✨ My style.',
+    { id: '02-ai-comment-ideas', label: 'AI comment ideas', caption: 'One tap writes ideas from the stats, weather, photos and comments.',
       run: async (h) => {
         await h.tap('.act[data-id="9100107"] [data-act="toggle-comment"]', { after: 600 });
-        await h.tap('#csheet [data-suggest]', { after: 1200 });
+        await h.tap('#csheet .sgo', { after: 3200 });
         await h.tap('#csheet .sug', { after: 300 });
         await h.eval(() => { if (document.activeElement) document.activeElement.blur(); });
       } },
-    { id: '04-one-kudos-per-person', label: 'One kudos per person', caption: 'Three activities, one kudos: the main one is picked for you.',
-      run: async (h) => { await h.scrollTo('section.person[data-pid="2000102"]', 118); } },
-    { id: '05-early-riser-badges', label: 'Early-riser badges', caption: 'The 4 AM, 5 AM and 6 AM clubs get a badge and a daily count.',
-      run: async (h) => { await h.scrollTo('section.person[data-pid="2000106"]', 118); } },
-    { id: '06-photo-viewer', label: 'Full-screen photos', caption: 'Swipe through photos, pinch to zoom, then back to the digest.',
-      run: async (h) => { await h.tap('.act[data-id="9100108"] img[data-photo]', { after: 800 }); } },
-    { id: '07-activity-details', label: 'Activity details', caption: 'Route map, every stat, PRs and photos without opening Strava.',
+    { id: '03-story-comic', label: 'The day as a comic', caption: 'A funny story starring everyone you follow, drawn as pages to share.',
+      run: async (h) => {
+        await h.tap('[data-act="story"]', { after: 1800 });
+        await h.eval(() => new Promise((done) => {
+          const avs = STORY.cast.slice(0, 8).map((c) => c.avatar).filter(Boolean);
+          send('story-assets', { urls: JSON.stringify(storyPhotoUrls()), avs: JSON.stringify(avs) }, (ok, msg) => {
+            let a = {}; try { a = JSON.parse(msg); } catch (e) {}
+            drawStoryPages(a, 'pop').then((pages) => {
+              const v = document.createElement('div');
+              v.style.cssText = 'position:fixed;inset:0;z-index:999;background:#0E1116;overflow:hidden;padding:14px 14px 0;box-sizing:border-box';
+              v.innerHTML = pages.slice(0, 2).map((b) => `<img src="data:image/jpeg;base64,${b}" style="display:block;width:100%;border-radius:10px;margin-bottom:12px">`).join('');
+              document.body.appendChild(v);
+              setTimeout(done, 500);
+            });
+          });
+        }));
+      } },
+    { id: '04-kudos-to-everyone', label: 'Kudos to everyone', caption: 'Two taps give each person one kudos, with a little celebration.',
+      run: async (h) => { await h.tap('.allk', { after: 350 }); await h.tap('.allk', { after: 0 }); await h.wait(3300); }, after: 0 },
+    { id: '05-photo-scan', label: 'Sees what’s in the photos', caption: 'While ideas are written, what the photos show rises up as emojis.', slowScan: 6000,
+      run: async (h) => {
+        await h.tap('.act[data-id="9100107"] [data-act="toggle-comment"]', { after: 600 });
+        await h.tap('#csheet .sgo', { after: 2600 });
+      } },
+    { id: '06-days-story', label: 'The day’s story', caption: 'Everyone stars in one story; rewrite it funnier, shorter or in Lithuanian.',
+      run: async (h) => { await h.tap('[data-act="story"]', { after: 1800 }); } },
+    { id: '07-comic-looks', label: 'Three comic looks', caption: 'Pop, Cool or Old paper: every page saved to Photos in one go.',
+      run: async (h) => {
+        await h.tap('[data-act="story"]', { after: 1800 });
+        await h.tap('#storysheet [data-act="story-image"]', { after: 500 });
+        await h.eval(() => { const b = document.querySelector('#storysheet .stb'); b.scrollTop = b.scrollHeight; });
+        await h.wait(300);
+      } },
+    { id: '08-activity-details', label: 'Activity details', caption: 'Route map, every stat, PRs, weather and photos without opening Strava.',
       run: async (h) => { await h.tap('.act[data-id="9100101"] .ttl', { after: 900 }); } },
-    { id: '08-your-activities', label: 'Your activities on top', caption: 'See who gave you kudos and like comments, right in the digest.',
-      run: async (h) => { await h.tap('.mt[data-mine="9100901"]', { after: 1000 }); } },
     { id: '09-launch-screen', label: 'Launch screen', caption: 'The route draws itself while the feed loads behind it.', settle: 1100, feedDelay: 4000 },
     { id: '10-settings', label: 'Settings', caption: 'Colours, layout, text size and the digest’s own choices.',
       run: async (h) => { await h.tap('[data-act="settings"]', { after: 900 }); } },
-    { id: '11-ai-settings', label: 'AI settings', caption: 'Your own Claude or OpenAI key, any model, and the tokens used.',
+    { id: '11-story-settings', label: 'Story instructions', caption: 'Your own instructions for the story, with one-tap tweaks.',
+      run: async (h) => { await h.tap('[data-act="settings"]', { after: 900 }); await h.eval(() => { const el = document.querySelector('#cfgsheet textarea[data-k="storyRules"]'); const h3 = [...document.querySelectorAll('#cfgsheet h3.sec')].find((x) => /story/i.test(x.textContent)) || el; h3.scrollIntoView({ block: 'start' }); let p = h3.parentElement; while (p && p.scrollHeight <= p.clientHeight + 2) p = p.parentElement; if (p) p.scrollTop -= 64; }); await h.wait(400); } },
+    { id: '12-ai-settings', label: 'AI settings', caption: 'Your own Claude or OpenAI key, any model, and the tokens used.',
       run: async (h) => { await h.tap('[data-act="settings"]', { after: 900 }); await h.tap('#cfgsheet [data-act="ai-open"]', { after: 900 }); await h.scrollEl('#aisheet', 115); } },
-    { id: '12-update-offer', label: 'Update offer', caption: 'A new version shows its three best features; Later waits two days.', update: true, settle: 3600 },
-    { id: '13-dark-mode', label: 'Dark mode', caption: 'Follows iOS; shown here in the one-line Tiny layout.', dark: true, density: 'tiny' },
-    { id: '14-kudos-widget', label: 'Kudos widget', caption: 'Who is still waiting for your kudos today, on the Home Screen.', widget: 'medium' },
+    { id: '13-update-offer', label: 'Update offer', caption: 'A new version shows its three best features; Later waits two days.', script: previousScript(), settle: 3600 },
+    { id: '14-dark-mode', label: 'Dark mode', caption: 'The one-line Tiny layout: country, weather and 💬 on every line.', dark: true, density: 'tiny' },
+    { id: '15-kudos-widget', label: 'Kudos widget', caption: 'Who is still waiting for your kudos today, on the Home Screen.', widget: 'medium' },
   ],
 };
