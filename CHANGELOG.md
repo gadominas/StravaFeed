@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.31.0 (2026-11-01): Three looks for the comic
+
+- 😎 **Cool**: Dark pages, neon cyan and pink ink, sleek lettering: a modern comic.
+- 📜 **Old paper**: Yellowed paper, sepia photos, typewriter captions, coffee rings: a strip from 1955.
+- 💥 **Pick before drawing**: 💥 Comic asks for the look first and remembers the one you picked.
+
+**Changes**
+
+- Pop is the bright Sunday comic from 1.30, still the default
+- Old paper turns every photo and profile picture sepia, adds faded edges and foxing spots
+- Each look has its own colours for panels, captions, sound effects and THE END
+
 ## 1.30.0 (2026-11-01): The day's story, as a comic
 
 - 💥 **Comic pages**: 💥 Comic turns the day's story into comic pages: a cover, panels and THE END.

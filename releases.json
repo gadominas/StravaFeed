@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.31.0",
+      "date": "2026-11-01",
+      "title": "Three looks for the comic",
+      "highlights": [
+        {
+          "icon": "😎",
+          "title": "Cool",
+          "text": "Dark pages, neon cyan and pink ink, sleek lettering: a modern comic."
+        },
+        {
+          "icon": "📜",
+          "title": "Old paper",
+          "text": "Yellowed paper, sepia photos, typewriter captions, coffee rings: a strip from 1955."
+        },
+        {
+          "icon": "💥",
+          "title": "Pick before drawing",
+          "text": "💥 Comic asks for the look first and remembers the one you picked."
+        }
+      ],
+      "changes": [
+        "Pop is the bright Sunday comic from 1.30, still the default",
+        "Old paper turns every photo and profile picture sepia, adds faded edges and foxing spots",
+        "Each look has its own colours for panels, captions, sound effects and THE END"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.30.0",
       "date": "2026-11-01",
       "title": "The day's story, as a comic",
