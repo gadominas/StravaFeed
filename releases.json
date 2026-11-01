@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.32.0",
+      "date": "2026-11-01",
+      "title": "Your story, your rules",
+      "highlights": [
+        {
+          "icon": "📝",
+          "title": "Instructions for the story",
+          "text": "Settings › The day's story holds the story's instructions: tone, length, style. Edit them freely."
+        },
+        {
+          "icon": "⚡",
+          "title": "One-tap tweaks",
+          "text": "More energetic, more specific, funnier, more dialogue, shorter, longer, gentler: tap to add, tap to take out."
+        },
+        {
+          "icon": "🔁",
+          "title": "Rewrite once",
+          "text": "The same buttons under a story rewrite just that one, leaving your instructions as they are."
+        }
+      ],
+      "changes": [
+        "The story's tone, length and structure now come from your instructions, which win over the app's defaults",
+        "Always kept, whatever the instructions: only real facts, every friend by first name, nobody mocked",
+        "Shorter and Longer replace each other; Reset to default brings back the original instructions",
+        "Up to 4,000 characters, with a counter, like the comment instructions"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.31.0",
       "date": "2026-11-01",
       "title": "Three looks for the comic",

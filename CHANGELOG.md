@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.32.0 (2026-11-01): Your story, your rules
+
+- 📝 **Instructions for the story**: Settings › The day's story holds the story's instructions: tone, length, style. Edit them freely.
+- ⚡ **One-tap tweaks**: More energetic, more specific, funnier, more dialogue, shorter, longer, gentler: tap to add, tap to take out.
+- 🔁 **Rewrite once**: The same buttons under a story rewrite just that one, leaving your instructions as they are.
+
+**Changes**
+
+- The story's tone, length and structure now come from your instructions, which win over the app's defaults
+- Always kept, whatever the instructions: only real facts, every friend by first name, nobody mocked
+- Shorter and Longer replace each other; Reset to default brings back the original instructions
+- Up to 4,000 characters, with a counter, like the comment instructions
+
 ## 1.31.0 (2026-11-01): Three looks for the comic
 
 - 😎 **Cool**: Dark pages, neon cyan and pink ink, sleek lettering: a modern comic.
