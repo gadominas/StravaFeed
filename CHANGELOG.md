@@ -2,6 +2,23 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.29.2 (2026-11-01): The weather, back for real
+
+- 🌧️ **Weather on every outdoor line**: When Strava keeps no weather, the app fetches the hour's weather where the activity started.
+- 🌍 **Country and weather together**: Tiny lines show the country after the title and the weather above 💬.
+
+**Changes**
+
+- Weather comes from Open-Meteo (free, no account): only the start point, rounded to about 1 km, and the date are sent
+- Rain in that hour or the next counts as rain, even when the sky was mostly cloudy
+- Comfortable and Compact layouts show the weather as a badge too, for example 🌧️ rain, 7°, feels like 4°
+- Comment ideas get the same weather
+- Part of Load extra details: turn that off and no weather is fetched; indoor activities without a route get none
+
+**Fixes**
+
+- The weather chip almost never showed, because Strava rarely includes the weather in the activity's data
+
 ## 1.29.1 (2026-11-01): Where in the world
 
 - 🇱🇹 **The country, nothing more**: Tiny lines show the activity's country and flag after its title, never the city.

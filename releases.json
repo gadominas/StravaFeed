@@ -3,6 +3,33 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.29.2",
+      "date": "2026-11-01",
+      "title": "The weather, back for real",
+      "highlights": [
+        {
+          "icon": "🌧️",
+          "title": "Weather on every outdoor line",
+          "text": "When Strava keeps no weather, the app fetches the hour's weather where the activity started."
+        },
+        {
+          "icon": "🌍",
+          "title": "Country and weather together",
+          "text": "Tiny lines show the country after the title and the weather above 💬."
+        }
+      ],
+      "changes": [
+        "Weather comes from Open-Meteo (free, no account): only the start point, rounded to about 1 km, and the date are sent",
+        "Rain in that hour or the next counts as rain, even when the sky was mostly cloudy",
+        "Comfortable and Compact layouts show the weather as a badge too, for example 🌧️ rain, 7°, feels like 4°",
+        "Comment ideas get the same weather",
+        "Part of Load extra details: turn that off and no weather is fetched; indoor activities without a route get none"
+      ],
+      "fixes": [
+        "The weather chip almost never showed, because Strava rarely includes the weather in the activity's data"
+      ]
+    },
+    {
       "version": "1.29.1",
       "date": "2026-11-01",
       "title": "Where in the world",
