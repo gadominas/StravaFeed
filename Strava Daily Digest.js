@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.27.0';
+const VERSION = '1.27.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1035,7 +1035,8 @@ function commentBrief(language, n) {
     rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
     'Defaults, where the instructions say nothing: a single short sentence each, written as a friend and teammate, built on the real details given (title, time of day, effort, PRs, distance, pace), at most one emoji, no hashtags.',
     'The data holds everything known about the activity: stats, telemetry, weather, the description and the comments already on it. Read all of it before choosing what to mention; never repeat what someone already said in the comments, and if by_you marks one, do not write the same thing again.',
-    language !== 'English' && language !== 'Auto' ? `Write natural ${language}; where the instructions ask for British phrasing, keep that spirit in ${language}.` : '',
+    language !== 'Auto' ? `LANGUAGE: the user picked ${language} in the app for these comments. Write every comment in ${language}, even where the instructions above say to follow the title's language or to use English. This choice overrides them.` : '',
+    language === 'Lithuanian' ? 'Write natural, casual spoken Lithuanian, the way friends text each other, not a translation from English.' : '',
   ].filter(Boolean).join('\n');
 }
 // Your learned style goes into every request; "My style" makes it the whole voice, a mood keeps your habits.
@@ -1081,6 +1082,15 @@ async function activityImages(a, max = 3, progress = async () => {}) {
   return out;
 }
 const isVisionError = (e) => /image|vision|multimodal|content|media/i.test(String((e && e.message) || e));
+
+// A quick check that ideas came back in the language you picked (most of them clearly in another one = wrong).
+const LT_MARK = /[ąčęėįšųūž]|\b(tu|kaip|labai|gerai|nu|ir|bet|kad|tai|čia|jau|dar|tavo|šaunu|faina|ryto)\b/i;
+const EN_MARK = /\b(the|you|your|was|were|my|than|and|on|too|of|is|for|with|this|that|what|who|it|me|meanwhile|nice)\b/i;
+function wrongLanguage(list, language) {
+  if (!list || !list.length || language === 'Auto') return false;
+  const off = list.filter(c => language === 'Lithuanian' ? !LT_MARK.test(c) && EN_MARK.test(c) : language === 'English' ? LT_MARK.test(c) && !EN_MARK.test(c) : false);
+  return off.length * 2 > list.length;
+}
 
 // The model may answer ["…"] (as the default instructions ask) or {"comments": […]}: both work.
 function readComments(text) {
@@ -1132,8 +1142,14 @@ async function aiSuggest(a, language, hint, mode, progress = async () => {}, me 
   }
   if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
   parts.push(COMMENT_SAFETY, COMMENT_JSON);
+  if (language !== 'Auto') parts.push(`Remember: every comment in ${language}.`);
   const extra = seen ? { photo_observations: { found: seen.elements.map(x => x.t), details: seen.details, conditions: seen.conditions } } : {};
-  const r = await aiComments(a, parts.join('\n'), seen ? [] : images, extra, me);
+  let r = await aiComments(a, parts.join('\n'), seen ? [] : images, extra, me);
+  if (wrongLanguage(r.comments, language)) {   // the model followed a language rule over your pick: ask once more, firmly
+    console.warn(`Comment ideas came back in the wrong language for ${language}; asking again`);
+    try { r = await aiComments(a, parts.join('\n') + `\nYour last answer was not in ${language}. Write all of them in ${language} now.`, seen ? [] : images, extra, me); }
+    catch (e) { console.warn('Language retry: ' + e.message); }
+  }
   return Object.assign(r, { photosRead: seen ? photosRead : r.photosRead, seen: [...signals.slice(1), ...(seen ? seen.elements : [])].map(x => x.e).filter((x, i, l) => l.indexOf(x) === i).slice(0, 8) });
 }
 
@@ -3574,7 +3590,10 @@ body.loading .loadst{display:block}
 .icancel{margin-top:4px;background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.35);padding:8px 18px;border-radius:999px;font-weight:600}
 @media (prefers-reduced-motion: reduce){.isun::before,.isun::after,.icloud,.iphoto::after,.itally span{animation:none}.iquote{transition:none}}
 .csp{position:relative;width:100%;max-height:94vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
-.csh{display:flex;align-items:center;gap:12px;padding:8px 16px 12px;border-bottom:1px solid var(--line)}
+.csh{display:flex;align-items:center;gap:10px;padding:8px 16px 12px;border-bottom:1px solid var(--line)}
+.csh .cpost{flex:none;padding:9px 18px;font-weight:700}
+.csh .cpost:disabled{opacity:.4}
+.incs .crow textarea{flex:1;width:100%}
 .csb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px))}
 .incs{margin-top:0}
 .incs textarea{font-size:16px;min-height:100px;line-height:1.4}
@@ -4095,7 +4114,11 @@ function openComposer(art){
   var ttl=(art.querySelector('.ttl')||{}).textContent||'';
   ov.querySelector('.csh').innerHTML='<div class="mtt"><b>Comment for '+escH(art.dataset.who||'your friend')+'</b><small>'+escH(ttl)+'</small></div><button class="mbtn" data-act="cs-close" aria-label="Close">✕</button>';
   var box=src.cloneNode(true); box.hidden=false; box.classList.add('incs');
+  // Post lives in the header, so the text box gets the full width
+  var post=box.querySelector('[data-comment]'); if(post){ post.classList.add('cpost'); ov.querySelector('.csh').insertBefore(post,ov.querySelector('.csh .mbtn')); }
   var ta=box.querySelector('textarea'); ta.rows=4; ta.value=DRAFTS[id]||''; ta.setAttribute('aria-label','Your comment');
+  var syncPost=function(){ if(post&&post.textContent==='Post') post.disabled=!ta.value.trim(); };
+  ta.addEventListener('input',syncPost); syncPost();
   var body=ov.querySelector('.csb'); body.innerHTML=''; body.appendChild(box); body.scrollTop=0;
   ov.hidden=false; document.body.style.overflow='hidden';
   setTimeout(function(){ try{ ta.focus(); }catch(e){} },250);
@@ -5264,10 +5287,11 @@ document.addEventListener('click',function(e){
   if(t.dataset.sug!==undefined){
     var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent;
     t.parentNode.querySelectorAll('.sug').forEach(function(b){ b.classList.toggle('picked', b===t); });
+    var cpost=document.querySelector('#csheet .cpost'); if(cpost&&cpost.textContent==='Post') cpost.disabled=false;
     ta.focus(); return;
   }
   if(t.dataset.comment){
-    var box=t.closest('.cbox'),ta=box.querySelector('textarea'),text=ta.value.trim(),id=t.dataset.comment;
+    var box=t.closest('.cbox')||(t.closest('#csheet')&&t.closest('#csheet').querySelector('.csb .cbox')),ta=box.querySelector('textarea'),text=ta.value.trim(),id=t.dataset.comment;
     if(!text) return;
     t.disabled=true; t.textContent='…';
     if(document.activeElement) document.activeElement.blur();
