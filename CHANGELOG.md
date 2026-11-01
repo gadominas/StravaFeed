@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.26.2 (2026-11-01): Room for the sun
+
+- ☀️ **Whole sun, every time**: While ideas are written, the sun and its rays always fit on screen, never cut at the top.
+
+**Changes**
+
+- The comment sheet grows while ideas are written, so the sky has room
+- On shorter iPhones the sun gets a little smaller instead of being cropped
+- If space still runs out, the sky scrolls rather than cutting anything off
+
+**Fixes**
+
+- The sun's rays were cut off at the top of the comment sheet when it was short
+
 ## 1.26.1 (2026-11-01): Whole instructions
 
 - 📜 **Nothing cut off**: Instructions for every AI comment now take up to 4,000 characters, as promised.

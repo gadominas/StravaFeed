@@ -3,6 +3,26 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.26.2",
+      "date": "2026-11-01",
+      "title": "Room for the sun",
+      "highlights": [
+        {
+          "icon": "☀️",
+          "title": "Whole sun, every time",
+          "text": "While ideas are written, the sun and its rays always fit on screen, never cut at the top."
+        }
+      ],
+      "changes": [
+        "The comment sheet grows while ideas are written, so the sky has room",
+        "On shorter iPhones the sun gets a little smaller instead of being cropped",
+        "If space still runs out, the sky scrolls rather than cutting anything off"
+      ],
+      "fixes": [
+        "The sun's rays were cut off at the top of the comment sheet when it was short"
+      ]
+    },
+    {
       "version": "1.26.1",
       "date": "2026-11-01",
       "title": "Whole instructions",
