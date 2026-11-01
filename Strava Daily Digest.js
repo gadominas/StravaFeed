@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.26.1';
+const VERSION = '1.26.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -3469,18 +3469,20 @@ body.loading .loadst{display:block}
 .uabtns button{flex:1}
 #csheet{position:fixed;inset:0;z-index:47;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #csheet[hidden]{display:none}
-#ideaov{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;overflow:hidden;color:#fff;border-radius:20px 20px 0 0;
+#ideaov{--sun:clamp(76px,14vh,112px);position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;padding:24px;text-align:center;overflow-x:hidden;overflow-y:auto;color:#fff;border-radius:20px 20px 0 0;
   background:linear-gradient(180deg,#0e3a78 0%,#2f74c8 52%,#7fb6e8 78%,#ffd59a 100%);animation:ifade .2s ease-out}
 #ideaov.done{opacity:0;transition:opacity .3s}
+#ideaov::before,#ideaov::after{content:'';flex:1 1 0;min-height:0}
+.csp.ideas{min-height:min(620px,94vh)}
 @keyframes ifade{from{opacity:0}to{opacity:1}}
-.isun{position:relative;width:112px;height:112px;margin:24px 0 28px;flex:none}
+.isun{position:relative;width:var(--sun);height:var(--sun);margin:calc(var(--sun) * .46) 0;flex:none}
 #ideaov > *{flex:none}
-.isun::before{content:'';position:absolute;inset:-46px;border-radius:50%;
+.isun::before{content:'';position:absolute;inset:calc(var(--sun) * -.41);border-radius:50%;
   background:repeating-conic-gradient(rgba(255,214,102,.9) 0deg 7deg,rgba(255,214,102,0) 7deg 22.5deg);
-  -webkit-mask:radial-gradient(circle,transparent 62px,#000 64px,#000 98px,transparent 102px);mask:radial-gradient(circle,transparent 62px,#000 64px,#000 98px,transparent 102px);
+  -webkit-mask:radial-gradient(circle,transparent calc(var(--sun) * .554),#000 calc(var(--sun) * .571),#000 calc(var(--sun) * .875),transparent calc(var(--sun) * .911));mask:radial-gradient(circle,transparent calc(var(--sun) * .554),#000 calc(var(--sun) * .571),#000 calc(var(--sun) * .875),transparent calc(var(--sun) * .911));
   animation:isunspin 16s linear infinite}
 .isun::after{content:'';position:absolute;inset:0;border-radius:50%;box-shadow:0 0 34px 14px rgba(255,205,90,.85),0 0 90px 40px rgba(255,190,70,.35);animation:isunglow 2.2s ease-in-out infinite alternate}
-.isun img,.isunini{position:relative;z-index:1;display:grid;place-items:center;width:112px;height:112px;border-radius:50%;object-fit:cover;border:4px solid #ffd166;box-sizing:border-box;background:#ffb703;color:#7a3e00;font-size:34px;font-weight:800}
+.isun img,.isunini{position:relative;z-index:1;display:grid;place-items:center;width:var(--sun);height:var(--sun);border-radius:50%;object-fit:cover;border:4px solid #ffd166;box-sizing:border-box;background:#ffb703;color:#7a3e00;font-size:calc(var(--sun) * .3);font-weight:800}
 @keyframes isunspin{to{transform:rotate(360deg)}}
 @keyframes isunglow{from{opacity:.65}to{opacity:1}}
 .icloud{position:absolute;z-index:0;height:26px;border-radius:999px;background:rgba(255,255,255,.85);filter:blur(.3px);animation:idrift linear infinite}
@@ -4077,7 +4079,7 @@ function ideaOverlay(box){
     '<div class="isub">Comment ideas for '+escH(who)+'</div>'+
     '<button class="icancel" data-act="idea-cancel">Cancel</button>';
   var old=panel.querySelector('#ideaov'); if(old) old.remove();
-  panel.appendChild(el);
+  panel.classList.add('ideas'); panel.appendChild(el);
   var q=el.querySelector('.iquote'), fill=el.querySelector('.ibar i'), bar=el.querySelector('.ibar'), sub=el.querySelector('.isub');
   var rise=el.querySelector('.irise'), tally=el.querySelector('.itally'), sun=el.querySelector('.isun'), ph=el.querySelector('.iphoto img');
   var still=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -4120,7 +4122,7 @@ function ideaOverlay(box){
         if(!loop&&!still) loop=setInterval(function(){ if(found.length) bubble(found[li++%found.length].e,false); },900);
       }
     },
-    finish:function(){ clearInterval(rot); [creep,early,loop].forEach(function(x){ if(x) clearInterval(x); }); if(qt) clearTimeout(qt); set(100); el.classList.add('done'); setTimeout(function(){ el.remove(); },300); },
+    finish:function(){ clearInterval(rot); [creep,early,loop].forEach(function(x){ if(x) clearInterval(x); }); if(qt) clearTimeout(qt); set(100); el.classList.add('done'); setTimeout(function(){ el.remove(); if(!panel.querySelector('#ideaov')) panel.classList.remove('ideas'); },300); },
     cancel:function(){ ctl.cancelled=true; ctl.finish(); }
   };
   early=setInterval(function(){ if(pct<12) set(pct+0.5); },400);   // creep a little before the first news arrives
