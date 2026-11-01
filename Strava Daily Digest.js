@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.32.0';
+const VERSION = '1.32.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -3635,6 +3635,7 @@ body.loading .loadst{display:block}
 .early.e4{background:linear-gradient(135deg,#070b1f,#2a1d5e);box-shadow:inset 0 0 0 1px #6c5ce7}
 .early.e5{background:linear-gradient(135deg,#1c2a6e,#8a3f8f)}
 .early.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
+.early.wx{background:var(--soft);color:var(--fg);font-weight:600}
 #lb{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column}
 #lb[hidden]{display:none}
 #upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
@@ -3892,6 +3893,9 @@ section.person .route{display:none}
 .stchips{margin-top:8px}
 .stchip{background:var(--soft);color:var(--fg);border:1px solid transparent;padding:7px 11px;font-size:calc(13px * var(--ts));font-weight:600}
 .stchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
+#cfgsheet .stchip{background:var(--soft);border:1px solid transparent;border-radius:999px;padding:7px 11px;font-size:calc(13px * var(--ts));font-weight:600}
+#cfgsheet .stchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
+#storysheet .mic{display:none}   /* room for the title next to the language pills */
 .sthint{display:block;margin-top:12px}
 #cpick{padding:12px 16px 4px;border-top:1px solid var(--line)}
 #cpick p{margin:0 0 8px;font-size:calc(13px * var(--ts));color:var(--mut);font-weight:600}

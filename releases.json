@@ -3,6 +3,24 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.32.1",
+      "date": "2026-11-01",
+      "title": "Tidier story and weather",
+      "highlights": [
+        {
+          "icon": "🧹",
+          "title": "Small things, fixed",
+          "text": "The story's title fits beside its language buttons, and the weather badge is easy to read."
+        }
+      ],
+      "changes": [],
+      "fixes": [
+        "The day's story title was cut to “The day’…” next to Auto, EN and LT",
+        "The weather badge on an activity was pale text on a pale badge",
+        "The one-tap tweaks in Settings › The day's story showed as plain text instead of buttons"
+      ]
+    },
+    {
       "version": "1.32.0",
       "date": "2026-11-01",
       "title": "Your story, your rules",

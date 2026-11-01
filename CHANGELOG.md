@@ -2,6 +2,16 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.32.1 (2026-11-01): Tidier story and weather
+
+- 🧹 **Small things, fixed**: The story's title fits beside its language buttons, and the weather badge is easy to read.
+
+**Fixes**
+
+- The day's story title was cut to “The day’…” next to Auto, EN and LT
+- The weather badge on an activity was pale text on a pale badge
+- The one-tap tweaks in Settings › The day's story showed as plain text instead of buttons
+
 ## 1.32.0 (2026-11-01): Your story, your rules
 
 - 📝 **Instructions for the story**: Settings › The day's story holds the story's instructions: tone, length, style. Edit them freely.
