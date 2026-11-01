@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.31.0';
+const VERSION = '1.32.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -525,9 +525,9 @@ async function main() {
         else {
           const lang = DIGEST.AI.LANGUAGES.some(l => l[1] === p.lang) ? p.lang : storyLanguage();
           const r = await aiStory(people, storyDay.dayStart, lang,
-            (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`));
+            (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`), p.tweak || '');
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify(Object.assign(r, { lang })); track('story_made', { people: r.count, photos: r.photosRead || 0, language: lang }); }
+          else { ok = true; msg = JSON.stringify(Object.assign(r, { lang })); track('story_made', { people: r.count, photos: r.photosRead || 0, language: lang, tweak: p.tweak || '', own_rules: String(settings.storyRules || '').trim() !== DEFAULT_STORY_RULES.trim() }); }
         }
       } else if (head === 'story-assets') {
         // the page may not draw Strava's pictures into an image, so they travel as data the page can use
@@ -955,17 +955,45 @@ const REPO_URL = 'https://github.com/gadominas/StravaFeed';
 const QR_REPO = '11111110111011100010001111111|10000010111111000101101000001|10111010101001100001101011101|10111010011111001100101011101|10111010110010111011001011101|10000010000110100100101000001|11111110101010101010101111111|00000000010111000001100000000|10011111111110111101010010111|10110000011110110111010110110|10001011011110010110000110100|11100000010110010101111101001|11100010001111110001101100001|01010001010100111110001111111|11111110100000110101111010101|01011001011101101011000110101|01000110011100010001110001000|11011000110100010111000010110|11111011010111111111000011001|11100101000001010001001001100|11001011010011010100111111110|00000000101111010000100011000|11111110101001010011101011000|10000010110011000101100010010|10111010101101010011111111001|10111010110010111110010000001|10111010010101110100110110111|10000010001010111000001101101|11111110110101011101101010000';
 
 // ── The day's story: everyone in the digest, with or without your kudos, in one funny tale ──
-const STORY_PROMPT = (language, n, photos) => [
-  `You are a witty, warm storyteller. Write one short, funny story (about 200 to 300 words) in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
-  'Every athlete in the data must appear at least once, by first name. Weave them into one connected tale (a relay, an adventure, a heist, a sitcom episode, whatever suits the day) rather than a list.',
-  'Build the jokes on the real details: sports, activity titles, times of day, early starts, places, PRs, descriptions. Keep numbers light; a few are fine, a wall of them is not.',
-  photos ? `${photos} photos are attached after the data, each introduced by its id, athlete and activity. Look at them closely and make them a highlight of the story: scenery, weather, food, pets, gear, signs, the odd funny detail. Never comment on anyone's body, weight, age or looks.` : '',
-  'Playfully mention who already has the reader\'s kudos and who is still waiting for it.',
-  'Keep it affectionate: never mock bodies, weight, age, looks or slowness, never invent facts that are not in the data or the photos, nothing offensive.',
-  'Give it a short, punchy title. Split the story into 3 to 6 short paragraphs.',
+// Your instructions for the day's story (Settings › The day's story): tone, length, structure, style. Editable; these are the defaults.
+const DEFAULT_STORY_RULES = `You write one short, funny story about a day in the lives of my friends on Strava, for me to read and share.
+
+TONE
+Warm, witty and a bit cheeky, like a friend telling the group chat what happened today. Energy over polish.
+
+STORY
+- One connected tale (a relay, a heist, a sitcom episode, a nature documentary, whatever suits the day), never a list of who did what.
+- Everyone appears at least once, by first name.
+- Build the jokes on real details: sports, activity titles, times of day, early starts, places, weather, PRs, descriptions and what is in the photos.
+- A few numbers are fine; a wall of them is not.
+- Playfully mention who already has my kudos and who is still waiting for it.
+
+LENGTH
+About 200 to 300 words. A short, punchy title. 3 to 6 short paragraphs.`;
+
+// One-tap tweaks: in Settings they add or remove a line in your instructions; in the story sheet they rewrite one story once.
+const STORY_TWEAKS = [
+  { key: 'energetic', label: '⚡ More energetic', line: 'Make it high-energy: short punchy sentences, big action verbs and a race-commentator buzz, without exclamation chains.' },
+  { key: 'specific', label: '🎯 More specific', line: 'Be very specific: for every friend use their exact places, times, distances, weather and photo details; no generic filler.' },
+  { key: 'funnier', label: '😂 Funnier', line: 'Push the humour: more jokes per paragraph, a running gag and playful exaggeration.' },
+  { key: 'dialogue', label: '💬 More dialogue', line: 'Add a few short lines of dialogue between the friends, like speech bubbles in a comic.' },
+  { key: 'shorter', label: '✂️ Shorter', line: 'Keep it short, whatever the length above says: about 120 to 180 words in 3 paragraphs.', not: 'longer' },
+  { key: 'longer', label: '📖 Longer', line: 'Make it longer, whatever the length above says: about 350 to 450 words in 5 to 7 paragraphs.', not: 'shorter' },
+  { key: 'gentle', label: '🫶 Gentler', line: 'Keep the teasing gentle: more admiration than roasting.' },
+];
+
+const STORY_PROMPT = (language, n, photos, rules, tweak) => [
+  `You write one story in ${language} about a day in the lives of ${n} friends who follow each other on Strava, told for the reader, who is their friend.`,
+  rules ? `Follow the user's instructions below. They decide tone, length, structure and style, and take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.`
+    : 'Make it short (about 200 to 300 words), warm and funny: one connected tale, built on the real details, never a list.',
+  tweak ? `For this version only, on top of the instructions: ${tweak}` : '',
+  'Every athlete in the data must appear at least once, by first name.',
+  photos ? `${photos} photos are attached after the data, each introduced by its id, athlete and activity. Look at them closely and make them a highlight of the story: scenery, weather, food, pets, gear, signs, the odd funny detail.` : '',
+  'Always, whatever the instructions: use only facts from the data and the photos, never invent results, places or events; never mock bodies, weight, age, looks or slowness; nothing offensive.',
+  'Give it a short title and split it into short paragraphs (3 to 6 unless the instructions say otherwise).',
   photos ? 'For each paragraph, list the ids of the photos that belong right after it; use each photo at most once and leave out dull ones.' : '',
   'Reply with JSON only, no other text: {"title": "...", "paragraphs": [{"text": "...", "photos": ["P1"]}]}.',
-].filter(Boolean).join(' ');
+].filter(Boolean).join('\n');
 
 // Downloaded and shrunk story photos, kept while the app is open so "Another take" doesn't load them again.
 const storyPhotoCache = new Map();
@@ -990,7 +1018,7 @@ async function shrinkImage(url, max) {
 }
 
 // progress(step, done, total): 'people', 'photos' (one call per photo) and 'writing'
-async function aiStory(people, dayStart, language, progress = async () => {}) {
+async function aiStory(people, dayStart, language, progress = async () => {}, tweak = '') {
   if (!aiKey()) return { needKey: true };
   const crew = people.slice(0, 25);
   await progress('people', crew.length, crew.length);
@@ -1016,7 +1044,9 @@ async function aiStory(people, dayStart, language, progress = async () => {}) {
   }));
   const day = dayStart ? new Date(+dayStart).toISOString().slice(0, 10) : null;
   await progress('writing', 0, 1);
-  const ask = (imgs) => aiCall(STORY_PROMPT(langPhrase(language, 'most of the activity titles'), cast.length, imgs.length), JSON.stringify({ day, athletes: cast }), 2200, 'story', aiSettings.aiProvider, imgs);
+  const tw = (STORY_TWEAKS.find(t => t.key === tweak) || {}).line || '';
+  const rules = String(settings.storyRules || '').trim() + (language !== 'Auto' ? `\nLANGUAGE: write it in ${language}, whatever the instructions above say about language.` : '');
+  const ask = (imgs) => aiCall(STORY_PROMPT(langPhrase(language, 'most of the activity titles'), cast.length, imgs.length, rules, tw), JSON.stringify({ day, athletes: cast }), 2600, 'story', aiSettings.aiProvider, imgs);
   let text, photosRead = images.length;
   try { text = await ask(images); }
   catch (e) {
@@ -1425,6 +1455,7 @@ const settings = {
   comicStyle: "pop",   // 💥 Comic: pop, cool or paper (old paper); the last look picked
   storyLang: "",   // The day's story: '' follows the comment language; also picked in the story sheet
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
+  storyRules: DEFAULT_STORY_RULES,       // instructions for the day's story
   styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
   shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
   cfg: {},
@@ -1498,7 +1529,7 @@ const SET_KEYS = {
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
-  commentRules: ["rules", ""], shareUsage: ["bool", ""],
+  commentRules: ["rules", ""], storyRules: ["rules", ""], shareUsage: ["bool", ""],
   storyLang: [v => v === "" || DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"],
   comicStyle: [v => ["pop", "cool", "paper"].includes(v), ""],
 };
@@ -1621,7 +1652,7 @@ function settingsState() {
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
-    defaultRules: DEFAULT_COMMENT_RULES, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
+    defaultRules: DEFAULT_COMMENT_RULES, defaultStoryRules: DEFAULT_STORY_RULES, storyTweaks: STORY_TWEAKS, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
     usageAvailable: usageAvailable(), usageStatus: usageStatus(),
   };
 }
@@ -3855,6 +3886,13 @@ section.person .route{display:none}
 .stph.n1 img{aspect-ratio:16/10}
 .stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
 .stf{display:flex;gap:10px}
+.sttw{margin:18px 0 12px}
+.sttw small{display:block;margin-bottom:7px;color:var(--mut);font-size:calc(12px * var(--ts));font-weight:700}
+.sttwr,.stchips{display:flex;flex-wrap:wrap;gap:6px}
+.stchips{margin-top:8px}
+.stchip{background:var(--soft);color:var(--fg);border:1px solid transparent;padding:7px 11px;font-size:calc(13px * var(--ts));font-weight:600}
+.stchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
+.sthint{display:block;margin-top:12px}
 #cpick{padding:12px 16px 4px;border-top:1px solid var(--line)}
 #cpick p{margin:0 0 8px;font-size:calc(13px * var(--ts));color:var(--mut);font-weight:600}
 .cprow{display:flex;gap:8px}
@@ -4828,6 +4866,18 @@ function writingHTML(){
       (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.opened!=null?'<br>'+(meta.read||0)+' comments read, '+meta.opened+' activities opened'+(meta.oldest?', back to '+escH(new Date(meta.oldest).toLocaleDateString(undefined,{day:'numeric',month:'short'})):'')+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
+// Settings › The day's story: your instructions, and one-tap lines that add or take away a tweak.
+function storyRulesHTML(){
+  var rules=SET.settings.storyRules||'', changed=rules!==SET.defaultStoryRules;
+  return '<h3 class="sec">The day’s story</h3>'+
+    '<div class="cfg'+(changed?' ch':'')+'"><div class="cfg-h"><b>Instructions for the day’s story</b>'+(changed?'<button class="link small" data-act="story-rules-reset">Reset to default</button>':'')+'</div>'+
+      '<small class="muted">Tone, length and style of every 📖 story. They win over the app’s own defaults; it still never invents facts or mocks anyone.</small>'+
+      '<textarea class="cfgsel rules" data-k="storyRules" rows="9" maxlength="4000" aria-label="Instructions for the day’s story">'+escH(rules)+'</textarea>'+
+      '<small class="muted rcount">'+rulesCount(rules.length)+'</small>'+
+      '<small class="muted sthint">Tap to add a line to the instructions, tap again to take it out:</small>'+
+      '<div class="stchips" role="group" aria-label="Quick tweaks">'+(SET.storyTweaks||[]).map(function(t){ var on=rules.indexOf(t.line)>=0;
+        return '<button class="stchip'+(on?' on':'')+'" data-act="story-tweak" data-tw="'+escH(t.key)+'" aria-pressed="'+on+'">'+escH(t.label)+'</button>'; }).join('')+'</div></div>';
+}
 // Settings blueprint 1.1.0: each section's rows in one card (.grp), built right after every render.
 // A heading's explanation (p.hint right under it) and the changed-count footer (.cfg-foot) stay outside.
 function cardSections(body) {
@@ -4860,6 +4910,7 @@ function renderCfg(){
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as the activity title':l[1]]; }))+
       pickRow('storyLang','Language of the day’s story',[['','Same as comments']].concat(SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as most activity titles':l[1]]; })))+
     writingHTML()+
+    storyRulesHTML()+
     (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
       swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
       '<div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">'+escH(SET.usageStatus||'Sends one test event now and shows PostHog’s answer.')+'</small></div><button class="sm" data-act="usage-test">Send test</button></div>':'')+
@@ -4899,6 +4950,18 @@ function cfgAction(t,act){
     return;
   }
   if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
+  if(act==='story-rules-reset'){ send('set',{k:'storyRules',v:SET.defaultStoryRules},setState); return; }
+  if(act==='story-tweak'){
+    var tw=(SET.storyTweaks||[]).filter(function(x){ return x.key===t.dataset.tw; })[0], ta=document.querySelector('#cfgsheet textarea[data-k="storyRules"]'); if(!tw||!ta) return;
+    var lines=ta.value.split(String.fromCharCode(10)), has=lines.indexOf(tw.line)>=0;
+    lines=lines.filter(function(l){ if(l===tw.line) return false; if(!has&&tw.not){ var o=(SET.storyTweaks||[]).filter(function(x){ return x.key===tw.not; })[0]; if(o&&l===o.line) return false; } return true; });
+    lines=lines.filter(function(l,k){ return l.trim()||k===0||lines[k-1].trim(); });   // no double blank lines left behind
+    while(lines.length&&!lines[lines.length-1].trim()) lines.pop();
+    if(!has) lines.push((lines.length?String.fromCharCode(10):'')+tw.line);
+    ta.value=lines.join(String.fromCharCode(10));
+    send('set',{k:'storyRules',v:ta.value},setState);
+    return;
+  }
   if(act==='style-clear'){ STYLEMSG=''; send('style-clear',{},setState); return; }
   if(act==='style-stop'){ styleStop(); return; }
   if(act==='style-learn'){ startStyle(); return; }
@@ -5143,6 +5206,7 @@ function likeMine(btn){
   });
 }
 // ── The day's story ──
+var STORYTWEAKS=${JSON.stringify(STORY_TWEAKS.map(t => ({ key: t.key, label: t.label })))}, STORYTWEAK='';
 var STORY=null, STORYBUSY=false, STORYLANG='${esc(settings.storyLang || '')}', STORYLANGS=${JSON.stringify(DIGEST.AI.LANGUAGES)};
 function storyLang(){ return STORYLANG||aiLang||'${esc(settings.aiLang)}'; }
 function storyLangs(){
@@ -5193,13 +5257,15 @@ function writeStory(){
   var key=storyKey(), lang=storyLang();
   paintStoryLangs();
   var lb=body.querySelector('.stwait b'); if(lb) lb.textContent+=' in '+(lang==='Auto'?'the titles’ language':lang);
-  send('story',{lang:lang},function(ok,msg){
+  var tweak=STORYTWEAK; STORYTWEAK='';
+  if(tweak){ var tl=STORYTWEAKS.filter(function(x){ return x.key===tweak; })[0]; var lb2=body.querySelector('.stwait b'); if(lb2&&tl) lb2.textContent='Rewriting it: '+tl.label; }
+  send('story',{lang:lang,tweak:tweak},function(ok,msg){
     if(creep) clearInterval(creep); STORYBUSY=false; window.__storyProgress=null; paintStoryLangs();
     if(!ok&&msg==='NEED_KEY'){ body.innerHTML='<p class="keyhelp">✨ The day’s story is written by AI. Add a Claude or OpenAI key in Settings › AI settings.</p><button class="small" data-act="ai-open">AI settings</button>'; return; }
     if(!ok){ body.innerHTML='<p class="mnote">'+escH(msg||'The story couldn’t be written.')+'</p><button class="small" data-act="story-again">Try again</button>'; return; }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
     mark('writing','done'); set(100);
-    STORY={key:key,lang:d.lang||lang,title:d.title||'',paragraphs:d.paragraphs||[],cast:d.cast||[],by:d.by||'AI',photos:d.photos||0,photosRead:d.photosRead||0};
+    STORY={key:key,tweak:tweak,lang:d.lang||lang,title:d.title||'',paragraphs:d.paragraphs||[],cast:d.cast||[],by:d.by||'AI',photos:d.photos||0,photosRead:d.photosRead||0};
     paintStoryLangs();
     setTimeout(renderStory,350);
   });
@@ -5216,6 +5282,7 @@ function renderStory(){
     if(x.photos&&x.photos.length) html+='<div class="stph n'+Math.min(3,x.photos.length)+'">'+x.photos.slice(0,3).map(function(u){ return '<img src="'+escH(u)+'" data-photo="1" alt="Photo from the day" loading="lazy" onerror="this.remove()">'; }).join('')+'</div>';
   });
   var note=STORY.photos&&!STORY.photosRead?' · this AI model couldn’t look at the photos':'';
+  html+='<div class="sttw" role="group" aria-label="Rewrite this story"><small>Rewrite it</small><div class="sttwr">'+STORYTWEAKS.map(function(t){ return '<button class="stchip'+(STORY.tweak===t.key?' on':'')+'" data-stw="'+escH(t.key)+'">'+escH(t.label)+'</button>'; }).join('')+'</div></div>';
   html+='<span class="badge-ai">✨ Written by '+escH(STORY.by)+(STORY.photosRead?' · looked at '+STORY.photosRead+' photo'+(STORY.photosRead===1?'':'s'):'')+escH(note)+'</span>';
   ov.querySelector('.stb').innerHTML=html;
   ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
@@ -5568,6 +5635,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='usage-yes'||t.dataset.act==='usage-no'){ send('usage-consent',{on:t.dataset.act==='usage-yes'?'1':'0'}); var ua=document.getElementById('usageask'); if(ua) ua.remove(); toast(t.dataset.act==='usage-yes'?'Thank you! Change it any time in Settings.':'No problem. Nothing is shared.'); return; }
   if(t.dataset.act==='story') return openStory(false);
   if(t.dataset.act==='story-again') return openStory(true);
+  if(t.dataset.stw){ if(STORYBUSY) return; STORYTWEAK=t.dataset.stw; return openStory(true); }   // one rewrite with that tweak; Settings keeps the instructions
   if(t.dataset.slang){   // the story in another language: remembered, and written straight away
     if(STORYBUSY||t.classList.contains('on')) return;
     STORYLANG=t.dataset.slang; send('setstorylang',{lang:STORYLANG}); return openStory(true);
@@ -5640,7 +5708,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
