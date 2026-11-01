@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.29.0';
+const VERSION = '1.29.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -888,6 +888,7 @@ function activityFacts(a, me = '') {
     start_time_local: a.clock ? fmtClock(a.clock) : null,
     early_start_club: early(a) ? early(a).label : null,
     location: a.location || null,
+    country: (countryOf(a) || {}).name || null,
     stats: Object.fromEntries(a.stats.map(s => [s.label, s.value])),
     heart_rate: a.hr || null,
     telemetry: tele,
@@ -1787,6 +1788,9 @@ function mergeDetails(a, d) {
   if (d.tele && Object.keys(d.tele).length) a.tele = Object.assign({}, a.tele || {}, d.tele);
   if (d.weather) a.weather = Object.assign({}, a.weather || {}, d.weather);
   if (d.weatherText) a.weatherText = d.weatherText;
+  if (d.country && !a.country) a.country = d.country;
+  if (d.tz && !a.tz) a.tz = d.tz;
+  if (d.locationText && !a.location) a.location = d.locationText;
   if (d.pageStats && Object.keys(d.pageStats).length) a.pageStats = d.pageStats;
   if (d.description && d.description.length > (a.description || '').length
       && (!a.description || d.description.startsWith(a.description.replace(/(…|\.\.\.)$/, '').slice(0, 30)))) a.description = d.description;
@@ -2508,6 +2512,13 @@ function stravaLib() {
     SD.walk(o, take);
     return out;
   };
+  // The country, where Strava's data names one (location_country and the like).
+  SD.country = (o) => {
+    const find = (rx) => { let c = ''; SD.walk(o, (k, v) => { if (!c && typeof v === 'string' && rx.test(k) && v.length <= 40) c = SD.text(v); }); return c; };
+    return find(/^location_?country$/i) || find(/^(country|country_?name)$/i);   // the activity's own field before any other country
+  };
+  // The activity's time zone, like Europe/Vilnius: a country when the location names only a city and region.
+  SD.tz = (o) => { let z = ''; SD.walk(o, (k, v) => { if (!z && typeof v === 'string' && /time_?zone/i.test(k)) { const m = v.match(/[A-Z][A-Za-z]+\/[A-Za-z_]+/); if (m) z = m[0]; } }); return z; };
   // Weather Strava stored with the activity (temperature, feels like, humidity, wind, condition), as found.
   SD.weather = (o) => {
     let w = null;
@@ -2550,7 +2561,7 @@ function stravaLib() {
       stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a), poly: SD.polylineOf(a),
       kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
       cmts: f.cmts || [], kudoers: f.kudoers || [],
-      tele: SD.tele(a), weather: SD.weather(a),
+      tele: SD.tele(a), weather: SD.weather(a), country: SD.country(a), tz: SD.tz(a),
     };
   };
 
@@ -2655,10 +2666,12 @@ function stravaLib() {
         const act = SD.findAct(j, id) || j;
         res.tele = SD.tele(act);
         res.weather = SD.weather(act) || SD.weather(j);
+        res.country = SD.country(act); res.tz = SD.tz(act);
       } catch (e) {}
     }
     const txt = SD.text(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' '));
     if (!res.weather) res.weatherText = SD.weatherText(txt);
+    { const lm = html.match(/class="[^"]*\blocation\b[^"]*"[^>]*>\s*([^<]{2,90}?)\s*</); if (lm) res.locationText = SD.text(lm[1]); }
     if (!res.tele || !Object.keys(res.tele).length) res.pageStats = SD.pageStats(txt);
     if (res.hr == null) {
       const m = txt.match(/Heart\s*Rate\s*(\d{2,3})\s*bpm(?:\s*(\d{2,3})\s*bpm)?/i);
@@ -3223,6 +3236,48 @@ function personIndicators(p) {
   return out.join('');
 }
 
+// The activity's country only (no city), with its flag: from Strava's country field, else the last part of the location.
+let COUNTRY_CODES = null;
+function countryCodes() {
+  if (COUNTRY_CODES) return COUNTRY_CODES;
+  COUNTRY_CODES = { usa: 'US', 'u.s.': 'US', uk: 'GB', 'great britain': 'GB', england: 'GB', scotland: 'GB', wales: 'GB', 'czech republic': 'CZ', holland: 'NL', 'the netherlands': 'NL',
+    lithuania: 'LT', lietuva: 'LT', latvia: 'LV', latvija: 'LV', estonia: 'EE', eesti: 'EE', poland: 'PL', lenkija: 'PL', germany: 'DE', vokietija: 'DE' };   // also without Intl
+  try {
+    const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const names = ['en', 'lt'].map(l => new Intl.DisplayNames([l], { type: 'region' }));
+    for (const x of A) for (const y of A) {
+      const code = x + y;
+      for (const dn of names) { const n = dn.of(code); if (n && n !== code) COUNTRY_CODES[n.toLowerCase()] = code; }
+    }
+  } catch (e) { console.warn('Country names: ' + e.message); }
+  return COUNTRY_CODES;
+}
+// Strava often writes only "City, Region": the region's word or the time zone still tell the country.
+const REGION_WORDS = [[/apskritis|savivaldyb/i, 'LT'], [/novads/i, 'LV'], [/maakond/i, 'EE'], [/województwo|voivodeship/i, 'PL']];
+const TZ_COUNTRY = {
+  'Europe/Vilnius': 'LT', 'Europe/Riga': 'LV', 'Europe/Tallinn': 'EE', 'Europe/Warsaw': 'PL', 'Europe/Berlin': 'DE', 'Europe/London': 'GB', 'Europe/Dublin': 'IE',
+  'Europe/Paris': 'FR', 'Europe/Madrid': 'ES', 'Europe/Lisbon': 'PT', 'Europe/Rome': 'IT', 'Europe/Amsterdam': 'NL', 'Europe/Brussels': 'BE', 'Europe/Luxembourg': 'LU',
+  'Europe/Zurich': 'CH', 'Europe/Vienna': 'AT', 'Europe/Prague': 'CZ', 'Europe/Bratislava': 'SK', 'Europe/Budapest': 'HU', 'Europe/Ljubljana': 'SI', 'Europe/Zagreb': 'HR',
+  'Europe/Belgrade': 'RS', 'Europe/Bucharest': 'RO', 'Europe/Sofia': 'BG', 'Europe/Athens': 'GR', 'Europe/Istanbul': 'TR', 'Europe/Kyiv': 'UA', 'Europe/Kiev': 'UA',
+  'Europe/Minsk': 'BY', 'Europe/Helsinki': 'FI', 'Europe/Stockholm': 'SE', 'Europe/Oslo': 'NO', 'Europe/Copenhagen': 'DK', 'Atlantic/Reykjavik': 'IS', 'Asia/Tbilisi': 'GE',
+  'Asia/Dubai': 'AE', 'Asia/Tokyo': 'JP', 'Asia/Singapore': 'SG', 'Asia/Bangkok': 'TH', 'Australia/Sydney': 'AU', 'Australia/Melbourne': 'AU', 'Pacific/Auckland': 'NZ',
+  'America/New_York': 'US', 'America/Chicago': 'US', 'America/Denver': 'US', 'America/Los_Angeles': 'US', 'America/Phoenix': 'US', 'America/Toronto': 'CA', 'America/Vancouver': 'CA',
+};
+function countryOf(a) {
+  const codes = countryCodes(), parts = String((a && a.location) || '').split(',').map(x => x.trim()).filter(Boolean);
+  let raw = String((a && a.country) || '').trim();
+  if (!raw && parts.length) { const last = parts[parts.length - 1]; if (codes[last.toLowerCase()] || parts.length >= 3) raw = last; }
+  if (!raw && parts.length) { const hit = REGION_WORDS.find(([rx]) => parts.some(p => rx.test(p))); if (hit) raw = hit[1]; }
+  if (!raw && a && a.tz && TZ_COUNTRY[a.tz]) raw = TZ_COUNTRY[a.tz];
+  if (!raw) return null;
+  const code = codes[raw.toLowerCase()] || (/^[A-Z]{2}$/.test(raw) ? raw : '');
+  let name = raw;
+  if (code) try { name = new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || raw; } catch (e) {}
+  const flag = code ? String.fromCodePoint(...[...code].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : '📍';
+  return { name, flag, code };
+}
+
+const tinyCountry = (a) => { const c = countryOf(a); return c ? `<span class="tcty" title="${esc(c.name)}" aria-label="${esc(c.name)}">${c.flag}<span class="tcn"> ${esc(c.name)}</span></span>` : ''; };
 // Tiny rows: the weather (when Strava has it) above a 💬 that opens the comment sheet straight away.
 function tinySide(a) {
   const w = weatherChip(a), first = esc(String(a.athleteName || '').split(/\s+/)[0] || 'them');
@@ -3265,7 +3320,7 @@ function personHtml(p) {
   if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
     const a = p.primary;
     return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
-    <header>${avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
+    <header>${avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline"><span class="ttx">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span>${tinyCountry(a)}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
     <div class="tacts" hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
   </section>`;
   }
@@ -3914,6 +3969,10 @@ body.loading .person{opacity:.45}
 .person.tiny .ic.gold{color:var(--gold)}
 .person.tiny .tline{margin-top:1px}
 .person.tiny .pn > b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.person.tiny .tline{display:flex;align-items:baseline;gap:8px;min-width:0}
+.person.tiny .ttx{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tcty{flex:none;white-space:nowrap;color:var(--mut);font-size:.92em}
+.tcty.flag .tcn{display:none}   /* no room for the name: the title keeps its space, the flag stays */
 .tside{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:40px}
 .twx{display:inline-flex;align-items:center;gap:3px;font-size:calc(15px * var(--ts));line-height:1;white-space:nowrap}
 .twx i{font-style:normal;font-weight:700;font-size:calc(12px * var(--ts));color:var(--mut);font-variant-numeric:tabular-nums}
@@ -4289,6 +4348,11 @@ function fitTinyChips(root){
     var cs=box.querySelectorAll('.ic'); cs.forEach(function(c){ c.classList.remove('cut'); });
     var edge=box.getBoundingClientRect().right+0.5;
     cs.forEach(function(c){ if(c.getBoundingClientRect().right>edge) c.classList.add('cut'); });
+  });
+  // the country after the title: its name only when the title still fits whole, else just the flag
+  (root||document).querySelectorAll('.person.tiny .tline').forEach(function(l){
+    var c=l.querySelector('.tcty'), t=l.querySelector('.ttx'); if(!c||!t) return;
+    c.classList.remove('flag'); if(t.scrollWidth>t.clientWidth+1) c.classList.add('flag');
   });
 }
 window.addEventListener('load',function(){ fitTinyChips(); });
