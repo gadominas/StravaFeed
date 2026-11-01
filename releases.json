@@ -3,6 +3,32 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.28.0",
+      "date": "2026-11-01",
+      "title": "Stories in your language",
+      "highlights": [
+        {
+          "icon": "📖",
+          "title": "Your language, from the start",
+          "text": "The day's story is written in the language set in Settings, not guessed from titles."
+        },
+        {
+          "icon": "🔤",
+          "title": "One tap, another language",
+          "text": "Auto, EN and LT sit at the top of the story; tap one to rewrite it straight away."
+        }
+      ],
+      "changes": [
+        "Settings › AI comments has Language of the day's story: Same as comments (the default), Auto, English or Lithuanian",
+        "A language tapped in the story sheet is remembered for the next story",
+        "Opening a story kept in another language writes a new one in the current language",
+        "While a story is written, the sheet says which language it is in"
+      ],
+      "fixes": [
+        "Changing the comment language in the composer no longer clears the highlighted story language"
+      ]
+    },
+    {
       "version": "1.27.1",
       "date": "2026-11-01",
       "title": "LT means Lithuanian",

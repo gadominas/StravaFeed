@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.28.0 (2026-11-01): Stories in your language
+
+- 📖 **Your language, from the start**: The day's story is written in the language set in Settings, not guessed from titles.
+- 🔤 **One tap, another language**: Auto, EN and LT sit at the top of the story; tap one to rewrite it straight away.
+
+**Changes**
+
+- Settings › AI comments has Language of the day's story: Same as comments (the default), Auto, English or Lithuanian
+- A language tapped in the story sheet is remembered for the next story
+- Opening a story kept in another language writes a new one in the current language
+- While a story is written, the sheet says which language it is in
+
+**Fixes**
+
+- Changing the comment language in the composer no longer clears the highlighted story language
+
 ## 1.27.1 (2026-11-01): LT means Lithuanian
 
 - 🇱🇹 **Your language pick wins**: Tap LT and every idea is in Lithuanian, even for an English title like Lunch Hike.
