@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.29.2';
+const VERSION = '1.30.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -533,16 +533,18 @@ async function main() {
         let urls = [], avs = [];
         try { urls = JSON.parse(p.urls || '[]'); avs = JSON.parse(p.avs || '[]'); } catch (e) {}
         const out = { photos: {}, avatars: {} };
-        for (const u of urls.slice(0, 3)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 1080); } catch (e) { console.warn('Story image photo: ' + e.message); } }
+        for (const u of urls.slice(0, 9)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 900); } catch (e) { console.warn('Story image photo: ' + e.message); } }
         for (const u of avs.slice(0, 12)) { try { out.avatars[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 200); } catch (e) { console.warn('Story image avatar: ' + e.message); } }
         ok = true; msg = JSON.stringify(out);
       } else if (head === 'story-image') {
-        const b64 = await ui.evaluateJavaScript('window.__storyImg || ""');
-        if (!b64) msg = 'The image wasn\u2019t made. Try again.';
-        else {
-          const img = Image.fromData(Data.fromBase64String(String(b64)));
-          await ShareSheet.present([img]); ok = true; track('story_image');
+        // the comic's pages, read one at a time (each is a large picture), then shared together: "Save N Images" keeps them in Photos
+        const n = Math.min(12, +(await ui.evaluateJavaScript('(window.__storyImgs || []).length')) || 0), imgs = [];
+        for (let i = 0; i < n; i++) {
+          const b64 = await ui.evaluateJavaScript(`(window.__storyImgs || [])[${i}] || ""`);
+          if (b64) imgs.push(Image.fromData(Data.fromBase64String(String(b64))));
         }
+        if (!imgs.length) msg = 'The pages weren\u2019t made. Try again.';
+        else { await ShareSheet.present(imgs); ok = true; track('story_comic', { pages: imgs.length }); }
       } else if (head === 'share') {
         await ShareSheet.present([String(p.text || '')]); ok = true;
       } else if (head === 'activity') {
@@ -5146,7 +5148,7 @@ function storySheet(){
   var ov=document.getElementById('storysheet');
   if(!ov){
     ov=document.createElement('div'); ov.id='storysheet'; ov.hidden=true;
-    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><div class="stlw"></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button class="ghost" data-act="story-image">📸 Image</button><button data-act="story-share">Share</button></div></div>';
+    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><div class="stlw"></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button class="ghost" data-act="story-image">💥 Comic</button><button data-act="story-share">Share</button></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',function(e){ if(e.target===ov) closeStory(); });
   }
@@ -5209,7 +5211,7 @@ function renderStory(){
   ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
   paintStoryLangs();
 }
-// ── The story as a 1080×1920 picture for Instagram, with the app's mark and a QR code to its GitHub page ──
+// ── Shared drawing helpers for the story's comic pages, with the app's mark and a QR code to its GitHub page ──
 var QR_REPO='${QR_REPO}', REPO_LABEL='github.com/gadominas/StravaFeed';
 function loadImg(src){ return new Promise(function(res){ if(!src) return res(null); var i=new Image(); i.onload=function(){ res(i); }; i.onerror=function(){ res(null); }; i.src=src; }); }
 function wrapLines(ctx,text,maxW){
@@ -5236,74 +5238,172 @@ function drawLogo(ctx,x,y,size){
   ctx.fillStyle='#2DD4BF'; ctx.beginPath(); ctx.arc(62,184,12,0,Math.PI*2); ctx.fill();
   ctx.restore();
 }
-function drawStoryCard(assets){
-  var W=1080,H=1920,P=80, cv=document.createElement('canvas'); cv.width=W; cv.height=H; var ctx=cv.getContext('2d');
-  var urls=[]; STORY.paragraphs.forEach(function(x){ (x.photos||[]).forEach(function(u){ if(urls.length<3&&urls.indexOf(u)<0) urls.push(u); }); });
-  var cast=STORY.cast.slice(0,8);
-  return Promise.all([Promise.all(urls.map(function(u){ return loadImg((assets.photos||{})[u]); })), Promise.all(cast.map(function(c){ return loadImg((assets.avatars||{})[c.avatar]); }))]).then(function(res){
-    var photos=res[0].filter(Boolean), faces=res[1];
-    // sky-dark background with a warm glow
-    var g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#101320'); g.addColorStop(1,'#1d1f2b'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-    var glow=ctx.createRadialGradient(W-120,120,10,W-120,120,620); glow.addColorStop(0,'rgba(252,76,2,.42)'); glow.addColorStop(1,'rgba(252,76,2,0)'); ctx.fillStyle=glow; ctx.fillRect(0,0,W,H);
-    ctx.textBaseline='alphabetic';
-    // header: logo, app name, date
-    drawLogo(ctx,P,88,60);
-    ctx.font='800 40px '+FONT; ctx.fillStyle='#ffffff'; ctx.fillText('Daily',P+78,132);
-    ctx.fillStyle='#FB7185'; ctx.fillText('Digest',P+78+ctx.measureText('Daily ').width,132);
-    ctx.fillStyle='rgba(255,255,255,.65)'; ctx.font='500 32px '+FONT; ctx.textAlign='right'; ctx.fillText(STORY.key||'',W-P,132); ctx.textAlign='left';
-    ctx.fillStyle='#ff8a4c'; ctx.font='800 30px '+FONT; ctx.fillText('THE DAY’S STORY',P,226);
-    // cast
-    var y=262, d=104, gap=22;
-    cast.forEach(function(c,i){
-      var x=P+i*(d+gap), cx=x+d/2, cy=y+d/2;
-      ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,d/2,0,Math.PI*2); ctx.clip();
-      if(faces[i]) cover(ctx,faces[i],x,y,d,d); else { ctx.fillStyle='#2b2d39'; ctx.fillRect(x,y,d,d); ctx.fillStyle='#d9d9e3'; ctx.font='800 36px '+FONT; ctx.textAlign='center'; ctx.fillText(initialsOf(c.name),cx,cy+13); ctx.textAlign='left'; }
-      ctx.restore();
-      ctx.strokeStyle=c.kudoed?'#2fbf71':'#fc4c02'; ctx.lineWidth=6; ctx.beginPath(); ctx.arc(cx,cy,d/2+4,0,Math.PI*2); ctx.stroke();
-      ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='600 24px '+FONT; ctx.textAlign='center'; ctx.fillText(String(c.name||'').split(' ')[0].slice(0,9),cx,y+d+38); ctx.textAlign='left';
-    });
-    y+=d+80;
-    // title
-    ctx.fillStyle='#ffffff'; ctx.font='800 70px '+FONT;
-    var tl=wrapLines(ctx,STORY.title||'',W-2*P).slice(0,3); tl.forEach(function(l){ y+=74; ctx.fillText(l,P,y); }); y+=44;
-    // footer and photos are fixed at the bottom; the story fills what's left, its size chosen to fit
-    var footTop=H-300, photoH=photos.length?(photos.length===1?420:340):0, photoTop=footTop-50-photoH, textBottom=(photos.length?photoTop-44:footTop-44);
-    var paras=STORY.paragraphs.map(function(x){ return x.text; }), size, layout;
-    for(size=54;size>=24;size-=2){
-      ctx.font='400 '+size+'px '+FONT; var lh=Math.round(size*1.42), h=0; layout=[];
-      paras.forEach(function(t,i){ var ls=wrapLines(ctx,t,W-2*P); layout.push(ls); h+=ls.length*lh+(i?Math.round(size*0.7):0); });
-      if(y+h<=textBottom) break;
+// ── The story as comic pages, 1080×1350 each (a cover, panels, the end), to save as photos and share ──
+var CW=1080, CH=1350, CM=40, CG=20, COMIC='"Chalkboard SE","Comic Sans MS","Marker Felt",cursive', CTITLE='"Marker Felt","Chalkboard SE","Comic Sans MS",cursive';
+var PANEL_BG=['#7fd3ff','#ffb3c7','#b5f28c','#ffd36b','#c9b6ff','#ffa77a'];
+var SFX=[[['rain','liet','lyja','lijo','šlap','splash'],'SPLASH!'],[['swim','plauk'],'SPLOSH!'],[['ride','dvirat','bike','cycl'],'WHIRR!'],[['run','bėg'],'ZOOM!'],[['hike','walk','žyg','ėjim','pasivaik'],'STOMP!'],[['kudos'],'POW!'],[['early','sunrise','ryto','auš'],'YAWN!'],[['record','rekord'],'BOOM!']];
+var SFX_ANY=['BAM!','WHAM!','KAPOW!','ZING!','WOW!'];
+function sfxFor(t,i){ t=String(t).toLowerCase(); for(var k=0;k<SFX.length;k++){ if(SFX[k][0].some(function(w){ return t.indexOf(w)>=0; })) return SFX[k][1]; } return SFX_ANY[i%SFX_ANY.length]; }
+function dotsPattern(ctx,color,step,r){ var p=document.createElement('canvas'); p.width=p.height=step; var c=p.getContext('2d'); c.fillStyle=color; c.beginPath(); c.arc(step/2,step/2,r,0,Math.PI*2); c.fill(); return ctx.createPattern(p,'repeat'); }
+function inked(ctx,txt,x,y,fill,lw){ ctx.lineJoin='round'; ctx.miterLimit=2; ctx.lineWidth=lw; ctx.strokeStyle='#111'; ctx.strokeText(txt,x,y); ctx.fillStyle=fill; ctx.fillText(txt,x,y); }
+function boxed(ctx,x,y,w,h,fill,lw){ ctx.fillStyle=fill; ctx.fillRect(x,y,w,h); ctx.lineWidth=lw||7; ctx.strokeStyle='#111'; ctx.strokeRect(x,y,w,h); }
+function burst(ctx,cx,cy,r,n,fill){ ctx.beginPath(); for(var i=0;i<n*2;i++){ var a=Math.PI*i/n-Math.PI/2, rr=i%2?r*0.66:r; ctx.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr*0.82); } ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle='#111'; ctx.stroke(); }
+function sfxBurst(ctx,cx,cy,word,size){
+  ctx.save(); burst(ctx,cx,cy,size,12,'#ffe45c'); ctx.translate(cx,cy); ctx.rotate(-0.14);
+  var fs=Math.round(size*0.5); ctx.font='900 '+fs+'px '+CTITLE; while(ctx.measureText(word).width>size*1.12&&fs>18){ fs-=2; ctx.font='900 '+fs+'px '+CTITLE; }
+  ctx.textAlign='center'; ctx.textBaseline='middle'; inked(ctx,word,0,2,'#ff3d2e',Math.max(4,fs/7)); ctx.restore();
+}
+function face(ctx,img,name,cx,cy,d){
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,d/2,0,Math.PI*2); ctx.clip();
+  if(img) cover(ctx,img,cx-d/2,cy-d/2,d,d); else { ctx.fillStyle='#fff'; ctx.fillRect(cx-d/2,cy-d/2,d,d); ctx.fillStyle='#111'; ctx.font='900 '+Math.round(d*0.36)+'px '+CTITLE; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(initialsOf(name),cx,cy+2); }
+  ctx.restore(); ctx.lineWidth=6; ctx.strokeStyle='#111'; ctx.beginPath(); ctx.arc(cx,cy,d/2,0,Math.PI*2); ctx.stroke();
+}
+function nameTag(ctx,name,cx,y,fs){
+  ctx.font='800 '+fs+'px '+COMIC; var w=ctx.measureText(name).width+22;
+  boxed(ctx,cx-w/2,y,w,fs+16,'#fff',4); ctx.fillStyle='#111'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(name,cx,y+(fs+16)/2+1); ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
+function firstName(c){ return String(c.name||'').split(' ')[0]; }
+// who a paragraph is about: first names, matched on the stem so Lithuanian endings (Mindaugas, Mindaugui) count
+function castIn(text,faces){
+  var t=String(text);
+  return STORY.cast.map(function(c,k){ return {c:c,f:faces[k]}; }).filter(function(x){ var n=firstName(x.c); if(n.length<3) return false; var stem=n.length>5?n.slice(0,n.length-2):n; return t.indexOf(stem)>=0; }).slice(0,4);
+}
+var CAP_FS=36, CAP_LH=48, CAP_PAD=22;
+function comicBlocks(ctx,photoBy,faces){
+  ctx.font='600 '+CAP_FS+'px '+COMIC;
+  var innerW=CW-2*CM-2*16-2*CAP_PAD, out=[];
+  STORY.paragraphs.forEach(function(p,i){
+    var ims=(p.photos||[]).map(function(u){ return photoBy[u]; }).filter(Boolean).slice(0,3);
+    out.push({lines:wrapLines(ctx,p.text,innerW),ims:ims,who:castIn(p.text,faces),sfx:sfxFor(p.text,i),bg:PANEL_BG[i%PANEL_BG.length],i:i});
+  });
+  return out;
+}
+function capH(n){ return n*CAP_LH+2*CAP_PAD; }
+function artMin(b){ return b.ims.length?(b.ims.length===1?380:300):(b.who.length?200:120); }
+// lay the panels out over pages: a long paragraph continues in the next panel; spare room goes to the pictures
+function comicPages(blocks,coverH){
+  var top=CM+56, bottom=CH-CM-50, pages=[], cur={cover:true,y0:CM+coverH+CG,items:[]}, y=cur.y0;
+  function room(){ return bottom-y; }
+  function newPage(){ pages.push(cur); cur={cover:false,y0:top,items:[]}; y=top; }
+  blocks.forEach(function(b){
+    var lines=b.lines.slice();
+    while(lines.length){
+      var need=16+capH(lines.length)+12+artMin(b)+16;
+      if(need<=room()){ cur.items.push({b:b,lines:lines,art:artMin(b)}); y+=need+CG; lines=[]; break; }
+      var fit=Math.floor((room()-16-12-16-2*CAP_PAD-60)/CAP_LH);   // what fits with a strip of picture under it
+      if(fit>=3&&fit<lines.length){ cur.items.push({b:b,lines:lines.slice(0,fit),art:60,cont:true}); lines=lines.slice(fit); newPage(); continue; }
+      if(cur.items.length||cur.cover) newPage(); else { cur.items.push({b:b,lines:lines,art:artMin(b)}); lines=[]; }
     }
-    ctx.fillStyle='rgba(255,255,255,.92)'; ctx.font='400 '+size+'px '+FONT; var lh2=Math.round(size*1.42), full=false;
-    layout.forEach(function(ls,i){ if(full) return; if(i) y+=Math.round(size*0.7);
-      for(var k=0;k<ls.length;k++){ if(y+lh2>textBottom){ var last=ls[k]; while(last&&ctx.measureText(last+' …').width>W-2*P) last=last.slice(0,-1); ctx.fillText((last||'')+' …',P,y+lh2-Math.round(size*0.35)); full=true; return; }
-        y+=lh2; ctx.fillText(ls[k],P,y-Math.round(size*0.35)); } });
-    // photos
-    if(photos.length){ var pw=(W-2*P-(photos.length-1)*18)/photos.length;
-      photos.forEach(function(im,i){ var x=P+i*(pw+18); ctx.save(); rrect(ctx,x,photoTop,pw,photoH,28); ctx.clip(); cover(ctx,im,x,photoTop,pw,photoH); ctx.restore(); }); }
-    // footer: watermark and the QR code to the app
-    ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(P,footTop); ctx.lineTo(W-P,footTop); ctx.stroke();
-    var qs=210; drawQR(ctx,W-P-qs,footTop+44,qs);
-    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='500 28px '+FONT; ctx.fillText('Made with',P,footTop+92);
-    drawLogo(ctx,P,footTop+108,48);
-    ctx.fillStyle='#ffffff'; ctx.font='800 46px '+FONT; ctx.fillText('Strava Daily Digest',P+64,footTop+148);
-    ctx.fillStyle='#ff8a4c'; ctx.font='700 28px '+FONT; ctx.fillText('Scan to get the app  →',P,footTop+200);
-    ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='500 24px '+FONT; ctx.fillText(REPO_LABEL,P,footTop+240);
-    return cv.toDataURL('image/jpeg',0.92);
+  });
+  var endH=330; if(room()<endH) newPage();
+  cur.end=true; pages.push(cur);
+  if(pages[0].cover&&!pages[0].items.length&&!pages[0].end) pages[0].fill=bottom-CM;   // a cover with no panel: the title takes the whole page
+  // stretch each page's pictures so the panels fill it to the bottom
+  pages.forEach(function(pg){
+    var used=0; pg.items.forEach(function(it){ used+=16+capH(it.lines.length)+12+it.art+16+CG; });
+    var avail=bottom-pg.y0-(pg.end?endH+CG:0)+CG, spare=avail-used; if(spare<=0||!pg.items.length) return;
+    var w=0; pg.items.forEach(function(it){ it.wt=it.b.ims.length?3:1; w+=it.wt; });
+    pg.items.forEach(function(it){ it.art+=Math.floor(spare*it.wt/w); });
+  });
+  return pages;
+}
+function drawPanel(ctx,it,y){
+  var b=it.b, x=CM, w=CW-2*CM, ch=capH(it.lines.length), h=16+ch+12+it.art+16;
+  boxed(ctx,x,y,w,h,b.ims.length?'#ffffff':b.bg,7);
+  if(!b.ims.length){ ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip(); ctx.fillStyle=dotsPattern(ctx,'rgba(0,0,0,.13)',14,3); ctx.fillRect(x,y,w,h); ctx.restore(); }
+  // caption box
+  boxed(ctx,x+16,y+16,w-32,ch,'#fff3a3',4);
+  ctx.fillStyle='#111'; ctx.font='600 '+CAP_FS+'px '+COMIC; ctx.textBaseline='alphabetic'; ctx.textAlign='left';
+  it.lines.forEach(function(l,k){ ctx.fillText(l,x+16+CAP_PAD,y+16+CAP_PAD+CAP_FS+k*CAP_LH-4); });
+  if(it.cont){ ctx.font='800 22px '+COMIC; ctx.textAlign='right'; ctx.fillText('CONTINUED…',x+w-16-12,y+16+ch-10); ctx.textAlign='left'; }
+  var ay=y+16+ch+12, ah=it.art, aw=w-32, ax=x+16;
+  if(it.cont) return h;
+  if(b.ims.length){
+    var gw=(aw-(b.ims.length-1)*12)/b.ims.length;
+    b.ims.forEach(function(im,k){ var px=ax+k*(gw+12); ctx.save(); ctx.beginPath(); ctx.rect(px,ay,gw,ah); ctx.clip(); cover(ctx,im,px,ay,gw,ah); ctx.fillStyle=dotsPattern(ctx,'rgba(0,0,0,.07)',8,1.6); ctx.fillRect(px,ay,gw,ah); ctx.restore(); ctx.lineWidth=5; ctx.strokeStyle='#111'; ctx.strokeRect(px,ay,gw,ah); });
+    if(b.i%2===0&&ah>=220) sfxBurst(ctx,ax+aw-90,ay+70,b.sfx,82);
+  } else {
+    var d=Math.min(ah-24,170);
+    b.who.forEach(function(x2,k){ var cx=ax+14+d/2+k*(d+26); face(ctx,x2.f,x2.c.name,cx,ay+ah/2,d); });
+    var r=Math.min(ah/2-6,110); if(r>=50) sfxBurst(ctx,ax+aw-r-10,ay+ah/2,b.sfx,r);
+  }
+  return h;
+}
+function drawCover(ctx,faces,coverH){
+  var x=CM, w=CW-2*CM, th=coverH-300-CG, y=CM;
+  // title panel: sun-burst rays behind the title
+  boxed(ctx,x,y,w,th,'#ff6b3d',7);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,th); ctx.clip();
+  var cx=x+w/2, cy=y+th*0.58;
+  for(var i=0;i<28;i++){ var a0=i*Math.PI*2/28, a1=a0+Math.PI/28; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(a0)*1400,cy+Math.sin(a0)*1400); ctx.lineTo(cx+Math.cos(a1)*1400,cy+Math.sin(a1)*1400); ctx.closePath(); ctx.fillStyle=i%2?'#ffb13d':'#ff8a3d'; ctx.fill(); }
+  ctx.fillStyle=dotsPattern(ctx,'rgba(0,0,0,.10)',14,3); ctx.fillRect(x,y,w,th); ctx.restore();
+  // ribbon
+  ctx.save(); ctx.translate(x+40,y+38); ctx.rotate(-0.04); boxed(ctx,0,0,430,62,'#111',4);
+  ctx.font='900 34px '+CTITLE; ctx.fillStyle='#ffe45c'; ctx.textBaseline='middle'; ctx.fillText('THE DAY’S STORY',22,33); ctx.restore();
+  ctx.font='800 28px '+COMIC; ctx.textAlign='right'; ctx.textBaseline='middle'; inked(ctx,STORY.key||'',x+w-30,y+70,'#ffffff',6); ctx.textAlign='left';
+  // title, as big as fits
+  var fs=104, tl; do{ ctx.font='900 '+fs+'px '+CTITLE; tl=wrapLines(ctx,STORY.title||'',w-90); fs-=6; } while((tl.length>3||tl.length*fs*1.08>th-170)&&fs>44);
+  fs+=6; ctx.font='900 '+fs+'px '+CTITLE; ctx.textAlign='center'; ctx.textBaseline='middle';
+  var lh=Math.round(fs*1.08), ty=cy-(tl.length-1)*lh/2;
+  tl.forEach(function(l,k){ inked(ctx,l,cx,ty+k*lh,'#ffffff',Math.round(fs/6)); });
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  // starring panel
+  var sy=y+th+CG, sh=300; boxed(ctx,x,sy,w,sh,'#4fb3ff',7);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,sy,w,sh); ctx.clip(); ctx.fillStyle=dotsPattern(ctx,'rgba(0,0,40,.16)',14,3); ctx.fillRect(x,sy,w,sh); ctx.restore();
+  ctx.font='900 34px '+CTITLE; ctx.textBaseline='middle'; inked(ctx,'STARRING',x+24,sy+38,'#ffe45c',7);
+  var cast=STORY.cast.slice(0,8), n=Math.max(1,cast.length), d=Math.min(150,Math.floor((w-48-(n-1)*18)/n)), gap=n>1?Math.min(40,(w-48-n*d)/(n-1)):0, rowW=n*d+(n-1)*gap, sx=x+(w-rowW)/2;
+  cast.forEach(function(c,k){ var fx=sx+k*(d+gap)+d/2; face(ctx,faces[k],c.name,fx,sy+80+d/2,d); ctx.save(); ctx.strokeStyle=c.kudoed?'#2fbf71':'#fc4c02'; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(fx,sy+80+d/2,d/2+6,0,Math.PI*2); ctx.stroke(); ctx.restore(); nameTag(ctx,firstName(c).slice(0,10),fx,sy+80+d+10,Math.max(18,Math.min(26,Math.round(d/5)))); });
+  ctx.textBaseline='alphabetic';
+}
+function drawEnd(ctx,y){
+  var x=CM, w=CW-2*CM, h=330;
+  boxed(ctx,x,y,w,h,'#ff3d6e',7);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip(); ctx.fillStyle=dotsPattern(ctx,'rgba(0,0,0,.14)',14,3); ctx.fillRect(x,y,w,h); ctx.restore();
+  burst(ctx,x+250,y+h/2,190,14,'#ffe45c');
+  ctx.save(); ctx.translate(x+250,y+h/2); ctx.rotate(-0.1); ctx.font='900 78px '+CTITLE; ctx.textAlign='center'; ctx.textBaseline='middle'; inked(ctx,'THE END',0,0,'#ffffff',12); ctx.restore();
+  var bx=x+w/2-20, by=y+26, bw=x+w-24-bx, bh=h-52, qs=200, tx=bx+22;
+  boxed(ctx,bx,by,bw,bh,'#ffffff',5); drawQR(ctx,bx+bw-qs-18,by+(bh-qs)/2-10,qs);
+  ctx.fillStyle='#111'; ctx.textBaseline='alphabetic'; ctx.font='800 24px '+COMIC; ctx.fillText('Made with',tx,by+46);
+  drawLogo(ctx,tx,by+64,46); ctx.font='900 30px '+CTITLE; ctx.fillText('Daily Digest',tx+58,by+96); ctx.font='700 22px '+COMIC; ctx.fillText('for Strava',tx+58,by+124);
+  ctx.fillStyle='#d4380d'; ctx.font='800 22px '+COMIC; ctx.fillText('Scan for the app →',tx,by+180);
+  ctx.fillStyle='#555'; ctx.font='600 17px '+COMIC; ctx.fillText(REPO_LABEL,tx,by+bh-18);
+}
+function pageChrome(ctx,k,n,cover){
+  ctx.fillStyle='#fff8e4'; ctx.fillRect(0,0,CW,CH); ctx.fillStyle=dotsPattern(ctx,'rgba(120,80,0,.07)',12,2.2); ctx.fillRect(0,0,CW,CH);
+  ctx.textBaseline='middle';
+  if(!cover){ ctx.font='900 30px '+CTITLE; ctx.fillStyle='#111'; ctx.fillText('THE DAY’S STORY',CM,CM+22); ctx.font='700 24px '+COMIC; ctx.textAlign='right'; ctx.fillText(STORY.key||'',CW-CM,CM+22); ctx.textAlign='left'; }
+  ctx.font='700 22px '+COMIC; ctx.fillStyle='#6b5a3a'; ctx.fillText('Daily Digest · '+(STORY.by?'written by '+STORY.by:''),CM,CH-CM-16);
+  var t=k+' / '+n; ctx.font='900 26px '+CTITLE; var tw=ctx.measureText(t).width+28; boxed(ctx,CW-CM-tw,CH-CM-36,tw,40,'#ffe45c',4);
+  ctx.fillStyle='#111'; ctx.textAlign='center'; ctx.fillText(t,CW-CM-tw/2,CH-CM-15); ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
+function drawStoryPages(assets){
+  var urls=storyPhotoUrls(), cast=STORY.cast.slice(0,8);
+  return Promise.all([Promise.all(urls.map(function(u){ return loadImg((assets.photos||{})[u]); })), Promise.all(cast.map(function(c){ return loadImg((assets.avatars||{})[c.avatar]); }))]).then(function(res){
+    var photoBy={}; urls.forEach(function(u,k){ if(res[0][k]) photoBy[u]=res[0][k]; }); var faces=res[1];
+    var cv=document.createElement('canvas'); cv.width=CW; cv.height=CH; var ctx=cv.getContext('2d');
+    var coverH=760, blocks=comicBlocks(ctx,photoBy,faces), pages=comicPages(blocks,coverH), out=[];
+    pages.forEach(function(pg,k){
+      ctx.setTransform(1,0,0,1,0,0); pageChrome(ctx,k+1,pages.length,pg.cover);
+      if(pg.cover) drawCover(ctx,faces,pg.fill||coverH);
+      var y=pg.y0; pg.items.forEach(function(it){ y+=drawPanel(ctx,it,y)+CG; });
+      if(pg.end) drawEnd(ctx,y);
+      out.push(cv.toDataURL('image/jpeg',0.9).split(',')[1]);
+    });
+    return out;
   });
 }
+function storyPhotoUrls(){ var urls=[]; STORY.paragraphs.forEach(function(x){ (x.photos||[]).forEach(function(u){ if(urls.length<9&&urls.indexOf(u)<0) urls.push(u); }); }); return urls; }
 function storyImage(btn){
   if(!STORY||btn.disabled) return;
-  var was=btn.textContent; btn.disabled=true; btn.textContent='Making it…';
-  var urls=[]; STORY.paragraphs.forEach(function(x){ (x.photos||[]).forEach(function(u){ if(urls.length<3&&urls.indexOf(u)<0) urls.push(u); }); });
+  var was=btn.textContent; btn.disabled=true; btn.textContent='Drawing pages…';
   var avs=STORY.cast.slice(0,8).map(function(c){ return c.avatar; }).filter(Boolean);
   function done(err){ btn.disabled=false; btn.textContent=was; if(err) toast(err); }
-  send('story-assets',{urls:JSON.stringify(urls),avs:JSON.stringify(avs)},function(ok,msg){
+  send('story-assets',{urls:JSON.stringify(storyPhotoUrls()),avs:JSON.stringify(avs)},function(ok,msg){
     var a={}; try{ a=JSON.parse(msg); }catch(e){}
-    drawStoryCard(a).then(function(url){
-      window.__storyImg=url.split(',')[1];
-      send('story-image',{},function(ok2,m2){ window.__storyImg=null; done(ok2?'':(m2||'Couldn’t share the image')); });
-    }).catch(function(e){ done('Couldn’t make the image: '+(e&&e.message||e)); });
+    drawStoryPages(a).then(function(pages){
+      window.__storyImgs=pages;
+      send('story-image',{n:pages.length},function(ok2,m2){ window.__storyImgs=null; done(ok2?'':(m2||'Couldn’t share the pages')); });
+    }).catch(function(e){ done('Couldn’t draw the pages: '+(e&&e.message||e)); });
   });
 }
 function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
