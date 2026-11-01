@@ -27,7 +27,53 @@
 // see the CONFIG registry and the settings defaults further down (github.com/gadominas/app-blueprints · settings).
 const APP = 'StravaFeed';   // the app's folder in Scriptable's documents (settings.json lives there)
 // Applied to every AI comment (Settings › Comment writing); the person can change it there.
-const DEFAULT_COMMENT_RULES = `Role & Tone: Act as an encouraging, witty, and intelligent British running mate, using natural, conversational British phrasing.
+const DEFAULT_COMMENT_RULES = `You write short comments on my friends' Strava activities. They should read as if I typed them on my phone: casual, warm, a bit funny, and specific to this one activity.
+
+INPUT
+You get one activity: athlete first name, sport type, title, description, distance, moving time, pace/speed, elevation gain, local start time, weather (if available), and photos (if any).
+
+WHAT TO NOTICE (pick the 1–2 most interesting, never all)
+- Early start: anything before 7:30 local time deserves credit. Before 6:00 is legendary.
+- Long effort: run over 10 km, ride over 60 km, swim over 2 km, hike over 15 km, or anything noticeably longer than usual for the title.
+- Rough conditions: rain, snow, wind, below 5 °C, or above 28 °C. Use weather data, or what you see in photos or read in the title.
+- Big climbing, a PR, a race, a streak, or a funny/self-deprecating title.
+- Photos: look closely. Sunrise, dog, kids, wet shoes, foggy forest, frozen beard, coffee after, an unusual place. A specific photo detail beats any statistic.
+If nothing stands out, react to the title or the simple fact they showed up.
+
+STYLE: pick one at random each time, don't repeat the same style twice in a row
+- dry understatement
+- mock outrage ("who allowed this at 5 AM")
+- playful question
+- short hype (2–5 words)
+- tiny observation about a photo detail
+- light self-deprecation from my side ("meanwhile I was asleep")
+- weather/condition banter
+- simple, genuine respect
+
+LENGTH: vary it. Often 3–8 words, sometimes one sentence, rarely two.
+
+SOUNDING HUMAN
+- Mention at most one number, and usually none. Round it or say it loosely ("half marathon-ish", "before sunrise") instead of quoting exact stats.
+- Use the first name only sometimes, roughly 1 in 3 comments, never a nickname you made up.
+- Emoji: zero, one, or two. Often zero. Never the same emoji every time.
+- Vary punctuation and capitalisation naturally; a comment without a final period is fine.
+- Never use: "Great job", "Amazing effort", "Keep it up", "Way to go", "Crushing it", hashtags, em dashes, exclamation chains, or a list of multiple stats.
+- Don't explain the joke or sound like a coach.
+
+LANGUAGE
+Write in the language of the activity title (Lithuanian or English). If unclear, use English. Lithuanian must sound like natural casual speech, not translated.
+
+RESPECT
+Humour is about the situation (weather, hour, distance, my laziness), never about the person's pace, body, or ability. A slow or short activity still gets genuine credit.
+
+ACCURACY
+Only mention things present in the data or clearly visible in photos. If unsure what a photo shows, ignore it.
+
+OUTPUT
+Return a JSON array of 3 comments, each in a different style, no other text:
+["...", "...", "..."]`;
+// The default up to 1.25.0: anyone who never changed it gets the new default (loadSettings).
+const LEGACY_COMMENT_RULES = `Role & Tone: Act as an encouraging, witty, and intelligent British running mate, using natural, conversational British phrasing.
 Task: Write exactly one short, punchy, and funny sentence to congratulate a runner on their workout.
 Content Requirements:
  * Core Message: Offer polite encouragement and genuine kudos while seamlessly weaving in a clever sports joke or a famous sports quote.
@@ -39,7 +85,7 @@ const DIGEST = {
   DAYS_BACK: 0,            // day shown first: 0 = today, 1 = yesterday, ... (or run with ?days=1)
   DEBUG_DUMP: false,       // save raw feed JSON to Scriptable/strava-feed-debug.json
   AI: {                    // ✨ comment ideas from Claude or OpenAI (your own key; Settings › AI settings)
-    LANGUAGES: [['EN', 'English'], ['LT', 'Lithuanian']],
+    LANGUAGES: [['Auto', 'Auto'], ['EN', 'English'], ['LT', 'Lithuanian']],   // Auto: the language of the activity title
     MODES: [               // comment moods offered in the comment composer
       { key: 'mystyle', label: '✨ My style' },   // your instructions plus the style learned from your comments
       { key: 'funny', label: '😂 Funny', style: 'funny and warm, like a teammate teasing with affection' },
@@ -62,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.25.0';
+const VERSION = '1.26.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -434,10 +480,22 @@ async function main() {
         const a = feed.get(p.id);
         if (!a) msg = 'Activity not found.';
         else {
-          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode,
-            (step, done, total) => js(`window.__ideaProgress && window.__ideaProgress(${JSON.stringify({ step, done, total })})`));
+          const say = (step, done, total, extra) => js(`window.__ideaProgress && window.__ideaProgress(${JSON.stringify(Object.assign({ step, done, total }, extra || {}))})`);
+          if (aiKey()) {
+            // everything the activity page knows (telemetry, weather, full description), and the comments already on it
+            await say('reading', 0, 1);
+            if (!details.has(a.id) || !details.get(a.id).tele) {
+              try { const det = (await sx(`__SD.enrich(${JSON.stringify([a.id])}, 1)`, cfg('detailsWait') * 1000)) || {}; if (det[a.id] && !det[a.id].error) { details.set(a.id, det[a.id]); mergeDetails(a, det[a.id]); derive(a); } }
+              catch (e) { console.warn('Comment ideas, details: ' + e.message); }
+            }
+            if ((a.comments || 0) > (a.cmts || []).length) {
+              try { const soc = await sx(`__SD.social(${JSON.stringify(String(a.id))})`, cfg('detailsWait') * 1000); if (soc && soc.comments && soc.comments.length) a.cmts = soc.comments; }
+              catch (e) { console.warn('Comment ideas, comments: ' + e.message); }
+            }
+          }
+          const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode, say, String(feed.me() || ''));
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0 }); track('ai_ideas', { mode: p.mode || settings.aiMode, language: p.lang || settings.aiLang, photos: r.photosRead || 0, provider: aiSettings.aiProvider }); }
+          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0, seen: r.seen || [] }); track('ai_ideas', { mode: p.mode || settings.aiMode, language: p.lang || settings.aiLang, photos: r.photosRead || 0, provider: aiSettings.aiProvider, has_style: !!settings.styleProfile }); }
         }
       } else if (head === 'story') {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
@@ -800,8 +858,14 @@ function aiInviteNote(what, now = Date.now()) {
 
 // ─────────────── ✨ comment suggestions (through aiCall) ───────────────
 
-function activityFacts(a) {
+// "Auto" in the language picker: write in the language of the title(s).
+const langPhrase = (l, what = 'the activity title') => l === 'Auto' ? `the language of ${what} (Lithuanian or English; English if unclear)` : l;
+
+// Everything the digest knows about one activity, for the AI: stats, telemetry, weather, description, comments.
+// me: your athlete id, so your own earlier comments are marked.
+function activityFacts(a, me = '') {
   const first = String(a.athleteName || '').split(/\s+/)[0];
+  const tele = a.tele && Object.keys(a.tele).length ? a.tele : null;
   return {
     friend_first_name: first,
     activity_title: a.name,
@@ -812,14 +876,51 @@ function activityFacts(a) {
     location: a.location || null,
     stats: Object.fromEntries(a.stats.map(s => [s.label, s.value])),
     heart_rate: a.hr || null,
+    telemetry: tele,
+    page_text_stats_approximate: !tele && a.pageStats && Object.keys(a.pageStats).length ? a.pageStats : null,
+    weather: a.weather || null,
+    weather_as_shown_on_strava: a.weatherText || null,
     personal_records: a.ach.prs || 0,
     achievements: a.ach.total || 0,
     achievement_details: a.ach.list.filter(x => x.name).slice(0, 5).map(x => [x.type, x.name].filter(Boolean).join(': ')),
-    description: a.description ? a.description.slice(0, 1200) : null,
+    description: a.description ? a.description.slice(0, 1500) : null,
     description_emojis: a.description ? [...new Set(a.description.match(/\p{Extended_Pictographic}/gu) || [])].slice(0, 20) : [],
     photos: a.photos.length,
     kudos_so_far: a.kudos,
+    comment_count: a.comments || 0,
+    comments: (a.cmts || []).slice(-10).map(c => Object.assign({ from: String(c.name || '').split(/\s+/)[0], text: String(c.text || '').slice(0, 300) },
+      me && String(c.athleteId) === String(me) ? { by_you: true } : {})),
   };
+}
+
+// What the digest can tell at a glance, as emojis for the progress screen (no AI needed).
+function weatherHints(a) {
+  const w = a.weather || {}, txt = [a.weatherText, ...Object.values(w).filter(v => typeof v === 'string'), a.name, a.description].filter(Boolean).join(' ').toLowerCase();
+  let temp = null;
+  for (const [k, v] of Object.entries(w)) if (temp == null && /temp/i.test(k) && !/feel|apparent|dew/i.test(k) && isFinite(+v)) temp = +v;
+  if (temp == null) { const m = String(a.weatherText || '').match(/(-?\d+(?:[.,]\d)?)\s*(?:°|℃|℉)\s*([CF])?/); if (m) temp = +m[1].replace(',', '.') ; if (m && (m[2] === 'F' || /℉/.test(m[0]))) temp = (temp - 32) / 1.8; }
+  return { temp, rain: /rain|drizzle|shower|lietu|lyja|lijo/.test(txt), snow: /snow|sniega|sninga/.test(txt), wind: /wind|gust|vėj|vej/.test(txt), fog: /fog|mist|rūk|ruk/.test(txt) };
+}
+function activitySignals(a) {
+  const out = [], add = (e, t) => { if (out.length < 12 && !out.some(x => x.e === e)) out.push({ e, t }); };
+  add(emoji(a.type), String(a.type || 'activity').toLowerCase());
+  if (a.clock) { const m = a.clock.h * 60 + a.clock.m; if (m < 360) add('🦉', 'before 6 AM'); else if (m < 450) add('🌅', 'early start'); }
+  const km = a.km ? (a.km.unit === 'mi' ? a.km.value * 1.609 : a.km.value) : 0, t = String(a.type || '').toLowerCase();
+  if ((/run/.test(t) && km > 10) || (/ride|cycl/.test(t) && km > 60) || (/swim/.test(t) && km > 2) || (/hike/.test(t) && km > 15)) add('📏', 'long one');
+  const el = parseFloat(String((a.stats.find(x => /elev/i.test(x.label)) || {}).value || (a.tele && a.tele['Elevation gain']) || '').replace(',', '.'));
+  if (el > 500) add('⛰️', 'big climbing');
+  const w = weatherHints(a);
+  if (w.temp != null && w.temp < 5) add('🥶', 'cold'); else if (w.temp != null && w.temp > 28) add('🥵', 'hot');
+  if (w.rain) add('🌧️', 'rain'); if (w.snow) add('❄️', 'snow'); if (w.wind) add('💨', 'wind'); if (w.fog) add('🌫️', 'fog');
+  if (a.ach.prs) add('🏆', 'PR'); else if (a.ach.total) add('🏅', 'achievements');
+  if (a.tele && /race/i.test(a.tele['Workout type'] || '')) add('🏁', 'race');
+  if (a.hr) add('❤️', 'heart rate');
+  if (a.tele && (a.tele['Average power'] || a.tele['Weighted average power'])) add('⚡', 'power');
+  if (a.description) add('📝', 'description');
+  ((a.description || '').match(/\p{Extended_Pictographic}/gu) || []).filter((x, i, l) => l.indexOf(x) === i).slice(0, 2).forEach(x => add(x, 'in the description'));
+  if ((a.cmts || []).length || a.comments) add('💬', 'comments');
+  if (a.photos.length) add('📷', a.photos.length + (a.photos.length === 1 ? ' photo' : ' photos'));
+  return out;
 }
 
 // The app's GitHub page as a QR code (version 3, 29×29, error correction M), rows of 1s and 0s.
@@ -885,11 +986,11 @@ async function aiStory(people, dayStart, language, progress = async () => {}) {
     name: p.name, first_name: String(p.name || '').split(/\s+/)[0],
     has_your_kudos: !!p.kudoed, early_club: p.early ? p.early.label : null,
     photos: picks.filter(x => x.pid === p.id && used.has(x.id)).map(x => ({ id: x.id, activity: x.act })),
-    activities: p.acts.slice(0, 3).map(a => { const f = activityFacts(a); delete f.friend_first_name; return f; }),
+    activities: p.acts.slice(0, 3).map(a => { const f = activityFacts(a); delete f.friend_first_name; delete f.comments; delete f.page_text_stats_approximate; return f; }),
   }));
   const day = dayStart ? new Date(+dayStart).toISOString().slice(0, 10) : null;
   await progress('writing', 0, 1);
-  const ask = (imgs) => aiCall(STORY_PROMPT(language, cast.length, imgs.length), JSON.stringify({ day, athletes: cast }), 2200, 'story', aiSettings.aiProvider, imgs);
+  const ask = (imgs) => aiCall(STORY_PROMPT(langPhrase(language, 'most of the activity titles'), cast.length, imgs.length), JSON.stringify({ day, athletes: cast }), 2200, 'story', aiSettings.aiProvider, imgs);
   let text, photosRead = images.length;
   try { text = await ask(images); }
   catch (e) {
@@ -918,26 +1019,50 @@ async function aiStory(people, dayStart, language, progress = async () => {}) {
 function commentBrief(language, n) {
   const rules = String(settings.commentRules || '').trim();
   return [
-    `You write comments on a friend's Strava activity. Write ${n} different options in ${language}.`,
+    `You write comments on a friend's Strava activity. Write ${n} different options in ${langPhrase(language)}.`,
     rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
     'Defaults, where the instructions say nothing: a single short sentence each, written as a friend and teammate, built on the real details given (title, time of day, effort, PRs, distance, pace), at most one emoji, no hashtags.',
-    language !== 'English' ? `Write natural ${language}; where the instructions ask for British phrasing, keep that spirit in ${language}.` : '',
+    'The data holds everything known about the activity: stats, telemetry, weather, the description and the comments already on it. Read all of it before choosing what to mention; never repeat what someone already said in the comments, and if by_you marks one, do not write the same thing again.',
+    language !== 'English' && language !== 'Auto' ? `Write natural ${language}; where the instructions ask for British phrasing, keep that spirit in ${language}.` : '',
   ].filter(Boolean).join('\n');
 }
-function styleBlock() {
+// Your learned style goes into every request; "My style" makes it the whole voice, a mood keeps your habits.
+function styleBlock(mode) {
   const prof = String(settings.styleProfile || '').trim();
-  return prof
-    ? `Write in the user's own commenting style, learned from their past comments:\n${prof}\nMatch that voice closely; the user's instructions above still decide format and length.`
-    : 'Write the way the user would: natural, personal and specific to this activity.';
+  const own = (sentComments || []).map(x => x && String(x.text || '').trim()).filter(Boolean).slice(0, 6);
+  const ex = own.length ? `\nComments the user really posted lately (their voice; never repeat them): ${JSON.stringify(own)}` : '';
+  if (mode === 'mystyle') return prof
+    ? `Write in the user's own commenting style, learned from their past comments:\n${prof}${ex}\nMatch that voice closely; the user's instructions above still decide format and length.`
+    : `Write the way the user would: natural, personal and specific to this activity.${ex}`;
+  return prof || ex ? `The user's own commenting style, learned from their past comments:\n${prof || '(not learned yet)'}${ex}\nKeep their habits (length, punctuation, emoji use, how they address people) while using the mood below.` : '';
 }
 const COMMENT_SAFETY = 'Always, whatever the instructions or mood: never mock body, weight, age or looks; never invent facts that are not given; nothing offensive. Make the options clearly different from each other.';
-const COMMENT_JSON = 'Reply with JSON only, no other text: {"comments": ["...", "..."]}.';
+const COMMENT_JSON = 'Reply with JSON only, no other text: an array of the comments, ["...", "..."].';
+
+// Looks at the photos once and names what is in them: shown as emojis while ideas are written, then used by the writer.
+const SCAN_PROMPT = [
+  "You look at the photos from one friend's Strava activity and list what is in them, so another writer can comment on it.",
+  'Be specific: animals, people and what they are doing, food and drink, scenery, light and weather, water, snow, mud, gear, signs and text, landmarks, anything funny or unusual.',
+  'Never describe or judge anyone\'s body, weight, age or looks. If you are not sure what something is, leave it out.',
+  'Reply with JSON only, no other text: {"elements": [{"emoji": "🐕", "label": "dog"}], "details": ["one short concrete observation"], "conditions": "weather and light in a few words, or null"}.',
+  'elements: up to 8, most interesting first, one fitting emoji each, label of one to three English words. details: up to 5.',
+].join(' ');
+const oneEmoji = (e) => { const m = String(e || '').match(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/u); return m ? m[0] : ''; };
+async function scanPhotos(a, images) {
+  const text = await aiCall(SCAN_PROMPT, JSON.stringify({ title: a.name, sport: a.type, description: a.description || null }), 700, 'comments', aiSettings.aiProvider, images);
+  const j = parseJSON(repairJSON(text)) || {};
+  const elements = (Array.isArray(j.elements) ? j.elements : []).map(x => ({ e: oneEmoji(x && x.emoji) || '🔎', t: String((x && x.label) || '').trim().slice(0, 30) }))
+    .filter(x => x.t).slice(0, 8);
+  const details = (Array.isArray(j.details) ? j.details : []).map(x => String(x || '').trim().slice(0, 200)).filter(Boolean).slice(0, 5);
+  const conditions = j.conditions ? String(j.conditions).slice(0, 120) : null;
+  return { elements, details, conditions };
+}
 
 // Up to three of an activity's photos, shrunk, for the AI to look at.
 async function activityImages(a, max = 3, progress = async () => {}) {
   const out = [], list = (a.photos || []).slice(0, max);
   for (let i = 0; i < list.length; i++) {
-    await progress('photos', i, list.length);
+    await progress('photos', i, list.length, { url: list[i] });
     try { out.push({ label: `Photo ${out.length + 1} from this activity`, b64: await storyPhoto(list[i]) }); }
     catch (e) { console.warn('Comment photo: ' + e.message); }
   }
@@ -945,38 +1070,59 @@ async function activityImages(a, max = 3, progress = async () => {}) {
 }
 const isVisionError = (e) => /image|vision|multimodal|content|media/i.test(String((e && e.message) || e));
 
-async function aiComments(a, system, images = []) {
+// The model may answer ["…"] (as the default instructions ask) or {"comments": […]}: both work.
+function readComments(text) {
+  let list = [];
+  try { const j = parseJSON(repairJSON(text)); list = Array.isArray(j) ? j : (j.comments || j.options || j.ideas || []); }
+  catch (e) { list = String(text).split(/\n+/).map(l => l.replace(/^[-*\d.)\s"]+|",?$/g, '').trim()).filter(l => l && !/^[\[\]{}]$/.test(l)); }
+  return (Array.isArray(list) ? list : []).map(c => String(typeof c === 'object' && c ? (c.text || c.comment || '') : c).trim()).filter(Boolean);
+}
+
+async function aiComments(a, system, images = [], extra = {}, me = '') {
   const provider = aiSettings.aiProvider, n = cfg('suggestions');
+  const user = JSON.stringify(Object.assign(activityFacts(a, me), extra));
   let text, photosRead = images.length;
-  try { text = await aiCall(system, JSON.stringify(activityFacts(a)), 900, 'comments', provider, images); }
+  try { text = await aiCall(system, user, 900, 'comments', provider, images); }
   catch (e) {
     if (!images.length || !isVisionError(e)) throw e;
     console.warn('Comment ideas without photos: ' + e.message);   // the chosen model can't read photos
-    photosRead = 0; text = await aiCall(system, JSON.stringify(activityFacts(a)), 900, 'comments', provider);
+    photosRead = 0; text = await aiCall(system, user, 900, 'comments', provider);
   }
-  let comments = [];
-  try { comments = parseJSON(text).comments || []; }
-  catch (e) { comments = text.split(/\n+/).map(l => l.replace(/^[-*\d.)\s"]+|"$/g, '').trim()).filter(Boolean); }
-  comments = comments.map(c => String(c).trim()).filter(Boolean).slice(0, n);
+  const comments = readComments(text).slice(0, n);
   if (!comments.length) throw new Error('No suggestions came back. Try again.');
   return { comments, by: PROVIDERS[provider], photosRead };
 }
 
-async function aiSuggest(a, language, hint, mode, progress = async () => {}) {
+// progress(step, done, total, extra): 'signals' (what the data shows), 'photos' (one per photo, with its url),
+// 'seen' (what the photos show) and 'writing'.
+async function aiSuggest(a, language, hint, mode, progress = async () => {}, me = '') {
   if (!aiKey()) return { needKey: true };
-  const images = await activityImages(a, 3, progress);
-  await progress('writing', images.length, images.length);
+  const signals = activitySignals(a);
+  await progress('signals', 0, 0, { items: signals });
+  let images = await activityImages(a, 3, progress);
+  let seen = null, photosRead = 0;
+  if (images.length) {
+    await progress('scanning', images.length, images.length);
+    try { seen = await scanPhotos(a, images); photosRead = images.length; }
+    catch (e) { console.warn('Photo scan: ' + e.message); if (isVisionError(e)) images = []; }
+    if (seen) await progress('seen', 0, 0, { items: seen.elements });
+  }
+  await progress('writing', 0, 1);
   const parts = [commentBrief(language, cfg('suggestions'))];
   if (a.description) parts.push('Read the activity description closely, including what its emojis suggest (food, weather, animals, places, mood), and use it in the comments.');
-  if (images.length) parts.push(`${images.length === 1 ? 'A photo' : `${images.length} photos`} from the activity ${images.length === 1 ? 'is' : 'are'} attached. Look closely: identify specific objects, places, food, animals, weather, signs and moments, and build the comments on what you see. Never comment on anyone's body, weight, age or looks.`);
-  if (mode === 'mystyle') parts.push(styleBlock());
-  else {
+  if (seen) parts.push('photo_observations in the data were made by looking closely at the activity\'s photos: treat them as what the photos show, and prefer a specific photo detail over any statistic. Never comment on anyone\'s body, weight, age or looks.');
+  else if (images.length) parts.push(`${images.length === 1 ? 'A photo' : `${images.length} photos`} from the activity ${images.length === 1 ? 'is' : 'are'} attached. Look closely: identify specific objects, places, food, animals, weather, signs and moments, and build the comments on what you see. Never comment on anyone's body, weight, age or looks.`);
+  const style = styleBlock(mode);
+  if (style) parts.push(style);
+  if (mode !== 'mystyle') {
     const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style);
     if (m) parts.push(`Mood for these options: ${m.style}. Where this mood clashes with the user's instructions about tone, use the mood; every other instruction still applies.`);
   }
   if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
   parts.push(COMMENT_SAFETY, COMMENT_JSON);
-  return aiComments(a, parts.join('\n'), images);
+  const extra = seen ? { photo_observations: { found: seen.elements.map(x => x.t), details: seen.details, conditions: seen.conditions } } : {};
+  const r = await aiComments(a, parts.join('\n'), seen ? [] : images, extra, me);
+  return Object.assign(r, { photosRead: seen ? photosRead : r.photosRead, seen: [...signals.slice(1), ...(seen ? seen.elements : [])].map(x => x.e).filter((x, i, l) => l.indexOf(x) === i).slice(0, 8) });
 }
 
 // "Learn my style": what the AI is asked to write from your own comments.
@@ -1300,7 +1446,7 @@ function setSetting(k, v) {
   if (!s) return null;
   if (s[0] === "bool") v = v === true || v === "true";
   else if (s[0] === "text") v = cleanPrompt(v);
-  else if (s[0] === "rules") v = String(v == null ? "" : v).replace(/\r\n?/g, "\n").slice(0, 2000).trim();
+  else if (s[0] === "rules") v = String(v == null ? "" : v).replace(/\r\n?/g, "\n").slice(0, 4000).trim();
   else if (!s[0](v)) return null;
   if (k === "textSize") v = +v;
   settings[k] = v;
@@ -1311,6 +1457,8 @@ async function loadSettings() {
   const saved = await load("settings", null);
   settingsOk = !loadIssues.includes("settings");   // settings that were never read are never saved over
   if (saved) Object.assign(settings, saved);
+  // 1.26.0: untouched default instructions move to the new default, which writes in the activity title's language
+  if (saved && String(settings.commentRules || '').trim() === LEGACY_COMMENT_RULES.trim()) { settings.commentRules = DEFAULT_COMMENT_RULES; settings.aiLang = 'Auto'; }
   else if (settingsOk) {   // first run of 1.10: move the choices 1.9.x kept in the Keychain into settings.json
     try {
       if (Keychain.contains(KC_SETTINGS_OLD)) {
@@ -1582,6 +1730,10 @@ function mergeDetails(a, d) {
   if (d.achievements != null) a.ach.total = Math.max(a.ach.total || 0, d.achievements);
   if (d.list && d.list.length && !a.ach.list.length) a.ach.list = d.list;
   if (!a.map && d.map) a.map = d.map;
+  if (d.tele && Object.keys(d.tele).length) a.tele = Object.assign({}, a.tele || {}, d.tele);
+  if (d.weather) a.weather = Object.assign({}, a.weather || {}, d.weather);
+  if (d.weatherText) a.weatherText = d.weatherText;
+  if (d.pageStats && Object.keys(d.pageStats).length) a.pageStats = d.pageStats;
   if (d.description && d.description.length > (a.description || '').length
       && (!a.description || d.description.startsWith(a.description.replace(/(…|\.\.\.)$/, '').slice(0, 30)))) a.description = d.description;
   if (!a.route && d.poly) { a.poly = d.poly; a.route = routeShape(d.poly); }
@@ -2259,6 +2411,79 @@ function stravaLib() {
   };
   SD.best = (...cs) => cs.filter(c => c && !(c.h === 0 && c.m === 0)).sort((x, y) => y.src - x.src)[0] || null;
 
+  // Telemetry: every number Strava keeps for the activity that a comment could use, under a readable name.
+  SD.TELE = {
+    elapsedtime: ['Elapsed time', 'dur'], movingtime: ['Moving time', 'dur'], distance: ['Distance', 'm'],
+    totalelevationgain: ['Elevation gain', 'm'], elevationgain: ['Elevation gain', 'm'], elevhigh: ['Highest point', 'm'], elevlow: ['Lowest point', 'm'],
+    averagespeed: ['Average speed', 'mps'], avgspeed: ['Average speed', 'mps'], maxspeed: ['Max speed', 'mps'],
+    averagecadence: ['Average cadence', ''], avgcadence: ['Average cadence', ''],
+    averagewatts: ['Average power', 'W'], avgwatts: ['Average power', 'W'], weightedaveragewatts: ['Weighted average power', 'W'], maxwatts: ['Max power', 'W'],
+    kilojoules: ['Energy', 'kJ'], calories: ['Calories', 'kcal'], sufferscore: ['Relative effort', ''], relativeeffort: ['Relative effort', ''],
+    perceivedexertion: ['Perceived exertion (1-10)', ''], averagetemp: ['Device temperature', '°C'], avgtemp: ['Device temperature', '°C'],
+    maxheartrate: ['Max heart rate', 'bpm'], averageheartrate: ['Average heart rate', 'bpm'], steps: ['Steps', ''], stepcount: ['Steps', ''],
+    devicename: ['Device', 'str'], workouttype: ['Workout type', 'wt'], trainer: ['Indoor trainer', 'bool'], commute: ['Commute', 'bool'],
+    sporttype: ['Sport type', 'str'], athletecount: ['People in the group', ''], prcount: ['PRs', ''], achievementcount: ['Achievements', ''],
+  };
+  SD.WT = { 1: 'race', 2: 'long run', 3: 'workout', 11: 'race', 12: 'workout' };
+  // The object that is this activity inside a page's data (so other activities on the page don't mix in).
+  SD.findAct = (o, id) => {
+    let hit = null;
+    SD.walk(o, (k, v) => {
+      if (hit || !v || typeof v !== 'object' || Array.isArray(v) || String(v.id) !== String(id)) return;
+      if (['distance', 'moving_time', 'movingTime', 'elapsed_time', 'elapsedTime'].some(x => x in v)) hit = v;
+    });
+    return hit;
+  };
+  SD.tele = (o) => {
+    const out = {};
+    const take = (k, v) => {
+      const t = SD.TELE[String(k).toLowerCase().replace(/[^a-z]/g, '')];
+      if (!t || out[t[0]] != null || v == null || typeof v === 'object') return;
+      const [name, u] = t;
+      if (u === 'bool') { if (v === true) out[name] = 'yes'; return; }
+      if (u === 'str') { const x = SD.text(v); if (x && x.length <= 60) out[name] = x; return; }
+      if (u === 'wt') { const x = SD.WT[+v] || (typeof v === 'string' && !/^\d+$/.test(v) ? SD.text(v) : ''); if (x) out[name] = x; return; }
+      const n = +v;
+      if (typeof v === 'boolean' || !isFinite(n) || n <= 0) return;
+      if (u === 'dur') out[name] = SD.dur(n);
+      else if (u === 'm') out[name] = name === 'Distance' && n >= 1000 ? (n / 1000).toFixed(2) + ' km' : Math.round(n) + ' m';
+      else if (u === 'mps') out[name] = n < 60 ? (n * 3.6).toFixed(1) + ' km/h' : String(n);
+      else out[name] = (Math.round(n * 10) / 10) + (u ? ' ' + u : '');
+    };
+    if (o && typeof o === 'object') Object.keys(o).forEach(k => take(k, o[k]));   // the activity's own fields win over nested ones
+    SD.walk(o, take);
+    return out;
+  };
+  // Weather Strava stored with the activity (temperature, feels like, humidity, wind, condition), as found.
+  SD.weather = (o) => {
+    let w = null;
+    SD.walk(o, (k, v) => {
+      if (w || !v || typeof v !== 'object' || Array.isArray(v) || !/weather/i.test(k)) return;
+      const out = {};
+      for (const [kk, vv] of Object.entries(v)) {
+        if (vv == null || /icon|url|id$/i.test(kk)) continue;
+        if (typeof vv === 'number' || typeof vv === 'boolean') out[kk] = vv;
+        else if (typeof vv === 'string' && vv.length <= 80) out[kk] = SD.text(vv);
+        else if (typeof vv === 'object' && !Array.isArray(vv)) for (const [k3, v3] of Object.entries(vv)) if (typeof v3 === 'number' || (typeof v3 === 'string' && v3.length <= 60)) out[kk + '_' + k3] = v3;
+      }
+      if (Object.keys(out).length) w = out;
+    });
+    return w;
+  };
+  // From the page's text when its data had none: the Weather panel, and labelled stats.
+  SD.weatherText = (txt) => {
+    const i = txt.search(/\bWeather\b/);
+    if (i < 0) return null;
+    const sn = txt.slice(i, i + 240);
+    return /°|℃|℉|humidity|wind|feels like/i.test(sn) ? sn : null;
+  };
+  SD.pageStats = (txt) => {
+    const out = {}, rx = /(Elapsed Time|Calories|Avg Cadence|Average Cadence|Avg Power|Weighted Avg Power|Max Power|Total Work|Relative Effort|Max Speed|Avg Speed|Perceived Exertion|Steps)\s*:?\s*([0-9][0-9.,:]*\s*(?:kcal|spm|rpm|W|kJ|km\/h|mph|bpm)?)/g;
+    let m;
+    while ((m = rx.exec(txt)) && Object.keys(out).length < 14) if (!out[m[1]]) out[m[1]] = m[2].trim();
+    return out;
+  };
+
   SD.item = (a, f) => {
     const stats = Array.isArray(a.stats) ? SD.stats(a.stats) : SD.rawStats(a);
     const st = Date.parse(f.start || '');
@@ -2271,6 +2496,7 @@ function stravaLib() {
       stats, hr: SD.hr(a, stats), ach: SD.achievements(a), photos: SD.photos(f.photoSrc || a), map: SD.mapUrl(a), poly: SD.polylineOf(a),
       kudos: f.kudos || 0, comments: f.comments || 0, hasKudoed: !!f.hasKudoed, canKudo: true,
       cmts: f.cmts || [], kudoers: f.kudoers || [],
+      tele: SD.tele(a), weather: SD.weather(a),
     };
   };
 
@@ -2372,9 +2598,14 @@ function stravaLib() {
         if (desc) res.description = SD.text(desc);
         const mu = SD.mapUrl(j);
         if (mu) res.map = mu;
+        const act = SD.findAct(j, id) || j;
+        res.tele = SD.tele(act);
+        res.weather = SD.weather(act) || SD.weather(j);
       } catch (e) {}
     }
     const txt = SD.text(html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' '));
+    if (!res.weather) res.weatherText = SD.weatherText(txt);
+    if (!res.tele || !Object.keys(res.tele).length) res.pageStats = SD.pageStats(txt);
     if (res.hr == null) {
       const m = txt.match(/Heart\s*Rate\s*(\d{2,3})\s*bpm(?:\s*(\d{2,3})\s*bpm)?/i);
       if (m) { res.hr = +m[1]; if (m[2]) res.maxHr = +m[2]; }
@@ -3000,11 +3231,18 @@ function actHtml(a, p) {
     </div>
     <div class="cbox" hidden>
       <div class="crow"><textarea rows="3" placeholder="${aiKey() ? 'Write a comment, or tap Suggest' : 'Write a comment'}"></textarea><button data-comment="${id}">Post</button></div>
-      <div class="modes" role="group" aria-label="Comment mood">${DIGEST.AI.MODES.map(m =>
-        `<button class="mode${m.key === settings.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}">${esc(m.label)}</button>`).join('')}</div>
-      <div class="ai"><button class="small" data-suggest="${id}">✨ Suggest 3</button>${DIGEST.AI.LANGUAGES.map(([code, name]) =>
-        `<button class="lng${name === settings.aiLang ? ' on' : ''}" data-lang="${esc(name)}">${esc(code)}</button>`).join('')}</div>
-      <div class="sugs"></div>
+      <div class="aiz">
+        <button class="sgo" data-suggest="${id}">✨ Suggest comments</button>
+        <div class="sugs"></div>
+        <div class="tune">
+          <div class="modes" role="group" aria-label="Tone">${DIGEST.AI.MODES.map(m => { const [ic, ...w] = m.label.split(' ');
+            return `<button class="mode${m.key === settings.aiMode ? ' on' : ''}" data-mode="${esc(m.key)}" aria-label="${esc(w.join(' '))}" aria-pressed="${m.key === settings.aiMode}"><i>${esc(ic)}</i><span>${esc(w.join(' '))}</span></button>`; }).join('')}</div>
+          <div class="lngs" role="group" aria-label="Language">${DIGEST.AI.LANGUAGES.map(([code, name]) =>
+            `<button class="lng${name === settings.aiLang ? ' on' : ''}" data-lang="${esc(name)}" aria-label="${name === 'Auto' ? 'Same language as the title' : esc(name)}">${esc(code)}</button>`).join('')}</div>
+          <button class="again" data-suggest="${id}" aria-label="New ideas">↻</button>
+        </div>
+        <p class="thint">Set the tone and language here, or just tap Suggest.</p>
+      </div>
     </div>
   </article>`;
 }
@@ -3249,7 +3487,19 @@ body.loading .loadst{display:block}
 .icloud.c2{width:70px;top:21%;opacity:.7;animation-duration:30s;animation-delay:-12s}
 .icloud.c3{width:84px;top:33%;opacity:.5;animation-duration:26s;animation-delay:-6s}
 .isun{z-index:1}
-.iquote,.ibar,.isub,.icancel{position:relative;z-index:2}
+.iquote,.ibar,.isub,.icancel,.itally{position:relative;z-index:2}
+.irise{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+.ibub{position:absolute;bottom:-40px;font-size:24px;opacity:0;animation:irise linear forwards;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+.ibub.big{font-size:34px}
+@keyframes irise{0%{transform:translate(0,0) scale(.6);opacity:0}12%{opacity:1;transform:translate(0,-12vh) scale(1)}80%{opacity:.95}100%{transform:translate(var(--dx),-104vh) scale(1.05);opacity:0}}
+.itally{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;min-height:30px;max-width:290px;font-size:22px;line-height:1.3}
+.itally span{animation:ipop .35s cubic-bezier(.3,1.6,.5,1)}
+@keyframes ipop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+.iphoto{position:absolute;inset:0;z-index:2;border-radius:50%;overflow:hidden;opacity:0;transition:opacity .35s;border:4px solid #ffd166;box-sizing:border-box}
+.iphoto img{width:100%;height:100%;object-fit:cover;display:block}
+.iphoto::after{content:'';position:absolute;left:0;right:0;height:34%;top:-34%;background:linear-gradient(180deg,rgba(255,232,150,0),rgba(255,232,150,.75) 70%,rgba(255,255,255,.95));animation:iscan 1.3s ease-in-out infinite}
+.isun.scan .iphoto{opacity:1}
+@keyframes iscan{to{top:100%}}
 @keyframes idrift{from{transform:translateX(-160px)}to{transform:translateX(520px)}}
 .iquote{font-size:calc(19px * var(--ts));font-weight:800;min-height:1.4em;text-shadow:0 1px 6px rgba(0,0,0,.35);transition:opacity .25s,transform .25s}
 .iquote.out{opacity:0;transform:translateY(6px)}
@@ -3257,15 +3507,13 @@ body.loading .loadst{display:block}
 .ibar i{display:block;height:100%;width:0;background:#ffd166;border-radius:999px;transition:width .35s ease-out}
 .isub{font-size:13px;opacity:.92;text-shadow:0 1px 4px rgba(0,0,0,.35)}
 .icancel{margin-top:4px;background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.35);padding:8px 18px;border-radius:999px;font-weight:600}
-@media (prefers-reduced-motion: reduce){.isun::before,.isun::after,.icloud{animation:none}.iquote{transition:none}}
+@media (prefers-reduced-motion: reduce){.isun::before,.isun::after,.icloud,.iphoto::after,.itally span{animation:none}.iquote{transition:none}}
 .csp{position:relative;width:100%;max-height:94vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
 .csh{display:flex;align-items:center;gap:12px;padding:8px 16px 12px;border-bottom:1px solid var(--line)}
 .csb{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px))}
 .incs{margin-top:0}
 .incs textarea{font-size:16px;min-height:100px;line-height:1.4}
 .cslab{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:18px 0 0}
-.incs .modes{margin:8px -16px 0;padding:0 16px}
-body.nokey .incs .cslab{display:none}
 #cfgsheet textarea.rules{display:block;width:100%;box-sizing:border-box;min-height:200px;margin-top:8px;font-size:15px;line-height:1.45}
 .stylebtns{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .styleprof{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)}
@@ -3460,15 +3708,29 @@ section.person .route{display:none}
 .counts{flex:1;color:var(--mut);font-size:calc(13px * var(--ts))}.counts i{font-style:normal;font-variant-numeric:tabular-nums}
 .cbox{margin-top:8px}.cbox[hidden]{display:none}
 .crow{display:flex;gap:6px;align-items:flex-end}
-.ai{display:flex;gap:6px;align-items:center;margin-top:8px}
-.modes{display:flex;gap:6px;margin:10px -14px 0;padding:0 14px;overflow-x:auto;scrollbar-width:none}
+.aiz{margin-top:12px}
+.sgo{display:block;width:100%;padding:13px 16px;font-size:calc(16px * var(--ts));font-weight:700;color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 11%,var(--bg));border:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
+.sgo:disabled{opacity:.7}
+.aiz.has .sgo{display:none}
+.tune{display:flex;align-items:center;gap:6px;margin-top:10px}
+.modes,.lngs{display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--soft)}
+.modes{flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
 .modes::-webkit-scrollbar{display:none}
-.mode{flex:none;background:var(--soft);color:var(--fg);padding:7px 12px;font-size:calc(13px * var(--ts));font-weight:600;border:1px solid transparent}
-.mode.on{background:var(--fg);color:var(--bg)}
-.lng{background:transparent;color:var(--mut);padding:6px 10px;border:1px solid var(--line)}
-.lng.on{background:var(--soft);color:var(--fg);border-color:var(--soft)}
-.sugs{display:flex;flex-direction:column;gap:6px;margin-top:8px}
-.sug{background:var(--soft);color:var(--fg);font-weight:500;text-align:left;border-radius:14px;padding:9px 12px;line-height:1.35}
+.mode,.lng{flex:none;background:transparent;color:var(--mut);border:0;padding:6px 9px;font-size:calc(13px * var(--ts));font-weight:700;line-height:1.2}
+.mode i{font-style:normal}
+.mode span{display:none;margin-left:5px}
+.mode.on,.lng.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.mode.on span{display:inline}
+.lng{font-size:calc(12px * var(--ts))}
+.again{display:none;flex:none;width:34px;height:34px;padding:0;font-size:17px;background:var(--soft);color:var(--fg)}
+.aiz.has .again{display:inline-grid;place-items:center}
+.again:disabled{opacity:.5}
+.thint{margin:7px 4px 0;font-size:calc(12px * var(--ts));color:var(--mut);line-height:1.35}
+.sugs{display:flex;flex-direction:column;gap:6px}
+.sugs:not(:empty){margin-bottom:2px}
+.sug{background:var(--soft);color:var(--fg);font-weight:500;text-align:left;border-radius:14px;padding:10px 12px;line-height:1.35;border-left:3px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.sug.picked{background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
 .keyrow{display:flex;gap:6px}.keyrow input{flex:1;min-width:0;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px}
 .keyhelp{font-size:calc(12px * var(--ts));color:var(--mut);margin:0}
 textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px;resize:none}
@@ -3640,7 +3902,7 @@ body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 #aisheet .utab th:not(:first-child),#aisheet .utab td:not(:first-child){text-align:right;white-space:nowrap}
 .badge-ai{display:inline-block;font-size:12px;font-weight:700;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border-radius:6px;padding:2px 8px}
 .badge-ex{display:inline-block;font-size:12px;font-weight:600;color:var(--mut);border:1px dashed var(--mut);border-radius:6px;padding:1px 8px}
-body.nokey .ai,body.nokey .modes{display:none!important}
+body.nokey .aiz{display:none!important}
 .sugs .badge-ai{align-self:flex-start}
 /* Safe start-up (app-blueprints · recipes/safe-startup): a stalled start says so on the boot page; Settings › Updates › Start-up log */
 .booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
@@ -3734,9 +3996,17 @@ function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift();
 var aiLang=document.querySelector('.lng.on')?document.querySelector('.lng.on').dataset.lang:'';
 var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'mystyle';
 function setMode(mode, from){
+  var same=aiMode===mode;
   aiMode=mode;
-  document.querySelectorAll('.mode').forEach(function(b){ b.classList.toggle('on', b.dataset.mode===mode); });
+  document.querySelectorAll('.mode').forEach(function(b){ var on=b.dataset.mode===mode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  if(from&&from.scrollIntoView) try{ from.scrollIntoView({block:'nearest',inline:'nearest',behavior:'smooth'}); }catch(e){}
   send('setmode',{mode:mode});
+  if(!same) reshape(from);
+}
+// Ideas already on screen: a new tone or language writes a fresh set straight away.
+function reshape(from){
+  var z=from&&from.closest&&from.closest('.aiz'); if(!z||!z.classList.contains('has')) return;
+  var again=z.querySelector('.again'); if(again&&!again.disabled) suggest(again);
 }
 // ── the comment composer: a pop-up with the draft and AI ideas ──
 var DRAFTS={};
@@ -3760,8 +4030,6 @@ function openComposer(art){
   ov.querySelector('.csh').innerHTML='<div class="mtt"><b>Comment for '+escH(art.dataset.who||'your friend')+'</b><small>'+escH(ttl)+'</small></div><button class="mbtn" data-act="cs-close" aria-label="Close">✕</button>';
   var box=src.cloneNode(true); box.hidden=false; box.classList.add('incs');
   var ta=box.querySelector('textarea'); ta.rows=4; ta.value=DRAFTS[id]||''; ta.setAttribute('aria-label','Your comment');
-  var lab=document.createElement('div'); lab.className='cslab'; lab.textContent='Write it for me';
-  var crow=box.querySelector('.crow'); crow.parentNode.insertBefore(lab,crow.nextSibling);
   var body=ov.querySelector('.csb'); body.innerHTML=''; body.appendChild(box); body.scrollTop=0;
   ov.hidden=false; document.body.style.overflow='hidden';
   setTimeout(function(){ try{ ta.focus(); }catch(e){} },250);
@@ -3782,7 +4050,7 @@ function aiReply(box,ok,msg,label){
   if(!ok){ toast(label+' failed: '+(msg||'unknown error')); return false; }
   var res={}; try{ res=JSON.parse(msg); }catch(e){}
   var list=res.comments||[];
-  if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI')+(res.photosRead?' · looked at '+res.photosRead+' photo'+(res.photosRead===1?'':'s'):''); sugs.appendChild(lab); }
+  if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI')+((res.seen&&res.seen.length)?'  '+res.seen.join(' '):''); if(res.photosRead) lab.title='Looked at '+res.photosRead+' photo'+(res.photosRead===1?'':'s'); sugs.appendChild(lab); }
   list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
   return true;
 }
@@ -3796,44 +4064,80 @@ function ideaOverlay(box){
   var face=av?'<img src="'+escH(av.getAttribute('src'))+'" alt="">':'<span class="isunini">'+escH(ini?ini.textContent:initialsOf(who))+'</span>';
   var el=document.createElement('div'); el.id='ideaov'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite');
   el.innerHTML='<div class="icloud c1" aria-hidden="true"></div><div class="icloud c2" aria-hidden="true"></div><div class="icloud c3" aria-hidden="true"></div>'+
-    '<div class="isun" aria-hidden="true">'+face+'</div>'+
+    '<div class="irise" aria-hidden="true"></div>'+
+    '<div class="isun" aria-hidden="true">'+face+'<div class="iphoto"><img alt=""></div></div>'+
     '<div class="iquote"></div>'+
     '<div class="ibar" role="progressbar" aria-label="Comment ideas progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></div>'+
+    '<div class="itally" aria-label="Spotted so far"></div>'+
     '<div class="isub">Comment ideas for '+escH(who)+'</div>'+
     '<button class="icancel" data-act="idea-cancel">Cancel</button>';
   var old=panel.querySelector('#ideaov'); if(old) old.remove();
   panel.appendChild(el);
   var q=el.querySelector('.iquote'), fill=el.querySelector('.ibar i'), bar=el.querySelector('.ibar'), sub=el.querySelector('.isub');
-  var k=Math.floor(Math.random()*IDEA_QUOTES.length), pct=0, creep=null, early=null;
+  var rise=el.querySelector('.irise'), tally=el.querySelector('.itally'), sun=el.querySelector('.isun'), ph=el.querySelector('.iphoto img');
+  var still=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var k=Math.floor(Math.random()*IDEA_QUOTES.length), pct=0, creep=null, early=null, queue=[], qt=null, found=[], loop=null, li=0;
   q.textContent=IDEA_QUOTES[0];
   var rot=setInterval(function(){ q.classList.add('out'); setTimeout(function(){ k=(k+1)%IDEA_QUOTES.length; if(k===0) k=1; q.textContent=IDEA_QUOTES[k]; q.classList.remove('out'); },250); },1700);
   function set(v){ pct=Math.max(pct,Math.min(100,v)); fill.style.width=pct+'%'; bar.setAttribute('aria-valuenow',Math.round(pct)); }
-  set(6);
+  // one emoji floats from the bottom to the top of the sky
+  function bubble(e, big){
+    if(still) return;
+    var b=document.createElement('span'); b.className='ibub'+(big?' big':''); b.textContent=e;
+    b.style.left=(8+Math.random()*80)+'%'; b.style.setProperty('--dx',(Math.random()*60-30)+'px'); b.style.animationDuration=(2.6+Math.random()*1.2)+'s';
+    rise.appendChild(b); setTimeout(function(){ b.remove(); },4200);
+  }
+  function addFound(it){
+    if(!it||!it.e) return;
+    var dup=found.some(function(f){ return f.e===it.e; });
+    if(!dup){ found.push(it); var c=document.createElement('span'); c.textContent=it.e; c.title=it.t||''; c.setAttribute('aria-label',(it.t||'')+' found'); tally.appendChild(c); if(tally.children.length>12) tally.removeChild(tally.firstChild); }
+    bubble(it.e,true);
+  }
+  // found items arrive in a burst; let them rise one after another
+  function enqueue(items){ (items||[]).forEach(function(it){ queue.push(it); }); if(!qt) drain(); }
+  function drain(){ var it=queue.shift(); if(!it){ qt=null; return; } addFound(it); qt=setTimeout(drain,still?60:380); }
+  set(4);
   var ctl={ cancelled:false,
     progress:function(p){
       if(early){ clearInterval(early); early=null; }
-      if(p.step==='photos'&&p.total){ sub.textContent='Looking at photo '+Math.min(p.done+1,p.total)+' of '+p.total+' from '+who; set(6+40*(p.done/p.total)); }
-      if(p.step==='writing'){ sub.textContent='Writing comment ideas for '+who; set(48); if(!creep) creep=setInterval(function(){ set(pct+(93-pct)*0.06); },350); }
+      if(p.step==='reading'){ sub.textContent='Reading everything on '+who+'’s activity'; set(8); }
+      if(p.step==='signals'){ enqueue(p.items); set(14); }
+      if(p.step==='photos'&&p.total){
+        sub.textContent='Looking at photo '+Math.min(p.done+1,p.total)+' of '+p.total;
+        if(p.url){ ph.src=p.url; sun.classList.add('scan'); }
+        set(14+26*(p.done/p.total));
+      }
+      if(p.step==='scanning'){ sub.textContent='Spotting what’s in the photos'; set(42); if(!creep) creep=setInterval(function(){ set(pct+(62-pct)*0.05); },350); }
+      if(p.step==='seen'){ if(creep){ clearInterval(creep); creep=null; } set(64); enqueue(p.items); }
+      if(p.step==='writing'){
+        sun.classList.remove('scan'); sub.textContent='Writing comment ideas for '+who; set(Math.max(pct,66));
+        if(creep) clearInterval(creep); creep=setInterval(function(){ set(pct+(94-pct)*0.05); },350);
+        if(!loop&&!still) loop=setInterval(function(){ if(found.length) bubble(found[li++%found.length].e,false); },900);
+      }
     },
-    finish:function(){ clearInterval(rot); if(creep) clearInterval(creep); if(early) clearInterval(early); set(100); el.classList.add('done'); setTimeout(function(){ el.remove(); },300); },
+    finish:function(){ clearInterval(rot); [creep,early,loop].forEach(function(x){ if(x) clearInterval(x); }); if(qt) clearTimeout(qt); set(100); el.classList.add('done'); setTimeout(function(){ el.remove(); },300); },
     cancel:function(){ ctl.cancelled=true; ctl.finish(); }
   };
-  early=setInterval(function(){ if(pct<40) set(pct+0.6); },400);   // creep a little before the first news arrives
+  early=setInterval(function(){ if(pct<12) set(pct+0.5); },400);   // creep a little before the first news arrives
   window.__ideaProgress=function(p){ ctl.progress(p); };
   el.querySelector('.icancel').addEventListener('click',function(e){ e.stopPropagation(); ctl.cancel(); });
   return ctl;
 }
 function suggest(btn){
   if(btn.disabled) return;
-  var box=btn.closest('.cbox'), sugs=box.querySelector('.sugs'), ta=box.querySelector('textarea');
-  btn.disabled=true; btn.dataset.busy='1'; var card=document.querySelector('.act[data-id="'+CSS.escape(btn.dataset.suggest)+'"]'); btn.textContent=(card&&card.querySelector('.photos img'))?'📷 Looking at the photos…':'✨ Thinking…';
+  var box=btn.closest('.cbox'), z=btn.closest('.aiz'), ta=box.querySelector('textarea');
+  var go=z.querySelector('.sgo'), again=z.querySelector('.again'), hint=z.querySelector('.thint');
+  [go,again].forEach(function(b){ if(b){ b.disabled=true; b.dataset.busy='1'; } });
+  if(go) go.textContent='✨ Writing…';
   var io=ideaOverlay(box);
   send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode},function(ok,msg){
     window.__ideaProgress=null;
-    btn.disabled=false; delete btn.dataset.busy;
-    if(io){ if(io.cancelled){ btn.textContent='✨ Suggest'; return; } io.finish(); }
-    btn.textContent='✨ More';
-    if(!aiReply(box,ok,msg,'Suggestions')&&!ok&&msg==='NEED_KEY') btn.textContent='✨ Suggest';
+    [go,again].forEach(function(b){ if(b){ b.disabled=false; delete b.dataset.busy; } });
+    if(go) go.textContent='✨ Suggest comments';
+    if(io){ if(io.cancelled) return; io.finish(); }
+    var shown=aiReply(box,ok,msg,'Ideas');
+    z.classList.toggle('has', !!shown);
+    if(hint) hint.textContent=shown?'Tap an idea to use it. Change the tone or language to reshape, or ↻ for new ones.':'Set the tone and language here, or just tap Suggest.';
   });
 }
 window.__done=function(req,ok,msg){ var cb=pending[req]; delete pending[req]; if(cb) cb(ok,msg); };
@@ -4198,7 +4502,7 @@ function renderCfg(){
     '<h3 class="sec">AI comments</h3>'+
       '<div class="srow"><div class="grow"><b>Keys, models and token usage</b><small id="s-aistatus">'+(SET.hasKey?escH(SET.aiStatus):'Add a Claude or OpenAI key for ✨ comment ideas')+'</small></div><button class="sm" data-act="ai-open">AI settings</button></div>'+
       pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
-      pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]]; }))+
+      pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as the activity title':l[1]]; }))+
     writingHTML()+
     (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
       swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
@@ -4778,15 +5082,19 @@ document.addEventListener('click',function(e){
   if(t.dataset.kudo) return kudo(t);
   if(t.dataset.open) return send('open',{url:t.dataset.open});
   if(t.dataset.lang){
-    var row=t.closest('.ai'); row.querySelectorAll('.lng').forEach(function(b){ b.classList.toggle('on', b===t); });
+    var langSame=aiLang===t.dataset.lang;
     document.querySelectorAll('.lng').forEach(function(b){ b.classList.toggle('on', b.dataset.lang===t.dataset.lang); });
-    aiLang=t.dataset.lang; send('setlang',{lang:aiLang}); return;
+    aiLang=t.dataset.lang; send('setlang',{lang:aiLang});
+    if(!langSame) reshape(t);
+    return;
   }
   if(t.dataset.suggest) return suggest(t);
   if(t.dataset.act==='cs-close') return closeComposer();
   if(t.dataset.mode) return setMode(t.dataset.mode, t);
   if(t.dataset.sug!==undefined){
-    var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent; ta.focus(); return;
+    var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent;
+    t.parentNode.querySelectorAll('.sug').forEach(function(b){ b.classList.toggle('picked', b===t); });
+    ta.focus(); return;
   }
   if(t.dataset.comment){
     var box=t.closest('.cbox'),ta=box.querySelector('textarea'),text=ta.value.trim(),id=t.dataset.comment;
