@@ -2,6 +2,24 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.27.0 (2026-11-01): Learning you can watch
+
+- ✍️ **Learning in its own window**: Learn my style opens a window with a live count of your comments found so far.
+- 🫧 **Your words float up**: Words and emojis from each comment it finds rise through the sky as it goes.
+- 📱 **Hide it, keep going**: Hide the window and keep using the app; a small pill shows progress. Just keep the app open.
+
+**Changes**
+
+- Learn my style runs in the background: closing Settings, changing day or refreshing no longer loses its progress
+- The window says plainly that closing the app or letting the phone lock stops learning
+- Stop, use these learns from what was found so far; a tap outside the window hides it
+- A ✍️ pill in the corner shows found of wanted and reopens the window; Settings shows Show progress while it runs
+- When it finishes with the window hidden, a short message says how many comments it learned from
+
+**Fixes**
+
+- Closing Settings while learning lost the result message and the Learn button stayed out of step
+
 ## 1.26.2 (2026-11-01): Room for the sun
 
 - ☀️ **Whole sun, every time**: While ideas are written, the sun and its rays always fit on screen, never cut at the top.

@@ -3,6 +3,38 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.27.0",
+      "date": "2026-11-01",
+      "title": "Learning you can watch",
+      "highlights": [
+        {
+          "icon": "✍️",
+          "title": "Learning in its own window",
+          "text": "Learn my style opens a window with a live count of your comments found so far."
+        },
+        {
+          "icon": "🫧",
+          "title": "Your words float up",
+          "text": "Words and emojis from each comment it finds rise through the sky as it goes."
+        },
+        {
+          "icon": "📱",
+          "title": "Hide it, keep going",
+          "text": "Hide the window and keep using the app; a small pill shows progress. Just keep the app open."
+        }
+      ],
+      "changes": [
+        "Learn my style runs in the background: closing Settings, changing day or refreshing no longer loses its progress",
+        "The window says plainly that closing the app or letting the phone lock stops learning",
+        "Stop, use these learns from what was found so far; a tap outside the window hides it",
+        "A ✍️ pill in the corner shows found of wanted and reopens the window; Settings shows Show progress while it runs",
+        "When it finishes with the window hidden, a short message says how many comments it learned from"
+      ],
+      "fixes": [
+        "Closing Settings while learning lost the result message and the Learn button stayed out of step"
+      ]
+    },
+    {
       "version": "1.26.2",
       "date": "2026-11-01",
       "title": "Room for the sun",
