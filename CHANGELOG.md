@@ -2,6 +2,28 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.26.0 (2026-11-01): Comments that notice things
+
+- 👆 **One button to start**: Tap ✨ Suggest comments; tone, language and ↻ sit in one tidy row to reshape the ideas.
+- 🐕 **See what it spots**: While ideas are written, what the photos and data show rises up the screen as emojis.
+- 🌦️ **Reads the whole activity**: Weather, telemetry, the description and comments already there all shape the ideas.
+
+**Changes**
+
+- New default instructions for AI comments: short, casual, specific, written as if typed on a phone, in the title's language; instructions you changed are kept
+- Language Auto (now the default) writes in the language of the activity title; EN and LT still force a language
+- The composer opens on one ✨ Suggest comments button; tones show as compact emoji pills, the chosen one named, beside Auto, EN, LT and ↻
+- With ideas on screen, tapping a tone or language writes a fresh set straight away; the picked idea is highlighted
+- Photos are looked at once to name what is in them; those findings rise as emojis during writing and steer the comments
+- Ideas read the activity page first: elapsed and moving time, climbing, speed, cadence, power, calories, relative effort, race, device and the weather Strava stored
+- The comments already on the activity go with the request (yours marked), so ideas never repeat them
+- Your learned style and up to six of your latest posted comments go into every request, whichever tone is picked
+- Instructions for every AI comment can now be up to 4,000 characters
+
+**Fixes**
+
+- Comment ideas answered as a plain JSON list came back empty
+
 ## 1.25.0 (2026-10-31): Clearer Settings
 
 - 🗂️ **Sections you can see**: Each Settings section now sits in its own card, so you can tell where it starts and ends.

@@ -3,6 +3,42 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.26.0",
+      "date": "2026-11-01",
+      "title": "Comments that notice things",
+      "highlights": [
+        {
+          "icon": "👆",
+          "title": "One button to start",
+          "text": "Tap ✨ Suggest comments; tone, language and ↻ sit in one tidy row to reshape the ideas."
+        },
+        {
+          "icon": "🐕",
+          "title": "See what it spots",
+          "text": "While ideas are written, what the photos and data show rises up the screen as emojis."
+        },
+        {
+          "icon": "🌦️",
+          "title": "Reads the whole activity",
+          "text": "Weather, telemetry, the description and comments already there all shape the ideas."
+        }
+      ],
+      "changes": [
+        "New default instructions for AI comments: short, casual, specific, written as if typed on a phone, in the title's language; instructions you changed are kept",
+        "Language Auto (now the default) writes in the language of the activity title; EN and LT still force a language",
+        "The composer opens on one ✨ Suggest comments button; tones show as compact emoji pills, the chosen one named, beside Auto, EN, LT and ↻",
+        "With ideas on screen, tapping a tone or language writes a fresh set straight away; the picked idea is highlighted",
+        "Photos are looked at once to name what is in them; those findings rise as emojis during writing and steer the comments",
+        "Ideas read the activity page first: elapsed and moving time, climbing, speed, cadence, power, calories, relative effort, race, device and the weather Strava stored",
+        "The comments already on the activity go with the request (yours marked), so ideas never repeat them",
+        "Your learned style and up to six of your latest posted comments go into every request, whichever tone is picked",
+        "Instructions for every AI comment can now be up to 4,000 characters"
+      ],
+      "fixes": [
+        "Comment ideas answered as a plain JSON list came back empty"
+      ]
+    },
+    {
       "version": "1.25.0",
       "date": "2026-10-31",
       "title": "Clearer Settings",
