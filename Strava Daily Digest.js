@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.32.1';
+const VERSION = '1.33.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -355,6 +355,7 @@ async function main() {
       return;
     }
     if (head === 'login') { await openStrava(ui, '/login'); return; }
+    if (head === 'logout') { await logOut(); return; }
     if (head === 'update-later') {
       Keychain.set(KC_UPDATE_SNOOZE, String(Date.now() + UPDATE_SNOOZE_MS)); pendingUpdate = null; return;
     }
@@ -559,6 +560,30 @@ async function main() {
       }
     } catch (e) { msg = String(e.message || e); }
     await js(`window.__done(${JSON.stringify(p.req)}, ${ok}, ${JSON.stringify(msg)})`);
+  }
+
+  // Settings › Account › Log out of Strava: sign out on strava.com, forget the account, back to the login page.
+  // Kept: settings, AI keys, your instructions and learned style.
+  async function logOut() {
+    viewToken++; styleStop = true; viewing = false;
+    await ui.loadHTML(bootScreen('Logging out of Strava'));
+    let r = { loggedOut: false, tries: [] };
+    try { await sv.loadURL(`${STRAVA}/robots.txt`); r = (await sx('__SD.logout()', cfg('pageWait') * 3000)) || r; }
+    catch (e) { r.tries.push(String(e.message || e)); }
+    startLog(`log out: ${r.loggedOut ? 'signed out' : 'still signed in'} (${(r.tries || []).join(', ')})`);
+    // forget the account whatever Strava answered: its id, its cached activities, and the widget's names
+    if (Keychain.contains(KC_ATHLETE)) Keychain.remove(KC_ATHLETE);
+    if (settings.cfg && settings.cfg.athleteId) { delete settings.cfg.athleteId; saveSettings(); }
+    try { const p = wPath('widget.json'); if (wfm.fileExists(p)) wfm.remove(p); } catch (e) {}
+    feed = null; details.clear(); storyDay = null; styleRun = null;
+    track('logged_out', { signed_out: !!r.loggedOut });
+    if (!r.loggedOut) {
+      // Strava kept the login: let the person end it on Strava's own page; the app notices and moves on
+      await ui.loadHTML(page(`<div class="center"><h1>Almost logged out</h1><p>Strava kept this phone signed in. Tap <b>Open Strava</b>, then your picture at the top right and <b>Log Out</b>.<br>The digest notices by itself.</p><br><button data-act="login">Open Strava</button></div>`));
+      while (!closed && (await authInfo(sx)).loggedIn) await sleep(2500);
+      if (closed) return;
+    }
+    await boot();   // logged out: the login page
   }
 
   // The app's own start-up work: the Strava session and the feed (the update check now starts from bootApp).
@@ -2363,6 +2388,26 @@ function stravaLib() {
     return { url: r.url, status: r.status, html: await r.text() };
   };
 
+  // Log out: Strava's own sign-out (DELETE /session with the page's token), then plain /logout, checked after each try.
+  SD.logout = async () => {
+    const tries = [];
+    let token = ''; try { token = await SD.csrf(); } catch (e) {}
+    SD._csrf = null;
+    const attempts = [
+      () => fetch('/session', { method: 'POST', credentials: 'include', redirect: 'follow',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': token, 'X-Requested-With': 'XMLHttpRequest' },
+        body: '_method=delete&authenticity_token=' + encodeURIComponent(token) }),
+      () => fetch('/session', { method: 'DELETE', credentials: 'include', headers: { 'X-CSRF-Token': token } }),
+      () => fetch('/logout', { credentials: 'include', redirect: 'follow' }),
+    ];
+    for (const a of attempts) {
+      try { const r = await a(); tries.push(r.status); } catch (e) { tries.push(String(e.message || e)); }
+      if (!(await SD.auth()).loggedIn) return { loggedOut: true, tries };
+    }
+    // cookies a page may clear itself go too; Strava's own login cookie can only be ended by Strava
+    document.cookie.split(';').forEach(c => { const n = c.split('=')[0].trim(); if (n) ['', '; domain=.strava.com', '; domain=www.strava.com'].forEach(d => { document.cookie = n + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/' + d; }); });
+    return { loggedOut: !(await SD.auth()).loggedIn, tries };
+  };
   SD.auth = async () => {
     const info = { page: location.pathname, title: document.title.slice(0, 60), loggedIn: false, probes: [] };
     for (const p of SD.PROBES) {
@@ -4923,7 +4968,7 @@ function renderCfg(){
       '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
       '<div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Daily Digest opened</small></div><button class="sm" data-act="startlog">Show</button></div>'+
       '<pre id="startlog" class="startlog" hidden></pre>'+
-    SET.cfgSchema.filter(function(sec){ return sec.title!=='Comments'; }).map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join(''); }).join('')+
+    SET.cfgSchema.filter(function(sec){ return sec.title!=='Comments'; }).map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join('')+(sec.title==='Account'?logoutRow():''); }).join('')+
     '<div class="cfg-foot"><span class="note">'+(changed?changed+' setting'+(changed===1?'':'s')+' changed':'All settings are at their original values')+'</span>'+
       (changed?'<button class="sm danger '+(cfgArmed?'armed':'')+'" data-act="cfgall">'+(cfgArmed?'Confirm reset':'Reset all')+'</button>':'')+'</div>'+
     builtWithHTML()+'</div>';
@@ -4954,6 +4999,11 @@ function cfgAction(t,act){
     return;
   }
   if(act==='rules-reset'){ send('set',{k:'commentRules',v:SET.defaultRules},setState); return; }
+  if(act==='logout'){   // two taps, like 👍 All: the first arms it
+    if(!t.classList.contains('armed')){ t.classList.add('armed'); t.textContent='Log out?'; setTimeout(function(){ if(t.isConnected&&!t.disabled){ t.classList.remove('armed'); t.textContent='Log out'; } },4000); return; }
+    t.disabled=true; t.textContent='Logging out…'; var lm=document.getElementById('logoutmsg'); if(lm) lm.textContent='Signing out on strava.com…';
+    send('logout',{}); return;
+  }
   if(act==='story-rules-reset'){ send('set',{k:'storyRules',v:SET.defaultStoryRules},setState); return; }
   if(act==='story-tweak'){
     var tw=(SET.storyTweaks||[]).filter(function(x){ return x.key===t.dataset.tw; })[0], ta=document.querySelector('#cfgsheet textarea[data-k="storyRules"]'); if(!tw||!ta) return;
@@ -4974,6 +5024,9 @@ function styleStop(){
   if(!STYLE||STYLE.stopping) return;
   STYLE.stopping=true; STYLE.text='Stopping: learning from what was found so far…'; spButtons(); spPaint(); if(cfgOpen) renderCfg();
   send('style-stop',{});
+}
+function logoutRow(){
+  return '<div class="srow"><div class="grow"><b>Log out of Strava</b><small id="logoutmsg" class="muted" aria-live="polite">Signs Daily Digest out of strava.com and forgets the account. Your settings, AI keys, instructions and learned style stay.</small></div><button class="sm danger" data-act="logout">Log out</button></div>';
 }
 function rulesCount(n){ return n.toLocaleString()+' of 4,000 characters'+(n>=4000?' (full)':''); }
 document.addEventListener('input',function(e){
@@ -5712,7 +5765,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','logout','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }

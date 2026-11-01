@@ -188,7 +188,7 @@ Tap the sliders icon at the top. Changes apply at once and are saved in `setting
 | AI comments | AI settings (keys, models, token usage), default mood, language |
 | Comment writing | Instructions for every AI comment (with Reset to default), comments read to learn your style, ✨ comment ideas per tap, Learn my style |
 | Updates | Offer new versions, check now |
-| Reading the feed, Digest, Widget, Account | Feed pages read for today, extra pages per earlier day, activities opened at once, time limits, days in the header, widget refresh and when it counts as out of date, your Strava athlete ID; each with Reset |
+| Reading the feed, Digest, Widget, Account | Feed pages read for today, extra pages per earlier day, activities opened at once, time limits, days in the header, widget refresh and when it counts as out of date, your Strava athlete ID; each with Reset. **Log out of Strava** (two taps) signs the app out and forgets the account, keeping your settings, AI keys and learned style |
 | Built with | The shared blueprints this app follows, with links (read-only) |
 
 Two values stay in code, in the `DIGEST` block at the top of `Strava Daily Digest.js`: `DAYS_BACK` (the day shown first; you can also run the script with `?days=1`) and `DEBUG_DUMP` (saves the raw feed for troubleshooting).
@@ -200,7 +200,7 @@ Strava Daily Digest checks this repository for a new version each time it opens.
 ## Privacy and security
 
 - **Everything runs on your phone.** There is no server in between, and nothing is collected unless you agree to share anonymous usage (below). Settings live in iCloud Drive › Scriptable › StravaFeed; the widget summary, AI settings and token usage stay in Scriptable's local storage on this iPhone.
-- **Your Strava login** stays in Scriptable's private browser storage, exactly as if you had logged in to strava.com.
+- **Your Strava login** stays in Scriptable's private browser storage, exactly as if you had logged in to strava.com. **Settings › Account › Log out of Strava** ends it and forgets the account on this phone (its athlete ID and the widget's names); you can then log in with the same or another account.
 - **✨ Suggest** sends that one activity's details (title, stats, telemetry, weather, PRs, description, start time, the comments already on it with commenters' first names) and the athlete's first name, with your instructions, learned style and up to six of your latest posted comments as examples, to the provider marked “In use”, and only when you tap it. **Learn my style** sends only your own comments. Comments you post through the digest are kept (the latest 50) in `sent-comments.json` next to `settings.json` as examples of your style.
 - AI keys stay in the iOS Keychain and are only sent to their own provider.
 - **Weather.** When Strava has no weather for an activity, the app asks [Open-Meteo](https://open-meteo.com) (free, no account) for the hour it started. Only the start point rounded to about 1 km and the date are sent. It is part of **Load extra details**; turn that off and no weather is fetched.
