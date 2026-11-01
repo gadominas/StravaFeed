@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.27.1';
+const VERSION = '1.28.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -367,6 +367,7 @@ async function main() {
       return;
     }
     if (head === 'setlang') { if (setSetting('aiLang', p.lang) !== null) saveSettings(); return; }
+    if (head === 'setstorylang') { if (setSetting('storyLang', p.lang) !== null) saveSettings(); return; }
     if (head === 'setmode') { if (setSetting('aiMode', p.mode) !== null) saveSettings(); return; }
     // Settings (app-blueprints · settings): every change is applied and saved at once; the reply is the fresh state.
     if (head === 'settings-get' || head === 'set' || head === 'cfg') {
@@ -513,10 +514,11 @@ async function main() {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
         if (!people.length) msg = 'Nobody to write about for this day yet.';
         else {
-          const r = await aiStory(people, storyDay.dayStart, p.lang || settings.aiLang,
+          const lang = DIGEST.AI.LANGUAGES.some(l => l[1] === p.lang) ? p.lang : storyLanguage();
+          const r = await aiStory(people, storyDay.dayStart, lang,
             (step, done, total) => js(`window.__storyProgress && window.__storyProgress(${JSON.stringify({ step, done, total })})`));
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify(r); track('story_made', { people: r.count, photos: r.photosRead || 0 }); }
+          else { ok = true; msg = JSON.stringify(Object.assign(r, { lang })); track('story_made', { people: r.count, photos: r.photosRead || 0, language: lang }); }
         }
       } else if (head === 'story-assets') {
         // the page may not draw Strava's pictures into an image, so they travel as data the page can use
@@ -1408,6 +1410,7 @@ const settings = {
   checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
   theme: "auto", density: "comfortable", font: "sans", textSize: 1,
   aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key,   // remembered picks, also set in the composer
+  storyLang: "",   // The day's story: '' follows the comment language; also picked in the story sheet
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
   styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
   shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
@@ -1483,7 +1486,10 @@ const SET_KEYS = {
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
   commentRules: ["rules", ""], shareUsage: ["bool", ""],
+  storyLang: [v => v === "" || DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"],
 };
+// The language The day's story is written in: its own pick, else the comment language.
+const storyLanguage = () => settings.storyLang || settings.aiLang;
 // Returns the effect ('', 'render', 'reload'), or null when the key or value isn't allowed.
 function setSetting(k, v) {
   const s = SET_KEYS[k];
@@ -1520,7 +1526,7 @@ async function loadSettings() {
     const r = norm(settings.commentRules), full = norm(DEFAULT_COMMENT_RULES);
     if (saved && r.length >= 500 && r.length < full.length && full.startsWith(r)) settings.commentRules = DEFAULT_COMMENT_RULES; }
   // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
-  const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key };
+  const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, storyLang: "" };
   for (const k of Object.keys(d)) if (setSetting(k, settings[k]) === null) settings[k] = d[k];
   settings.cfg = settings.cfg && typeof settings.cfg === "object" ? settings.cfg : {};
 }
@@ -3713,6 +3719,10 @@ section.person .route{display:none}
 .stph.n1 img{aspect-ratio:16/10}
 .stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
 .stf{display:flex;gap:10px}
+.stlw .lngs{display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--soft)}
+.stlw .lng{flex:none;background:transparent;color:var(--mut);border:0;padding:6px 9px;font-size:calc(12px * var(--ts));font-weight:700;line-height:1.2}
+.stlw .lng.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.14)}
+.stlw .lng:disabled{opacity:.5}
 .stf[hidden]{display:none}
 .stf button{flex:1;padding-left:8px;padding-right:8px;white-space:nowrap}
 @media (prefers-reduced-motion: reduce){.stquill{animation:none}}
@@ -4078,7 +4088,7 @@ function send(action,params,cb){
   q.push('${SCHEME}'+action+'?'+qs); pump();
 }
 function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift(); setTimeout(function(){busy=false;pump();},300); }
-var aiLang=document.querySelector('.lng.on')?document.querySelector('.lng.on').dataset.lang:'';
+var aiLang=document.querySelector('.lng.on[data-lang]')?document.querySelector('.lng.on[data-lang]').dataset.lang:'';
 var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'mystyle';
 function setMode(mode, from){
   var same=aiMode===mode;
@@ -4691,6 +4701,7 @@ function renderCfg(){
       '<div class="srow"><div class="grow"><b>Keys, models and token usage</b><small id="s-aistatus">'+(SET.hasKey?escH(SET.aiStatus):'Add a Claude or OpenAI key for ✨ comment ideas')+'</small></div><button class="sm" data-act="ai-open">AI settings</button></div>'+
       pickRow('aiMode','Default mood',SET.modes.map(function(m){ return [m.key,m.label]; }))+
       pickRow('aiLang','Language',SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as the activity title':l[1]]; }))+
+      pickRow('storyLang','Language of the day’s story',[['','Same as comments']].concat(SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as most activity titles':l[1]]; })))+
     writingHTML()+
     (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
       swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
@@ -4975,14 +4986,22 @@ function likeMine(btn){
   });
 }
 // ── The day's story ──
-var STORY=null, STORYBUSY=false;
+var STORY=null, STORYBUSY=false, STORYLANG='${esc(settings.storyLang || '')}', STORYLANGS=${JSON.stringify(DIGEST.AI.LANGUAGES)};
+function storyLang(){ return STORYLANG||aiLang||'${esc(settings.aiLang)}'; }
+function storyLangs(){
+  var cur=(STORY&&STORY.lang)||storyLang();
+  return '<div class="lngs stlngs" role="group" aria-label="Story language">'+STORYLANGS.map(function(l){
+    return '<button class="lng'+(l[1]===cur?' on':'')+'" data-slang="'+escH(l[1])+'" aria-pressed="'+(l[1]===cur)+'" aria-label="'+(l[1]==='Auto'?'Same language as most activity titles':escH(l[1]))+'"'+(STORYBUSY?' disabled':'')+'>'+escH(l[0])+'</button>';
+  }).join('')+'</div>';
+}
+function paintStoryLangs(){ var w=document.querySelector('#storysheet .stlw'); if(w) w.innerHTML=storyLangs(); }
 var STORY_LINES=['Gathering everyone’s adventures…','Interviewing the early birds…','Counting the kudos, and the kudos still owed…','Polishing the punchlines…','Checking the facts, mostly…'];
 function storyKey(){ var h=document.querySelector('.top h1'); return h?h.textContent:''; }
 function storySheet(){
   var ov=document.getElementById('storysheet');
   if(!ov){
     ov=document.createElement('div'); ov.id='storysheet'; ov.hidden=true;
-    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button class="ghost" data-act="story-image">📸 Image</button><button data-act="story-share">Share</button></div></div>';
+    ov.innerHTML='<div class="msp" role="dialog" aria-label="The day’s story"><div class="msgrab"></div><div class="msh"><span class="mic" aria-hidden="true">📖</span><div class="mtt"><b>The day’s story</b><small class="stday"></small></div><div class="stlw"></div><button class="mbtn" data-act="story-close" aria-label="Close">✕</button></div><div class="msb stb" aria-live="polite"></div><div class="msf stf"><button class="ghost" data-act="story-again">🔁 Another take</button><button class="ghost" data-act="story-image">📸 Image</button><button data-act="story-share">Share</button></div></div>';
     document.body.appendChild(ov);
     ov.addEventListener('click',function(e){ if(e.target===ov) closeStory(); });
   }
@@ -4991,7 +5010,7 @@ function storySheet(){
 function openStory(again){
   var ov=storySheet(); ov.querySelector('.stday').textContent=storyKey();
   ov.hidden=false; document.body.style.overflow='hidden';
-  if(!again&&STORY&&STORY.key===storyKey()&&STORY.paragraphs) return renderStory();
+  if(!again&&STORY&&STORY.key===storyKey()&&STORY.paragraphs&&STORY.lang===storyLang()) return renderStory();
   writeStory();
 }
 function writeStory(){
@@ -5014,14 +5033,17 @@ function writeStory(){
     if(p.step==='writing'){ mark('photos','done'); mark('writing','now'); set(55); if(!creep) creep=setInterval(function(){ set(pct+(92-pct)*0.05); },400); }
   };
   mark('people','now'); set(3);
-  var key=storyKey();
-  send('story',{lang:aiLang},function(ok,msg){
-    if(creep) clearInterval(creep); STORYBUSY=false; window.__storyProgress=null;
+  var key=storyKey(), lang=storyLang();
+  paintStoryLangs();
+  var lb=body.querySelector('.stwait b'); if(lb) lb.textContent+=' in '+(lang==='Auto'?'the titles’ language':lang);
+  send('story',{lang:lang},function(ok,msg){
+    if(creep) clearInterval(creep); STORYBUSY=false; window.__storyProgress=null; paintStoryLangs();
     if(!ok&&msg==='NEED_KEY'){ body.innerHTML='<p class="keyhelp">✨ The day’s story is written by AI. Add a Claude or OpenAI key in Settings › AI settings.</p><button class="small" data-act="ai-open">AI settings</button>'; return; }
     if(!ok){ body.innerHTML='<p class="mnote">'+escH(msg||'The story couldn’t be written.')+'</p><button class="small" data-act="story-again">Try again</button>'; return; }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
     mark('writing','done'); set(100);
-    STORY={key:key,title:d.title||'',paragraphs:d.paragraphs||[],cast:d.cast||[],by:d.by||'AI',photos:d.photos||0,photosRead:d.photosRead||0};
+    STORY={key:key,lang:d.lang||lang,title:d.title||'',paragraphs:d.paragraphs||[],cast:d.cast||[],by:d.by||'AI',photos:d.photos||0,photosRead:d.photosRead||0};
+    paintStoryLangs();
     setTimeout(renderStory,350);
   });
 }
@@ -5040,6 +5062,7 @@ function renderStory(){
   html+='<span class="badge-ai">✨ Written by '+escH(STORY.by)+(STORY.photosRead?' · looked at '+STORY.photosRead+' photo'+(STORY.photosRead===1?'':'s'):'')+escH(note)+'</span>';
   ov.querySelector('.stb').innerHTML=html;
   ov.querySelector('.stf').hidden=false; ov.querySelector('.stb').scrollTop=0;
+  paintStoryLangs();
 }
 // ── The story as a 1080×1920 picture for Instagram, with the app's mark and a QR code to its GitHub page ──
 var QR_REPO='${QR_REPO}', REPO_LABEL='github.com/gadominas/StravaFeed';
@@ -5248,6 +5271,10 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='usage-yes'||t.dataset.act==='usage-no'){ send('usage-consent',{on:t.dataset.act==='usage-yes'?'1':'0'}); var ua=document.getElementById('usageask'); if(ua) ua.remove(); toast(t.dataset.act==='usage-yes'?'Thank you! Change it any time in Settings.':'No problem. Nothing is shared.'); return; }
   if(t.dataset.act==='story') return openStory(false);
   if(t.dataset.act==='story-again') return openStory(true);
+  if(t.dataset.slang){   // the story in another language: remembered, and written straight away
+    if(STORYBUSY||t.classList.contains('on')) return;
+    STORYLANG=t.dataset.slang; send('setstorylang',{lang:STORYLANG}); return openStory(true);
+  }
   if(t.dataset.act==='story-close') return closeStory();
   if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:storyText()}); return; }
   if(t.dataset.act==='story-image') return storyImage(t);
@@ -5276,7 +5303,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.open) return send('open',{url:t.dataset.open});
   if(t.dataset.lang){
     var langSame=aiLang===t.dataset.lang;
-    document.querySelectorAll('.lng').forEach(function(b){ b.classList.toggle('on', b.dataset.lang===t.dataset.lang); });
+    document.querySelectorAll('.lng[data-lang]').forEach(function(b){ b.classList.toggle('on', b.dataset.lang===t.dataset.lang); });
     aiLang=t.dataset.lang; send('setlang',{lang:aiLang});
     if(!langSame) reshape(t);
     return;
