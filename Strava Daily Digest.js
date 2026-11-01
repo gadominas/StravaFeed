@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.26.0';
+const VERSION = '1.26.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1457,8 +1457,6 @@ async function loadSettings() {
   const saved = await load("settings", null);
   settingsOk = !loadIssues.includes("settings");   // settings that were never read are never saved over
   if (saved) Object.assign(settings, saved);
-  // 1.26.0: untouched default instructions move to the new default, which writes in the activity title's language
-  if (saved && String(settings.commentRules || '').trim() === LEGACY_COMMENT_RULES.trim()) { settings.commentRules = DEFAULT_COMMENT_RULES; settings.aiLang = 'Auto'; }
   else if (settingsOk) {   // first run of 1.10: move the choices 1.9.x kept in the Keychain into settings.json
     try {
       if (Keychain.contains(KC_SETTINGS_OLD)) {
@@ -1471,6 +1469,12 @@ async function loadSettings() {
     for (const [k, kc] of [["aiLang", KC_AI_LANG], ["aiMode", KC_AI_MODE]]) if (Keychain.contains(kc)) settings[k] = Keychain.get(kc);
     if (saveSettings()) for (const kc of [KC_SETTINGS_OLD, KC_AI_LANG, KC_AI_MODE, KC_AI_CUSTOM]) if (Keychain.contains(kc)) Keychain.remove(kc);
   }
+  // 1.26.0: untouched default instructions move to the new default, which writes in the activity title's language
+  if (saved && String(settings.commentRules || '').trim() === LEGACY_COMMENT_RULES.trim()) { settings.commentRules = DEFAULT_COMMENT_RULES; settings.aiLang = 'Auto'; }
+  // 1.26.1: the 1.26.0 text box still stopped at 2,000 characters, so the new default could be saved cut off: make it whole again
+  { const norm = (t) => String(t || '').replace(/[“”„]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();   // pasted text may differ in quotes and spaces
+    const r = norm(settings.commentRules), full = norm(DEFAULT_COMMENT_RULES);
+    if (saved && r.length >= 500 && r.length < full.length && full.startsWith(r)) settings.commentRules = DEFAULT_COMMENT_RULES; }
   // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
   const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key };
   for (const k of Object.keys(d)) if (setSetting(k, settings[k]) === null) settings[k] = d[k];
@@ -3515,6 +3519,7 @@ body.loading .loadst{display:block}
 .incs textarea{font-size:16px;min-height:100px;line-height:1.4}
 .cslab{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:18px 0 0}
 #cfgsheet textarea.rules{display:block;width:100%;box-sizing:border-box;min-height:200px;margin-top:8px;font-size:15px;line-height:1.45}
+#cfgsheet .rcount{display:block;margin-top:4px;text-align:right}
 .stylebtns{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .styleprof{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)}
 .styleprof p{margin:6px 0 0;white-space:pre-wrap;font-size:13px;line-height:1.45}
@@ -4463,7 +4468,8 @@ function writingHTML(){
   return '<h3 class="sec">Comment writing</h3>'+
     '<div class="cfg'+(changed?' ch':'')+'"><div class="cfg-h"><b>Instructions for every AI comment</b>'+(changed?'<button class="link small" data-act="rules-reset">Reset to default</button>':'')+'</div>'+
       '<small class="muted">Used for every AI comment idea. They win over the app’s own defaults.</small>'+
-      '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="2000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea></div>'+
+      '<textarea class="cfgsel rules" data-k="commentRules" rows="9" maxlength="4000" aria-label="Instructions for every AI comment">'+escH(rules)+'</textarea>'+
+      '<small class="muted rcount">'+rulesCount(rules.length)+'</small></div>'+
     (sec?sec.items.map(fieldHTML).join(''):'')+
     '<div class="cfg"><div class="cfg-h"><b>Learn my style</b></div>'+
       '<small class="muted">Finds your own comments on friends’ activities, opening their pages one by one until it has the number above, then describes how you write. It can take several minutes; you can keep using the digest. ✨ My style then writes like you, on top of your instructions.</small>'+
@@ -4555,6 +4561,11 @@ function cfgAction(t,act){
     return;
   }
 }
+function rulesCount(n){ return n.toLocaleString()+' of 4,000 characters'+(n>=4000?' (full)':''); }
+document.addEventListener('input',function(e){
+  var el=e.target; if(!el.classList||!el.classList.contains('rules')) return;
+  var c=el.parentNode.querySelector('.rcount'); if(c) c.textContent=rulesCount(el.value.length);
+});
 // Typed and picked values arrive through "change".
 document.addEventListener('change',function(e){
   var el=e.target; if(!el.closest||!el.closest('#cfgsheet')) return;
