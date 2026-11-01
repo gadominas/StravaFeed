@@ -148,7 +148,7 @@ The bigger your feed, the more time it saves.
 - **💬 Comment in place.** Write or pick a comment and post it without opening Strava. The screen locks while it's sending, with a little animation of your comment flying to your friend, and confetti when it lands.
 - **🗺 Activity details.** Tap an activity's title or **↗** for a details sheet: route map, all stats, PRs, description, larger photos, kudos and comments. From there you can also open it in the Strava app or on Strava's website.
 - **🏃 Your activities on top.** Your latest activities (up to three, from today and yesterday) sit above everyone else's, with the kudos and comments you received. Tap one to see who gave kudos, read the comments and like them, without opening the Strava app.
-- **🔎 Peek, then expand.** In the Compact and Tiny layouts, every line shows distance, pace, trophies and photo counts. Tap to open the full activity in place.
+- **🔎 Peek, then expand.** In the Compact and Tiny layouts, every line shows distance, pace, trophies and photo counts. Tap to open the full activity in place. Tiny lines also have a 💬 that opens the comment sheet straight away, with the weather above it (🌧️ 8°) when Strava has it.
 - **⬇️ Pull to refresh.** Drag the digest down at the top to reload today's feed.
 - **🏃 Fun loading screen.** While the feed loads, a runner collects posts onto a reading pile and a counter ticks up to the number of posts read.
 - **⚡ Fast.** The window opens immediately and the day appears within seconds. Extra details such as heart rate and PRs fill in while you read.

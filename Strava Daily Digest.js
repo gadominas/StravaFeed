@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.28.0';
+const VERSION = '1.29.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -3223,6 +3223,35 @@ function personIndicators(p) {
   return out.join('');
 }
 
+// Tiny rows: the weather (when Strava has it) above a 💬 that opens the comment sheet straight away.
+function tinySide(a) {
+  const w = weatherChip(a), first = esc(String(a.athleteName || '').split(/\s+/)[0] || 'them');
+  return `<span class="tside">${w ? `<span class="twx" role="img" aria-label="${esc(w.label)}" title="${esc(w.label)}">${w.e}${w.t ? `<i>${esc(w.t)}</i>` : ''}</span>` : ''}`
+    + `<button class="tcm" data-tcomment="${esc(a.id)}" aria-label="Comment on ${first}’s ${esc(a.name || a.type || 'activity')}">💬</button></span>`;
+}
+// The weather Strava stored, as an emoji and a temperature for the Tiny rows (null when there is none).
+function weatherChip(a) {
+  if (!a || (!a.weather && !a.weatherText)) return null;
+  const w = a.weather || {};
+  const said = [a.weatherText, ...Object.entries(w).filter(([k, v]) => typeof v === 'string' && !/time|date|zone|unit/i.test(k)).map(([, v]) => v)].join(' ').toLowerCase();
+  let temp = null, feels = null;
+  for (const [k, v] of Object.entries(w)) {
+    if (!isFinite(+v) || typeof v === 'boolean') continue;
+    if (/feel|apparent/i.test(k)) { if (feels == null) feels = +v; }
+    else if (/temp/i.test(k) && !/dew|min|max/i.test(k) && temp == null) temp = +v;
+  }
+  if (temp == null) { const m = String(a.weatherText || '').match(/(-?\d+(?:[.,]\d)?)\s*(?:°|℃)/); if (m) temp = +m[1].replace(',', '.'); }
+  if (feels == null) { const m = String(a.weatherText || '').match(/feels like\s*(-?\d+(?:[.,]\d)?)/i); if (m) feels = +m[1].replace(',', '.'); }
+  const has = (rx) => rx.test(said);
+  const [e, word] = has(/thunder|storm|perkūn/) ? ['⛈️', 'storm'] : has(/snow|sleet|snieg|šlapdrib/) ? ['❄️', 'snow'] : has(/rain|drizzle|shower|lietu|lyja/) ? ['🌧️', 'rain']
+    : has(/fog|mist|haze|rūk/) ? ['🌫️', 'fog'] : has(/partly|few clouds|scattered|mostly sunny|dalinai/) ? ['⛅', 'partly cloudy'] : has(/overcast|cloud|debes/) ? ['☁️', 'cloudy']
+    : has(/clear|sunny|sun\b|giedr|saul/) ? ['☀️', 'clear'] : has(/wind|breez|vėj/) ? ['💨', 'windy'] : ['🌡️', ''];
+  if (e === '🌡️' && temp == null) return null;
+  const t = temp != null ? Math.round(temp) + '°' : '';
+  const label = ['Weather', word, t, feels != null && Math.round(feels) !== Math.round(temp) ? `feels like ${Math.round(feels)}°` : ''].filter(Boolean).join(', ');
+  return { e, t, label };
+}
+
 function personHtml(p) {
   const pid = esc(p.id);
   const profile = /^\d+$/.test(p.id) ? ` data-athlete="${pid}"` : '';
@@ -3236,7 +3265,7 @@ function personHtml(p) {
   if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
     const a = p.primary;
     return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
-    <header>${avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span><span class="ind">${personIndicators(p)}</span></div><span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
+    <header>${avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span class="tline">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
     <div class="tacts" hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
   </section>`;
   }
@@ -3884,6 +3913,11 @@ body.loading .person{opacity:.45}
 .person.tiny .ic{background:none;padding:0;color:var(--mut)}
 .person.tiny .ic.gold{color:var(--gold)}
 .person.tiny .tline{margin-top:1px}
+.person.tiny .pn > b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tside{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:40px}
+.twx{display:inline-flex;align-items:center;gap:3px;font-size:calc(15px * var(--ts));line-height:1;white-space:nowrap}
+.twx i{font-style:normal;font-weight:700;font-size:calc(12px * var(--ts));color:var(--mut);font-variant-numeric:tabular-nums}
+.tcm{width:40px;height:32px;padding:0;font-size:16px;background:var(--soft);color:var(--fg);flex:none}
 .tline .more{color:var(--mut);font-weight:600}
 .person.tiny .person-k{font-size:0;width:44px;height:36px;padding:0;flex:none}
 .person.tiny .person-k::before{content:'👍';font-size:17px}
@@ -5261,6 +5295,7 @@ document.addEventListener('click',function(e){
     return;
   }
   var t=e.target.closest('button,[data-open],[data-photo],[data-athlete],[data-detail]'); if(!t) return;
+  if(t.dataset.tcomment){ var tart=document.querySelector('.act[data-id="'+CSS.escape(t.dataset.tcomment)+'"]'); if(tart) openComposer(tart); return; }
   if(t.dataset.act==='sp-open') return openStylePop();
   if(t.dataset.act==='sp-hide'||t.dataset.act==='sp-close') return hideStylePop();
   if(t.dataset.act==='sp-stop') return styleStop();
