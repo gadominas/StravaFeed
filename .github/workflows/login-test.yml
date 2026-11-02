@@ -7,21 +7,23 @@ on:
   workflow_dispatch:
 jobs:
   login:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # Playwright's browser dependencies are published for this release
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { path: StravaFeed }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { repository: gadominas/app-blueprints, path: app-blueprints }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: 22 }
       - name: Emulator dependencies
         working-directory: app-blueprints/repo-site
         run: |
           npm ci
           npm install --no-save playwright@1.56.0
-          npx playwright install --with-deps chromium
+      - name: Headless Chromium
+        working-directory: app-blueprints/repo-site
+        run: npx playwright install --with-deps chromium
       - name: Login and log-out flows
         working-directory: StravaFeed
         env:
