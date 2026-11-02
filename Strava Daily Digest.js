@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.33.0';
+const VERSION = '1.33.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -5769,6 +5769,8 @@ document.addEventListener('click',function(e){
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
+  // the login and error pages: "Log in to Strava" / "Open Strava" and "Try again" are handled by the app itself
+  if(act==='login'||act==='retry'){ t.disabled=true; send(act,{}); setTimeout(function(){ t.disabled=false; },4000); }
 });
 // Safe start-up (app-blueprints · recipes/safe-startup). The page goes on screen first; Scriptable hands over the data
 // once it has read it. The digest loads a new page for every screen: only the run's first page (the boot page, with the
