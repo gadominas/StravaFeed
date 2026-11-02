@@ -3,6 +3,25 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.33.1",
+      "date": "2026-11-02",
+      "title": "Log in works again",
+      "highlights": [
+        {
+          "icon": "🔑",
+          "title": "Log in to Strava works",
+          "text": "The Log in to Strava button opens Strava's login again, after logging out or on a first start."
+        }
+      ],
+      "changes": [
+        "A test now checks logging in, logging out and logging back in before every release, and on every change to the app"
+      ],
+      "fixes": [
+        "Log in to Strava and Open Strava did nothing when tapped",
+        "Try again on the start-up error page did nothing when tapped"
+      ]
+    },
+    {
       "version": "1.33.0",
       "date": "2026-11-02",
       "title": "Log out of Strava",

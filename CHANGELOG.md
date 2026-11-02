@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.33.1 (2026-11-02): Log in works again
+
+- 🔑 **Log in to Strava works**: The Log in to Strava button opens Strava's login again, after logging out or on a first start.
+
+**Changes**
+
+- A test now checks logging in, logging out and logging back in before every release, and on every change to the app
+
+**Fixes**
+
+- Log in to Strava and Open Strava did nothing when tapped
+- Try again on the start-up error page did nothing when tapped
+
 ## 1.33.0 (2026-11-02): Log out of Strava
 
 - 🚪 **Log out in Settings**: Settings › Account › Log out of Strava signs the app out of strava.com in two taps.
