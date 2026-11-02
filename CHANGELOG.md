@@ -2,6 +2,15 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.34.1 (2026-11-02): Early-riser tags everywhere
+
+- 🌅 **On every layout**: Comfortable and Compact now show the 4 AM, 5 AM or 6 AM tag on the profile photo too.
+
+**Changes**
+
+- The icon after an early riser's name is gone in every layout; the tag on the photo replaces it
+- Each activity keeps its own early-riser badge (for example 🌅 6 AM club) in Comfortable and Compact
+
 ## 1.34.0 (2026-11-02): Early risers, on the photo
 
 - 🌅 **Early-riser tags on photos**: Tiny lines show 4 AM, 5 AM or 6 AM on the profile photo's lower edge, in the club's colours.
