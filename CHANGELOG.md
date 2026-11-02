@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.34.2 (2026-11-02): Delivered, then gone
+
+- ✅ **Posting a comment finishes**: After Delivered, the screen closes by itself again and the digest scrolls as before.
+
+**Changes**
+
+- The app test now posts comments in the Comfortable and Tiny layouts and checks the Delivered screen closes
+
+**Fixes**
+
+- Since 1.30.0 the Delivered screen stayed up after posting a comment: the comic's starburst had taken the name of its confetti
+
 ## 1.34.1 (2026-11-02): Early-riser tags everywhere
 
 - 🌅 **On every layout**: Comfortable and Compact now show the 4 AM, 5 AM or 6 AM tag on the profile photo too.
