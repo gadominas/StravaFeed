@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Login and log-out regression test: runs the real script in the Scriptable emulator (app-blueprints/repo-site)
-// against a pretend strava.com whose session can be ended and started again, and checks every step a person takes.
+// App regression test: runs the real script in the Scriptable emulator (app-blueprints/repo-site) against a pretend
+// strava.com whose session can be ended and started again, and checks every step a person takes.
 //
-//   node tests/login.test.js            (app-blueprints checked out next to this repository, its repo-site deps installed)
-//   APP_BLUEPRINTS=/path/to/app-blueprints node tests/login.test.js
+//   node tests/app.test.js            (app-blueprints checked out next to this repository, its repo-site deps installed)
+//   APP_BLUEPRINTS=/path/to/app-blueprints node tests/app.test.js
 //
 // Flows:
 //   1. Opening while logged out: the login page shows, "Log in to Strava" opens Strava's login, logging in opens the digest.
 //   2. Logging out in Settings (two taps) and logging back in: the same login page works again.
 //   3. Logging out when Strava keeps the session: the "Almost logged out" page, its Open Strava button, then the login page.
+//   4. Posting a comment, in the Comfortable and Tiny layouts: it reaches Strava, "Delivered" shows, then everything closes.
 'use strict';
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -19,21 +20,26 @@ const { Emulator, sleep } = require(path.join(SITE, 'tools', 'scriptable-emulato
 const sc = require(path.join(ROOT, 'docs', 'site', 'scenario.js'));
 process.env.TZ = sc.timezone || 'Europe/Vilnius';
 
+const COMMENT_TPL = { method: 'POST', enc: 'json', ct: 'application/json', url: 'https://www.strava.com/feed/activity/{{ID}}/comment', body: '{"text":"{{TEXT}}"}' };
 const STRAVA_LOGIN_PAGE = `<!doctype html><html><head><title>Log In | Strava</title><meta name="csrf-token" content="t0k3n"></head>
 <body><h1>Log in to Strava</h1><form id="login" action="/session/new-login" method="get"><input name="email"><button id="signin" type="submit">Log In</button></form></body></html>`;
 
 // strava.com as far as logging in and out goes; everything else comes from the screenshot scenario's fixtures
 function fixtures(auth) {
-  const base = sc.fixtures({ id: 'login-test' });
+  auth.posted = auth.posted || [];
+  const base = sc.fixtures({ id: 'app-test', density: auth.density });
   const out = { status: 401, body: 'You need to log in', contentType: 'text/html' };
   const routes = [
+    // posting a comment (the app's learned request, see the keychain below)
+    { match: (url, req) => /strava\.com\/feed\/activity\/\d+\/comment$/.test(url) && (req.method || 'GET') !== 'GET', respond: (req) => { auth.posted.push(req.json ? req.json() : req.body); return { json: { ok: true } }; } },
     { match: /strava\.com\/login/, respond: { body: STRAVA_LOGIN_PAGE, contentType: 'text/html' } },
     { match: /strava\.com\/session\/new-login/, respond: () => { auth.loggedIn = true; auth.logins++; return { body: '<html><body>Dashboard</body></html>', contentType: 'text/html' }; } },
     { match: /strava\.com\/(session|logout)(\?|$)/, respond: () => { if (!auth.sticky) auth.loggedIn = false; auth.logoutCalls++; return { body: 'bye', contentType: 'text/html' }; } },
     // with the session gone, every page that needs a login refuses
     { match: (url) => /strava\.com\/(dashboard|settings|athlete|athletes|feed|activities)/.test(url) && !auth.loggedIn, respond: out },
   ];
-  return Object.assign({}, base, { routes: routes.concat(base.routes), keychain: auth.keychain || base.keychain });
+  const keychain = Object.assign({}, auth.keychain || base.keychain, { 'strava-digest-comment-request': JSON.stringify(COMMENT_TPL) });
+  return Object.assign({}, base, { routes: routes.concat(base.routes), keychain });
 }
 
 let failures = 0, passes = 0;
@@ -83,6 +89,29 @@ function staticCheck() {
   const dead = [...acts].filter((a) => !handled.has(a) && !OWN_LISTENER.includes(a));
   check(!dead.length, `all ${acts.size} button actions are handled` + (dead.length ? ' (not handled: ' + dead.join(', ') + ')' : ''));
   check(/head === 'login'/.test(src) && /head === 'retry'/.test(src) && /head === 'logout'/.test(src), 'the app answers login, retry and logout');
+  // Two page functions with one name: the later one silently replaces the other everywhere (1.30.0's comic burst() broke "Delivered")
+  const twice = (rx) => { const c = {}; for (const m of src.matchAll(rx)) c[m[1]] = (c[m[1]] || 0) + 1; return Object.keys(c).filter((k) => c[k] > 1); };
+  const fns = twice(/^function\s+([\w$]+)\s*\(/gm), vars = twice(/^var\s+([\w$]+)/gm);
+  check(!fns.length, 'no two top-level functions share a name' + (fns.length ? ' (' + fns.join(', ') + ')' : ''));
+  check(!vars.length, 'no two top-level vars share a name' + (vars.length ? ' (' + vars.join(', ') + ')' : ''));
+}
+
+// Post a comment from the comment sheet: it reaches Strava, the "Delivered" screen shows and then goes away by itself
+async function postComment(emu, auth, open) {
+  const text = 'Test comment ' + Math.random().toString(36).slice(2, 7);
+  await tap(emu, open);
+  check(await until(() => has(emu, '#csheet textarea'), 5000), 'the comment sheet opens');
+  await pg(emu).locator('#csheet textarea').fill(text);
+  await pg(emu).locator('#csheet textarea').dispatchEvent('input');
+  check(await until(() => pg(emu).locator('#csheet .cpost:not([disabled])').count().then((n) => n > 0), 3000), 'Post lights up once there is text');
+  const before = auth.posted.length;
+  await tap(emu, '#csheet .cpost');
+  check(await until(() => auth.posted.length > before, 10000), 'the comment reaches Strava');
+  check(JSON.stringify(auth.posted[auth.posted.length - 1] || '').includes(text), 'with the text that was typed');
+  check(await until(() => pg(emu).locator('#sendov .svt').textContent().then((t) => /Delivered/.test(t)), 8000), '"Delivered" shows');
+  check(await until(() => pg(emu).locator('#sendov').isHidden(), 6000), 'the Delivered screen goes away by itself');
+  check(await until(() => pg(emu).evaluate(() => { const c = document.getElementById('csheet'); return !c || c.hidden || !c.classList.contains('open'); }), 3000), 'the comment sheet is closed');
+  check(await pg(emu).evaluate(() => getComputedStyle(document.body).overflow !== 'hidden' && getComputedStyle(document.documentElement).overflow !== 'hidden'), 'the digest scrolls again');
 }
 
 async function main() {
@@ -126,6 +155,16 @@ async function main() {
       auth.sticky = false; auth.loggedIn = false;   // the person taps Log Out on Strava's page
       check(await until(() => has(emu, '[data-act="login"]') && pg(emu).getByText('Log in to Strava').count().then((n) => n > 0), 20000), 'the app notices and shows its login page');
       await logInFromLoginPage(emu, auth);
+      await emu.close();
+    }
+    console.log('▸ 4. Posting a comment');
+    for (const density of ['comfortable', 'tiny']) {
+      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
+      const emu = await start(browser, auth);
+      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+      await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 1)' : '.act[data-id="9100101"] [data-act="toggle-comment"]');
+      await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 2)' : '.act[data-id="9100102"] [data-act="toggle-comment"]');   // and a second one
+      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
       await emu.close();
     }
   } finally { await browser.close(); }

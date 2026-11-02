@@ -1,6 +1,6 @@
-# Logging in and out must always work: the login regression test runs on every push.
+# Logging in and out and posting comments must always work: the app test runs on every push.
 # It runs the real script in the Scriptable emulator from gadominas/app-blueprints (repo-site).
-name: Login test
+name: App test
 on:
   push:
   pull_request:
@@ -24,8 +24,8 @@ jobs:
       - name: Headless Chromium
         working-directory: app-blueprints/repo-site
         run: npx playwright install --with-deps chromium
-      - name: Login and log-out flows
+      - name: Login, log-out and commenting flows
         working-directory: StravaFeed
         env:
           APP_BLUEPRINTS: ${{ github.workspace }}/app-blueprints
-        run: node tests/login.test.js
+        run: node tests/app.test.js
