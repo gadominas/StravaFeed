@@ -3,6 +3,23 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.34.0",
+      "date": "2026-11-02",
+      "title": "Early risers, on the photo",
+      "highlights": [
+        {
+          "icon": "🌅",
+          "title": "Early-riser tags on photos",
+          "text": "Tiny lines show 4 AM, 5 AM or 6 AM on the profile photo's lower edge, in the club's colours."
+        }
+      ],
+      "changes": [
+        "The tag uses the room already around the photo, so lines stay the same height and names get the full width",
+        "Night blue for 4 AM, violet for 5 AM, sunrise orange for 6 AM; VoiceOver and a long press name the club"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.33.1",
       "date": "2026-11-02",
       "title": "Log in works again",

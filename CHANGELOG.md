@@ -2,6 +2,15 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.34.0 (2026-11-02): Early risers, on the photo
+
+- 🌅 **Early-riser tags on photos**: Tiny lines show 4 AM, 5 AM or 6 AM on the profile photo's lower edge, in the club's colours.
+
+**Changes**
+
+- The tag uses the room already around the photo, so lines stay the same height and names get the full width
+- Night blue for 4 AM, violet for 5 AM, sunrise orange for 6 AM; VoiceOver and a long press name the club
+
 ## 1.33.1 (2026-11-02): Log in works again
 
 - 🔑 **Log in to Strava works**: The Log in to Strava button opens Strava's login again, after logging out or on a first start.
