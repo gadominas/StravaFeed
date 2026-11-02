@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.34.0';
+const VERSION = '1.34.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -3440,6 +3440,10 @@ function personHtml(p) {
   const avatar = p.avatar && !/avatar\/athlete/.test(p.avatar)
     ? `<img class="av" src="${esc(p.avatar)}"${profile}>`
     : `<div class="av ph"${profile}>${esc(initials(p.name))}</div>`;
+  // every layout: an early riser's club (4, 5 or 6 AM) sits as a tag on the photo's lower edge
+  const face = p.early
+    ? `<span class="avw">${avatar}<span class="avtag ${p.early.cls}" role="img" aria-label="${esc(p.early.label)}" title="${esc(p.early.icon + ' ' + p.early.label)}">${esc(p.early.label.replace(/ club$/, ''))}</span></span>`
+    : avatar;
   const sub = `${p.acts.length} ${p.acts.length > 1 ? 'activities' : 'activity'}${p.total ? `, ${esc(p.total)}` : ''}`;
   const btn = p.primary.canKudo
     ? `<button class="kudo person-k${p.kudoed ? ' done' : ''}" data-kudo="${esc(p.primary.id)}" data-pid="${pid}"${p.kudoed ? ' disabled' : ''}>${p.kudoed ? '✓ Kudos given' : '👍 Kudos'}</button>`
@@ -3447,12 +3451,12 @@ function personHtml(p) {
   if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
     const a = p.primary;
     return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
-    <header>${p.early ? `<span class="avw">${avatar}<span class="avtag ${p.early.cls}" role="img" aria-label="${esc(p.early.label)}" title="${esc(p.early.icon + ' ' + p.early.label)}">${esc(p.early.label.replace(/ club$/, ''))}</span></span>` : avatar}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}</b><span class="tline"><span class="ttx">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span>${tinyCountry(a)}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
+    <header>${face}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}</b><span class="tline"><span class="ttx">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span>${tinyCountry(a)}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
     <div class="tacts" hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
   </section>`;
   }
   return `<section class="person" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
-    <header>${avatar}<div class="pn"><b>${esc(p.name)}${p.early ? ` <span class="nb">${p.early.icon}</span>` : ''}</b><span>${sub}</span></div>${btn}</header>
+    <header>${face}<div class="pn"><b>${esc(p.name)}</b><span>${sub}</span></div>${btn}</header>
     ${p.acts.map(a => actHtml(a, p)).join('')}
   </section>`;
 }
@@ -4115,12 +4119,14 @@ body.loading .person{opacity:.45}
 .person.tiny .ic.gold{color:var(--gold)}
 .person.tiny .tline{margin-top:1px}
 .person.tiny .pn > b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Tiny: the early-riser club sits on the photo's lower edge, in the room the line already has above and below it */
+/* the early-riser club sits on the photo's lower edge, in the room the header already has around it */
 .avw{position:relative;flex:none;display:block;line-height:0}
 .avtag{position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);white-space:nowrap;line-height:1;padding:2px 5px;border-radius:999px;font-size:calc(9px * var(--ts));font-weight:800;color:#fff;letter-spacing:.01em;box-shadow:0 0 0 2px var(--card);pointer-events:none}
 .avtag.e4{background:linear-gradient(135deg,#070b1f,#2a1d5e)}
 .avtag.e5{background:linear-gradient(135deg,#1c2a6e,#8a3f8f)}
 .avtag.e6{background:linear-gradient(135deg,#f9a826,#f2541b)}
+.person:not(.tiny) .avtag{font-size:calc(10px * var(--ts));bottom:-6px}
+.person:not(.tiny) header .pn{padding-bottom:2px}
 .person.tiny .tline{display:flex;align-items:baseline;gap:8px;min-width:0}
 .person.tiny .ttx{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tcty{flex:none;white-space:nowrap;color:var(--mut);font-size:.92em}
