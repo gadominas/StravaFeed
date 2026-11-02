@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.34.1';
+const VERSION = '1.34.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -5412,9 +5412,10 @@ function tf(w,size){ return (T.italicTitle?'italic ':'')+w+' '+size+'px '+T.tfon
 function inked(ctx,txt,x,y,fill,lw){ ctx.lineJoin='round'; ctx.miterLimit=2; ctx.lineWidth=lw; ctx.strokeStyle=T.ink; ctx.strokeText(txt,x,y); ctx.fillStyle=fill; ctx.fillText(txt,x,y); }
 function boxed(ctx,x,y,w,h,fill,lw){ ctx.fillStyle=fill; ctx.fillRect(x,y,w,h); ctx.lineWidth=lw||7; ctx.strokeStyle=T.line; ctx.strokeRect(x,y,w,h); }
 function dotted(ctx,x,y,w,h,color,step,r){ ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip(); ctx.fillStyle=dotsPattern(ctx,color,step,r); ctx.fillRect(x,y,w,h); ctx.restore(); }
-function burst(ctx,cx,cy,r,n,fill){ ctx.beginPath(); for(var i=0;i<n*2;i++){ var a=Math.PI*i/n-Math.PI/2, rr=i%2?r*0.66:r; ctx.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr*0.82); } ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle=T.ink; ctx.stroke(); }
+function comicBurst(ctx,cx,cy,r,n,fill){   // not burst(): that name is the comment overlay's confetti
+  ctx.beginPath(); for(var i=0;i<n*2;i++){ var a=Math.PI*i/n-Math.PI/2, rr=i%2?r*0.66:r; ctx.lineTo(cx+Math.cos(a)*rr,cy+Math.sin(a)*rr*0.82); } ctx.closePath(); ctx.fillStyle=fill; ctx.fill(); ctx.lineWidth=5; ctx.strokeStyle=T.ink; ctx.stroke(); }
 function sfxBurst(ctx,cx,cy,word,size){
-  ctx.save(); burst(ctx,cx,cy,size,12,T.burst); ctx.translate(cx,cy); ctx.rotate(-0.14);
+  ctx.save(); comicBurst(ctx,cx,cy,size,12,T.burst); ctx.translate(cx,cy); ctx.rotate(-0.14);
   var fs=Math.round(size*0.5); ctx.font=tf('900',fs); while(ctx.measureText(word).width>size*1.12&&fs>18){ fs-=2; ctx.font=tf('900',fs); }
   ctx.textAlign='center'; ctx.textBaseline='middle'; inked(ctx,word,0,2,T.sfx,Math.max(4,fs/7)); ctx.restore();
 }
@@ -5524,7 +5525,7 @@ function drawCover(ctx,faces,coverH){
 function drawEnd(ctx,y){
   var x=CM, w=CW-2*CM, h=330;
   boxed(ctx,x,y,w,h,T.end,7); dotted(ctx,x,y,w,h,T.panelDots,14,3);
-  burst(ctx,x+250,y+h/2,190,14,T.burst);
+  comicBurst(ctx,x+250,y+h/2,190,14,T.burst);
   ctx.save(); ctx.translate(x+250,y+h/2); ctx.rotate(-0.1); ctx.font=tf('900',78); ctx.textAlign='center'; ctx.textBaseline='middle'; inked(ctx,'THE END',0,0,T===COMIC_THEMES.cool?'#ffffff':T.title,12); ctx.restore();
   var bx=x+w/2-20, by=y+26, bw=x+w-24-bx, bh=h-52, qs=200, tx=bx+22, dark=T===COMIC_THEMES.cool?'#05060c':T.ink;
   boxed(ctx,bx,by,bw,bh,T.box,5); drawQR(ctx,bx+bw-qs-18,by+(bh-qs)/2-10,qs);
