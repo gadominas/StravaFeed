@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.34.2';
+const VERSION = '1.35.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -293,7 +293,7 @@ async function main() {
   // Your latest activities (today and yesterday, newest first, at most three).
   function mineList() {
     if (!feed) return [];
-    return feed.mine(+dayBounds(1).dayStart, +dayBounds(0).dayEnd).slice(0, 3);
+    return feed.mine(+dayBounds(1).dayStart, +dayBounds(0).dayEnd).slice(0, 10);
   }
   // Today's view may not have read back to yesterday: do it quietly, then refresh the strip.
   async function fillMine(token) {
@@ -1364,7 +1364,7 @@ function makeFeed(sx, me, first) {
     for (const a of r.items) {
       if (!a.id || a.id === 'undefined') continue;
       if (a.athleteId === me) { derive(a); st.mine.set(a.id, a); }   // your own: for the strip on top
-      if (!settings.includeMe && a.athleteId === me) continue;
+      if (a.athleteId === me) continue;   // never in the feed: no kudos to yourself (Strava answers 403), no comment ideas for yourself
       derive(a);
       st.items.set(a.id, a);
       if (a.ts && (st.oldest == null || a.ts < st.oldest)) st.oldest = a.ts;
@@ -1473,7 +1473,7 @@ async function loadData() {
 
 // Defaults first, saved choices on top (loadSettings, at the entry point, before any branch).
 const settings = {
-  includeMe: false, enrich: true, widgetNames: true,
+  enrich: true, widgetNames: true,
   checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
   theme: "auto", density: "comfortable", font: "sans", textSize: 1,
   aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key,   // remembered picks, also set in the composer
@@ -1550,7 +1550,7 @@ function setUsage(on) {
 
 // Every key the page may change, with its check and what closing Settings must then do.
 const SET_KEYS = {
-  includeMe: ["bool", "reload"], enrich: ["bool", "reload"], widgetNames: ["bool", ""], checkUpdates: ["bool", ""],
+  enrich: ["bool", "reload"], widgetNames: ["bool", ""], checkUpdates: ["bool", ""],
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
@@ -1582,7 +1582,7 @@ async function loadSettings() {
       if (Keychain.contains(KC_SETTINGS_OLD)) {
         const o = JSON.parse(Keychain.get(KC_SETTINGS_OLD));
         LEGACY_AI_MODEL = o.aiModel || null;
-        for (const k of ["includeMe", "enrich", "widgetNames", "checkUpdates"]) if (k in o) settings[k] = !!o[k];
+        for (const k of ["enrich", "widgetNames", "checkUpdates"]) if (k in o) settings[k] = !!o[k];
         if (/^\d+$/.test(String(o.athleteId || "").trim())) settings.cfg.athleteId = String(o.athleteId).trim();
       }
     } catch (e) {}
@@ -3305,7 +3305,7 @@ function mineHtml(list) {
       <span class="mtx"><b>${esc(name)}</b><small>${esc(sub)}</small></span>
       <span class="mcn"><span>👍 <b>${+a.kudos || 0}</b></span><span>💬 <b>${+a.comments || 0}</b></span></span></button>`;
   }).join('');
-  return `<section id="mine" class="n${list.length}" aria-label="Your activities"><div class="mineh"><span>Your activities</span><small>Today &amp; yesterday</small></div><div class="minet">${tiles}</div></section>`;
+  return `<section id="mine" class="${list.length > 3 ? 'many' : `n${list.length}`}" aria-label="Your activities"><div class="mineh"><span>Your activities</span><small>Today &amp; yesterday</small></div><div class="minet">${tiles}</div></section>`;
 }
 
 // Before this hour, an empty "today" opens yesterday instead.
@@ -3374,7 +3374,8 @@ function countryCodes() {
     const names = ['en', 'lt'].map(l => new Intl.DisplayNames([l], { type: 'region' }));
     for (const x of A) for (const y of A) {
       const code = x + y;
-      for (const dn of names) { const n = dn.of(code); if (n && n !== code) COUNTRY_CODES[n.toLowerCase()] = code; }
+      if (/^(FX|EU|EZ|UN|QO|XA|XB|ZZ)$/.test(code)) continue;   // not countries with a flag of their own (FX "Metropolitan France" would show as F X)
+      for (const dn of names) { const n = dn.of(code), k = n && n.toLowerCase(); if (n && n !== code && !COUNTRY_CODES[k]) COUNTRY_CODES[k] = code; }
     }
   } catch (e) { console.warn('Country names: ' + e.message); }
   return COUNTRY_CODES;
@@ -3835,6 +3836,10 @@ body.loading .loadst{display:block}
 #mine.n1 .minet{grid-template-columns:minmax(0,1fr)}
 #mine.n2 .minet{grid-template-columns:repeat(2,minmax(0,1fr))}
 #mine.n3 .minet{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* four or more: three across and a bit of the next, swipe left for the rest */
+#mine.many .minet{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -12px;padding:0 12px;scroll-padding:0 12px}
+#mine.many .minet::-webkit-scrollbar{display:none}
+#mine.many .mt{flex:0 0 calc((100% - 16px) / 3.25);scroll-snap-align:start}
 .mt{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:14px;background:var(--soft);color:var(--fg);text-align:left;font-weight:400}
 .mt .mic{width:30px;height:30px;border-radius:50%;background:var(--bg);display:grid;place-items:center;font-size:16px;flex:none}
 .mtx{display:flex;flex-direction:column;gap:2px;min-width:0;width:100%}
@@ -4962,7 +4967,6 @@ function renderCfg(){
     '<p class="hint">Changes apply right away and are kept on this iPhone.</p>'+
     '<h3 class="sec">Appearance</h3>'+lookHTML()+
     '<h3 class="sec">Digest</h3>'+
-      swRow('includeMe','Show my own activities','The feed reloads when you close Settings')+
       swRow('enrich','Load extra details','Heart rate, PRs, start times, route maps')+
       swRow('widgetNames','Names on the widget','First names of people waiting for your kudos')+
     '<h3 class="sec">AI comments</h3>'+

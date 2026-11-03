@@ -435,7 +435,7 @@ module.exports = {
 
   fixtures: (shot) => {
     const settings = {
-      includeMe: false, enrich: true, widgetNames: true, checkUpdates: true,
+      enrich: true, widgetNames: true, checkUpdates: true,
       theme: 'auto', density: shot.density || 'comfortable', font: 'sans', textSize: 1,
       aiLang: 'English', aiMode: 'mystyle', storyLang: '', comicStyle: shot.comicStyle || 'pop', usageAsked: true, shareUsage: false,
       styleProfile: LEARNED_STYLE, styleMeta: { at: NOW - 3 * DAY, count: 18, read: 214, scanned: 61 },

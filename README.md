@@ -42,7 +42,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 - **Weather and country.** Each activity shows the weather it was done in (Strava's own, or from Open-Meteo for the hour it started) and the Tiny layout adds the country with its flag and a 💬 to comment straight from the line.
 - **Early-riser badges.** The 🦉 4 AM, 🌙 5 AM and 🌅 6 AM clubs get a 4 AM, 5 AM or 6 AM tag on their profile photo and a badge on the activity, and the day's summary counts the early risers.
 - **Photos and details in place.** Full-screen photos with swipe and zoom, and a details sheet with the route map (drawn from Strava's route line when there's no map picture), every stat, PRs, the weather, the description and photos.
-- **Your activities on top.** Your latest activities sit above everyone else's. Tap one to see who gave kudos, read the comments and like them.
+- **Your activities on top.** Your latest activities sit above everyone else's, side by side (three across; swipe for more), and never in the feed itself. Tap one to see who gave kudos, read the comments and like them.
 - **Kudos widget, launch screen, settings, updates.** A Home Screen and Lock Screen widget shows who is still waiting for your kudos; the digest opens on its logo; colours, layout and text size are in Settings; new versions are offered in the app.
 
 ## Screenshots
@@ -184,7 +184,7 @@ Tap the sliders icon at the top. Changes apply at once and are saved in `setting
 | Section | What you can change |
 | --- | --- |
 | Appearance | Colours (Auto or Ink, Sepia, Mint, Contrast, Slate, Night), layout (Comfortable, Compact, Tiny), text size (Small, Default, Large, Larger), headline font (Sans serif or Serif) |
-| Digest | Show my own activities, load extra details (heart rate, PRs, start times, route maps), names on the widget |
+| Digest | Load extra details (heart rate, PRs, start times, route maps), names on the widget |
 | AI comments | AI settings (keys, models, token usage), default mood, language |
 | Comment writing | Instructions for every AI comment (with Reset to default), comments read to learn your style, ✨ comment ideas per tap, Learn my style |
 | Updates | Offer new versions, check now |
