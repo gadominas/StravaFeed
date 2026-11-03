@@ -2,6 +2,23 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.35.0 (2026-11-03): Your activities, on top only
+
+- 🙋 **Not in your own feed**: Your activities only show in Your activities on top, never as a card waiting for kudos.
+- ↔️ **Side by side**: Several activities sit left to right in one card, three across; swipe for the rest.
+- 🇫🇷 **Flags fixed**: France and a few others showed as boxed letters; they show their flag now.
+
+**Changes**
+
+- Settings › Digest no longer has Show my own activities
+- 👍 All never counts you
+- Your activities shows up to ten from today and yesterday
+
+**Fixes**
+
+- With Show my own activities on, your own activity waited for your kudos and the kudos failed with HTTP 403
+- France showed as F X boxes instead of 🇫🇷
+
 ## 1.34.2 (2026-11-02): Delivered, then gone
 
 - ✅ **Posting a comment finishes**: After Delivered, the screen closes by itself again and the digest scrolls as before.
