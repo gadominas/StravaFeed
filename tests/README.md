@@ -13,6 +13,8 @@ against a pretend strava.com whose session can end and start again, and checks w
 3. Logging out when Strava keeps the session: the "Almost logged out" page, **Open Strava**, then the login page.
 4. Posting comments in the Comfortable and Tiny layouts: the text reaches Strava, **Delivered** shows and closes by itself,
    the comment sheet closes and the digest scrolls again.
+5. Your own activities: never in the feed (even with the old "Show my own activities" switch saved as on), only in
+   **Your activities** on top, side by side, and not counted by **👍 All**.
 
 ```sh
 # app-blueprints checked out next to this repository

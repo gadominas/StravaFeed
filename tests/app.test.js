@@ -10,6 +10,7 @@
 //   2. Logging out in Settings (two taps) and logging back in: the same login page works again.
 //   3. Logging out when Strava keeps the session: the "Almost logged out" page, its Open Strava button, then the login page.
 //   4. Posting a comment, in the Comfortable and Tiny layouts: it reaches Strava, "Delivered" shows, then everything closes.
+//   5. Your own activities: never in the feed (not even with the old "Show my own activities" setting), only in the strip on top.
 'use strict';
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -28,6 +29,7 @@ const STRAVA_LOGIN_PAGE = `<!doctype html><html><head><title>Log In | Strava</ti
 function fixtures(auth) {
   auth.posted = auth.posted || [];
   const base = sc.fixtures({ id: 'app-test', density: auth.density });
+  if (auth.settings) for (const k of Object.keys(base.files || {})) if (/settings\.json$/.test(k) && !/ai-settings/.test(k)) Object.assign(base.files[k], auth.settings);
   const out = { status: 401, body: 'You need to log in', contentType: 'text/html' };
   const routes = [
     // posting a comment (the app's learned request, see the keychain below)
@@ -94,6 +96,7 @@ function staticCheck() {
   const fns = twice(/^function\s+([\w$]+)\s*\(/gm), vars = twice(/^var\s+([\w$]+)/gm);
   check(!fns.length, 'no two top-level functions share a name' + (fns.length ? ' (' + fns.join(', ') + ')' : ''));
   check(!vars.length, 'no two top-level vars share a name' + (vars.length ? ' (' + vars.join(', ') + ')' : ''));
+  check(/if \(a\.athleteId === me\) continue;/.test(src), 'the feed always leaves out your own activities');
 }
 
 // Post a comment from the comment sheet: it reaches Strava, the "Delivered" screen shows and then goes away by itself
@@ -164,6 +167,26 @@ async function main() {
       check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
       await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 1)' : '.act[data-id="9100101"] [data-act="toggle-comment"]');
       await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 2)' : '.act[data-id="9100102"] [data-act="toggle-comment"]');   // and a second one
+      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+      await emu.close();
+    }
+    console.log('▸ 5. Your own activities');
+    for (const density of ['comfortable', 'tiny']) {
+      // the old "Show my own activities" switch still saved as on: it must not bring them back
+      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density, settings: { includeMe: true } };
+      const emu = await start(browser, auth);
+      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+      const mine = await pg(emu).evaluate(() => ({
+        inFeed: [...document.querySelectorAll('section.person')].filter((s) => /Sam Rivers/.test(s.textContent)).length,
+        strip: document.querySelectorAll('#mine .mt').length,
+        stripRow: (() => { const t = [...document.querySelectorAll('#mine .mt')].map((x) => x.getBoundingClientRect()); return t.length > 1 && Math.abs(t[0].top - t[1].top) < 2 && t[1].left > t[0].left; })(),
+        allCount: (document.querySelector('.allk') || {}).textContent || '',
+        waiting: document.querySelectorAll('section.person:not([data-counted]) .kudo:not([disabled]), section.person:not([data-counted]) .person-k').length,
+      }));
+      check(mine.inFeed === 0, 'your own activities are not in the feed');
+      check(mine.strip >= 2, 'they are in Your activities on top');
+      check(mine.stripRow, 'side by side, left to right');
+      check(!/Sam/.test(mine.allCount), '👍 All doesn\'t count you');
       check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
       await emu.close();
     }
