@@ -2,6 +2,17 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.36.0 (2026-11-04): Early risers first
+
+- 🌅 **Early risers on top**: The 4, 5 and 6 AM clubs lead each group, earliest first.
+- 📷 **Then photos**: People who posted photos come next, newest first.
+- 🕒 **Then everyone else**: The rest follow, newest activity first.
+
+**Changes**
+
+- The same order in Waiting for your kudos and in Kudos given, in every layout
+- When the details load and show someone started early or posted photos, their line moves to its place without a redraw
+
 ## 1.35.2 (2026-11-04): Opens on any iPhone
 
 - 📱 **Opens on any iPhone**: Strava Daily Digest opens on iPhones that aren't signed in to iCloud, every time.

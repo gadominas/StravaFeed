@@ -3,6 +3,33 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.36.0",
+      "date": "2026-11-04",
+      "title": "Early risers first",
+      "highlights": [
+        {
+          "icon": "🌅",
+          "title": "Early risers on top",
+          "text": "The 4, 5 and 6 AM clubs lead each group, earliest first."
+        },
+        {
+          "icon": "📷",
+          "title": "Then photos",
+          "text": "People who posted photos come next, newest first."
+        },
+        {
+          "icon": "🕒",
+          "title": "Then everyone else",
+          "text": "The rest follow, newest activity first."
+        }
+      ],
+      "changes": [
+        "The same order in Waiting for your kudos and in Kudos given, in every layout",
+        "When the details load and show someone started early or posted photos, their line moves to its place without a redraw"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.35.2",
       "date": "2026-11-04",
       "title": "Opens on any iPhone",
