@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.35.0';
+const VERSION = '1.35.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -117,7 +117,7 @@ const APP_ID = 'stravafeed';   // unique per app, never changes
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
   { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.10.0' },
-  { id: 'settings', name: 'Settings', version: '1.1.0', since: '1.25.0' },
+  { id: 'settings', name: 'Settings', version: '1.1.1', since: '1.35.1' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
@@ -1411,7 +1411,9 @@ function makeFeed(sx, me, first) {
 // and applied on top of it at start, so updates never wipe your choices.
 
 // ---------- storage ----------
-const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+// iCloud Drive when the phone is signed in to iCloud, otherwise the phone itself (settings blueprint 1.1.1):
+// FileManager.iCloud() itself never fails; asking it for its folder does, so ask inside the try.
+const fm = (() => { try { const ic = FileManager.iCloud(); ic.documentsDirectory(); return ic; } catch (e) { return FileManager.local(); } })();
 const DIR = fm.joinPath(fm.documentsDirectory(), APP);
 if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
 const P = n => fm.joinPath(DIR, n + ".json");
@@ -2054,7 +2056,7 @@ function saveSnapshot(feed) {
       })),
     });
     try {   // drop the old summary file once the new snapshot exists
-      const ofm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+      const ofm = (() => { try { const ic = FileManager.iCloud(); ic.documentsDirectory(); return ic; } catch (e) { return FileManager.local(); } })();
       const old = ofm.joinPath(ofm.documentsDirectory(), LEGACY_SNAPSHOT);
       if (ofm.fileExists(old)) ofm.remove(old);
     } catch (e) {}
@@ -2343,7 +2345,7 @@ async function refreshOnly() {
 
 function dump(raws) {
   try {
-    let fm; try { fm = FileManager.iCloud(); } catch (e) { fm = FileManager.local(); }
+    let fm; try { fm = FileManager.iCloud(); fm.documentsDirectory(); } catch (e) { fm = FileManager.local(); }
     const path = fm.joinPath(fm.documentsDirectory(), 'strava-feed-debug.json');
     fm.writeString(path, JSON.stringify(raws, null, 2));
     console.log('Raw feed saved to ' + path);
