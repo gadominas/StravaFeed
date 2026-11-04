@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.38.0 (2026-11-04): The comic factory
+
+- 🎬 **Comic factory**: While AI draws your comic, watch it being made: cast, locations, script, storyboard, ink, print.
+- 🖼 **Pages as they land**: Each page flips over on screen the moment it's drawn, with a tick or a note if it failed.
+- 👆 **A real Draw button**: ✨ Drawn by AI now looks and feels like a button, and shows clearly when a key is missing.
+
+**Changes**
+
+- The factory covers the whole screen while the comic is made, with a timer, a progress bar and lines about the day's cast
+- Casting shows everyone's face, Locations the story's photos, Script types the story, Storyboard shows each page's real captions and speech bubbles
+- ✨ Drawn by AI is a raised button with a Draw › pill that presses down; without an OpenAI key it is grey with No key
+
 ## 1.37.0 (2026-11-04): Comics drawn by AI
 
 - ✨ **Drawn by AI**: 💥 Comic › ✨ Drawn by AI draws every page in full: panels, art, bubbles and lettering.
