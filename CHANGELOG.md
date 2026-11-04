@@ -2,6 +2,16 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.38.1 (2026-11-04): Share when you're ready
+
+- 📤 **Share comic**: A finished comic waits for you: tap Share comic when you want to send or save it.
+- 👀 **Nothing pops up**: The share sheet no longer opens on its own after the pages are drawn.
+- 🔁 **Fresh story, fresh comic**: Rewriting the story clears the old comic's Share button.
+
+**Changes**
+
+- After 💥 Comic (Drawn by AI or a template look), the pages wait for 📤 Share comic in the story's footer instead of opening the share sheet
+
 ## 1.38.0 (2026-11-04): The comic factory
 
 - 🎬 **Comic factory**: While AI draws your comic, watch it being made: cast, locations, script, storyboard, ink, print.

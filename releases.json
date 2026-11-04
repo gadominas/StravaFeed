@@ -3,6 +3,32 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.38.1",
+      "date": "2026-11-04",
+      "title": "Share when you're ready",
+      "highlights": [
+        {
+          "icon": "📤",
+          "title": "Share comic",
+          "text": "A finished comic waits for you: tap Share comic when you want to send or save it."
+        },
+        {
+          "icon": "👀",
+          "title": "Nothing pops up",
+          "text": "The share sheet no longer opens on its own after the pages are drawn."
+        },
+        {
+          "icon": "🔁",
+          "title": "Fresh story, fresh comic",
+          "text": "Rewriting the story clears the old comic's Share button."
+        }
+      ],
+      "changes": [
+        "After 💥 Comic (Drawn by AI or a template look), the pages wait for 📤 Share comic in the story's footer instead of opening the share sheet"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.38.0",
       "date": "2026-11-04",
       "title": "The comic factory",
