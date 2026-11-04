@@ -11,6 +11,8 @@
 //   3. Logging out when Strava keeps the session: the "Almost logged out" page, its Open Strava button, then the login page.
 //   4. Posting a comment, in the Comfortable and Tiny layouts: it reaches Strava, "Delivered" shows, then everything closes.
 //   5. Your own activities: never in the feed (not even with the old "Show my own activities" setting), only in the strip on top.
+//   6. The order of people, strictly, in each group: early risers (earliest first), then people with photos, then everyone
+//      else (both newest first); also after the details load, which can turn someone into an early riser.
 'use strict';
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -187,6 +189,36 @@ async function main() {
       check(mine.strip >= 2, 'they are in Your activities on top');
       check(mine.stripRow, 'side by side, left to right');
       check(!/Sam/.test(mine.allCount), '👍 All doesn\'t count you');
+      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+      await emu.close();
+    }
+    console.log('▸ 6. The order of people');
+    for (const density of ['comfortable', 'tiny']) {
+      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
+      const emu = await start(browser, auth);
+      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+      await sleep(4000);   // the details load and may reorder the lines
+      const groups = await pg(emu).evaluate(() => [...document.querySelectorAll('h2.sec')].map((h) => {
+        const out = []; let n = h.nextElementSibling;
+        while (n && n.matches('section.person')) {
+          out.push({ name: (n.querySelector('.pn b') || {}).textContent, rank: +n.dataset.rank, t: +n.dataset.t,
+            early: !!n.querySelector('.avtag'), photos: !!n.querySelector('[data-photo]') || /📷/.test((n.querySelector('.ind') || {}).textContent || '') });
+          n = n.nextElementSibling;
+        }
+        return { title: h.firstChild.textContent, people: out };
+      }));
+      let ok = groups.length > 0, why = '';
+      for (const g of groups) g.people.forEach((p, i) => {
+        const want = p.early ? 0 : p.photos ? 1 : 2;
+        if (p.rank !== want) { ok = false; why = why || `${p.name} ranked ${p.rank}, should be ${want}`; }
+        const q = g.people[i - 1];
+        if (!q) return;
+        if (q.rank > p.rank) { ok = false; why = why || `${q.name} (${q.rank}) before ${p.name} (${p.rank})`; }
+        if (q.rank === p.rank && (p.rank === 0 ? q.t > p.t : q.t < p.t)) { ok = false; why = why || `${q.name} and ${p.name} out of time order`; }
+      });
+      check(ok, 'early risers first (earliest first), then photos, then the rest (newest first)' + (why ? ': ' + why : ''));
+      const top = groups[0] && groups[0].people[0];
+      check(!!top && top.early, 'the first line of the day is an early riser' + (top ? ` (${top.name})` : ''));
       check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
       await emu.close();
     }

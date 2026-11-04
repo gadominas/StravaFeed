@@ -15,6 +15,8 @@ against a pretend strava.com whose session can end and start again, and checks w
    the comment sheet closes and the digest scrolls again.
 5. Your own activities: never in the feed (even with the old "Show my own activities" switch saved as on), only in
    **Your activities** on top, side by side, and not counted by **👍 All**.
+6. The order of people in each group: early risers first (earliest first), then people with photos, then everyone else
+   (newest first), checked against what each line shows, also after the details have loaded.
 
 ```sh
 # app-blueprints checked out next to this repository
