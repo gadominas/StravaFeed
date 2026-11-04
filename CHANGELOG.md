@@ -2,6 +2,24 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.37.0 (2026-11-04): Comics drawn by AI
+
+- ✨ **Drawn by AI**: 💥 Comic › ✨ Drawn by AI draws every page in full: panels, art, bubbles and lettering.
+- 📝 **Your style, really**: The pages follow your story instructions, so asking for a comic now gives a real comic.
+- 🧑‍🎨 **Your friends, cartooned**: Profile pictures and the day's photos guide how friends and places are drawn.
+
+**Changes**
+
+- The story's AI plans the pages (panels, captions, speech bubbles) from the story, its photos and your story instructions; OpenAI's GPT Image model draws each page
+- Uses the newest GPT Image model your OpenAI key can reach (gpt-image-2 by default, gpt-image-1 if that isn't available); needs an OpenAI key, also when Claude writes the story
+- Each page gets a slim footer with the page number and who wrote and drew it; the last one has the QR code to the app
+- Two pages are drawn at a time, with progress in the story sheet; all pages open in the share sheet to save to Photos
+- The Pop, Cool and Old paper templates stay as quick options and no longer show script markers such as [PANEL 1] or [Visual]
+
+**Fixes**
+
+- Comic pages showed the story's comic script as plain text in caption boxes instead of drawing it
+
 ## 1.36.0 (2026-11-04): Early risers first
 
 - 🌅 **Early risers on top**: The 4, 5 and 6 AM clubs lead each group, earliest first.
