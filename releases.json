@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.38.0",
+      "date": "2026-11-04",
+      "title": "The comic factory",
+      "highlights": [
+        {
+          "icon": "🎬",
+          "title": "Comic factory",
+          "text": "While AI draws your comic, watch it being made: cast, locations, script, storyboard, ink, print."
+        },
+        {
+          "icon": "🖼",
+          "title": "Pages as they land",
+          "text": "Each page flips over on screen the moment it's drawn, with a tick or a note if it failed."
+        },
+        {
+          "icon": "👆",
+          "title": "A real Draw button",
+          "text": "✨ Drawn by AI now looks and feels like a button, and shows clearly when a key is missing."
+        }
+      ],
+      "changes": [
+        "The factory covers the whole screen while the comic is made, with a timer, a progress bar and lines about the day's cast",
+        "Casting shows everyone's face, Locations the story's photos, Script types the story, Storyboard shows each page's real captions and speech bubbles",
+        "✨ Drawn by AI is a raised button with a Draw › pill that presses down; without an OpenAI key it is grey with No key"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.37.0",
       "date": "2026-11-04",
       "title": "Comics drawn by AI",
