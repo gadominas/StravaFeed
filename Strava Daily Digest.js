@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.38.0';
+const VERSION = '1.38.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -152,6 +152,8 @@ function dayBounds(daysBack) {
   const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
   return { dayStart, dayEnd };
 }
+
+let comicReady = null;   // the last AI comic's pages, until the user shares them (Share comic)
 
 async function main() {
   await waitForOtherWindow();        // safe start-up: quick taps on the widget don't stack up windows
@@ -549,8 +551,11 @@ async function main() {
           const r = await aiComic(lastStory, ['pop', 'cool', 'paper'].includes(p.look) ? p.look : 'pop',
             (step, data) => js(`window.__comicProgress && window.__comicProgress(${JSON.stringify(Object.assign({ step }, data || {}))})`));
           if (r.needKey) msg = 'NEED_OPENAI';
-          else { await ShareSheet.present(r.images); ok = true; msg = r.note || ''; track('story_comic', { pages: r.pages, style: 'ai', model: r.model, provider: aiSettings.aiProvider }); }
+          else { comicReady = r.images; ok = true; msg = JSON.stringify({ pages: r.images.length, note: r.note || '' }); track('story_comic', { pages: r.pages, style: 'ai', model: r.model, provider: aiSettings.aiProvider }); }   // shared only when the user taps Share comic
         }
+      } else if (head === 'story-comic-share') {   // the AI comic's pages, on the user's tap
+        if (!comicReady || !comicReady.length) msg = 'Draw the comic again: its pages are gone.';
+        else { await ShareSheet.present(comicReady); ok = true; }
       } else if (head === 'story-image') {
         // the comic's pages, read one at a time (each is a large picture), then shared together: "Save N Images" keeps them in Photos
         const n = Math.min(12, +(await ui.evaluateJavaScript('(window.__storyImgs || []).length')) || 0), imgs = [];
@@ -5600,6 +5605,7 @@ function storySheet(){
 }
 function openStory(again){
   var ov=storySheet(); ov.querySelector('.stday').textContent=storyKey();
+  if(again||!STORY||STORY.key!==storyKey()){ COMICREADY=null; window.__storyImgs=null; var cs=ov.querySelector('[data-act="story-comic-share"]'); if(cs) cs.remove(); }   // a new story: the old comic goes
   ov.hidden=false; document.body.style.overflow='hidden';
   if(!again&&STORY&&STORY.key===storyKey()&&STORY.paragraphs&&STORY.lang===storyLang()) return renderStory();
   writeStory();
@@ -5892,8 +5898,7 @@ function storyImage(btn,style){
   send('story-assets',{urls:JSON.stringify(storyPhotoUrls()),avs:JSON.stringify(avs)},function(ok,msg){
     var a={}; try{ a=JSON.parse(msg); }catch(e){}
     drawStoryPages(a,COMICSTYLE).then(function(pages){
-      window.__storyImgs=pages;
-      send('story-image',{n:pages.length,style:COMICSTYLE},function(ok2,m2){ window.__storyImgs=null; done(ok2?'':(m2||'Couldn’t share the pages')); });
+      window.__storyImgs=pages; done(''); comicReadyShow('local',pages.length);   // shared only on the user's tap
     }).catch(function(e){ done('Couldn’t draw the pages: '+(e&&e.message||e)); });
   });
 }
@@ -6005,8 +6010,28 @@ function comicDraw(){
   send('story-ai-comic',{look:COMICLOOK},function(ok,msg){
     window.__comicProgress=null; cfClose(); b.disabled=false;
     if(msg==='NEED_OPENAI') return toast('Drawing needs an OpenAI key: Settings › AI');
-    if(!ok) return toast(msg||'The pages couldn’t be drawn'); if(msg) toast(msg);
+    if(!ok) return toast(msg||'The pages couldn’t be drawn');
+    var r={}; try{ r=JSON.parse(msg); }catch(e){}
+    if(r.note) toast(r.note);
+    comicReadyShow('ai',r.pages||0);
   });
+}
+// A drawn comic waits for the user: "📤 Share comic" in the story's footer shares (or saves) its pages
+var COMICREADY=null;
+function comicReadyShow(kind,n){
+  COMICREADY={kind:kind,n:n};
+  var f=document.querySelector('#storysheet .stf'); if(!f) return;
+  var b=f.querySelector('[data-act="story-comic-share"]');
+  if(!b){ b=document.createElement('button'); b.setAttribute('data-act','story-comic-share'); f.insertBefore(b,f.lastElementChild); }
+  b.textContent='📤 Share comic'+(n?' ('+n+' page'+(n===1?'':'s')+')':'');
+  toast('Your comic is ready: tap Share comic to send or save it');
+}
+function comicShare(b){
+  if(!COMICREADY||b.disabled) return;
+  b.disabled=true;
+  var fin=function(ok,m){ b.disabled=false; if(!ok&&m) toast(m); };
+  if(COMICREADY.kind==='ai') send('story-comic-share',{},fin);
+  else send('story-image',{n:(window.__storyImgs||[]).length,style:COMICSTYLE},fin);
 }
 function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
 function closeDetail(){ var det=document.getElementById('det'); det.hidden=true; det.querySelector('.detb').innerHTML=''; document.body.style.overflow=''; }
@@ -6126,6 +6151,7 @@ document.addEventListener('click',function(e){
   }
   if(t.dataset.act==='story-close') return closeStory();
   if(t.dataset.act==='story-share'){ if(STORY) send('share',{text:storyText()}); return; }
+  if(t.dataset.act==='story-comic-share') return comicShare(t);
   if(t.dataset.act==='story-image') return comicPicker(t);
   if(t.dataset.cstyle) return storyImage(t,t.dataset.cstyle);
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
