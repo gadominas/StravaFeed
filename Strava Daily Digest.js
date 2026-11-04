@@ -328,6 +328,7 @@ async function main() {
       try { await fillWeather(chunk.map(id => feed.get(id)).filter(Boolean)); } catch (e) { console.warn('Weather: ' + e.message); }
       const dayActs = feed.day(dayStart, dayEnd), people = groupByAthlete(dayActs);
       for (const p of people) if (touched.has(p.id)) await js(`window.__patchPerson(${JSON.stringify(p.id)}, ${JSON.stringify(personHtml(p))})`);
+      await js(`window.__order(${JSON.stringify(people.map(p => p.id))})`);
       await js(`window.__patchSummary(${JSON.stringify(summaryText(people, dayActs.length))})`);
     }
   }
@@ -2010,9 +2011,22 @@ function groupByAthlete(acts) {
       if (sum >= 0.05) p.total = `${sum.toFixed(1)} ${[...units][0]}`;
     }
   }
-  // People still waiting for your kudos first, then newest activity first within each group.
-  people.sort((a, b) => (a.kudoed - b.kudoed) || (b.latest - a.latest));
+  // The order, strictly, within each group (waiting for your kudos, then kudos given):
+  //   1. early risers (4, 5, 6 AM clubs), earliest start first
+  //   2. people with photos, newest activity first
+  //   3. everyone else, newest activity first
+  for (const p of people) {
+    p.hasPhotos = p.acts.some(a => (a.photos || []).length > 0);
+    p.rank = p.early ? 0 : p.hasPhotos ? 1 : 2;
+    p.firstEarly = p.early ? Math.min(...p.acts.filter(a => early(a)).map(a => a.start || Infinity)) : null;
+  }
+  people.sort(personOrder);
   return people;
+}
+function personOrder(a, b) {
+  return (a.kudoed - b.kudoed) || (a.rank - b.rank)
+    || (a.rank === 0 ? (a.firstEarly - b.firstEarly) : (b.latest - a.latest))
+    || String(a.id).localeCompare(String(b.id));   // never left to chance
 }
 
 function parseDist(s) {
@@ -3461,12 +3475,12 @@ function personHtml(p) {
     : '';
   if (settings.density === 'tiny') {   // one line per athlete; the full activities stay in the DOM for the details sheet and comments
     const a = p.primary;
-    return `<section class="person tiny" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
+    return `<section class="person tiny" data-pid="${pid}" data-rank="${p.rank}" data-t="${p.rank === 0 ? p.firstEarly : p.latest}"${p.kudoed ? ' data-counted="1"' : ''}>
     <header>${face}<div class="pn" data-expandp="${pid}" role="button" aria-expanded="false"><b>${esc(p.name)}</b><span class="tline"><span class="ttx">${emoji(a.type)} ${esc(a.name || a.type || '')}${p.acts.length > 1 ? ` <span class="more">+${p.acts.length - 1} more</span>` : ''}</span>${tinyCountry(a)}</span><span class="ind">${personIndicators(p)}</span></div>${tinySide(a)}<span class="chev" data-expandp="${pid}" aria-hidden="true">⌄</span>${btn}</header>
     <div class="tacts" hidden>${p.acts.map(x => actHtml(x, p)).join('')}</div>
   </section>`;
   }
-  return `<section class="person" data-pid="${pid}"${p.kudoed ? ' data-counted="1"' : ''}>
+  return `<section class="person" data-pid="${pid}" data-rank="${p.rank}" data-t="${p.rank === 0 ? p.firstEarly : p.latest}"${p.kudoed ? ' data-counted="1"' : ''}>
     <header>${face}<div class="pn"><b>${esc(p.name)}</b><span>${sub}</span></div>${btn}</header>
     ${p.acts.map(a => actHtml(a, p)).join('')}
   </section>`;
@@ -4506,6 +4520,17 @@ function suggest(btn){
   });
 }
 window.__done=function(req,ok,msg){ var cb=pending[req]; delete pending[req]; if(cb) cb(ok,msg); };
+// Puts the lines of each group (waiting, kudos given) in the order the app worked out, without redrawing them.
+window.__order=function(ids){
+  var pos={}; ids.forEach(function(id,i){ pos[id]=i; });
+  document.querySelectorAll('h2.sec').forEach(function(h){
+    var list=[], n=h.nextElementSibling;
+    while(n&&n.matches('section.person')){ list.push(n); n=n.nextElementSibling; }
+    var sorted=list.slice().sort(function(a,b){ return (pos[a.dataset.pid]==null?1e9:pos[a.dataset.pid])-(pos[b.dataset.pid]==null?1e9:pos[b.dataset.pid]); });
+    if(sorted.every(function(x,i){ return x===list[i]; })) return;
+    var at=h; sorted.forEach(function(x){ at.after(x); at=x; });
+  });
+};
 window.__patchPerson=function(pid,html){
   var old=document.querySelector('section.person[data-pid="'+CSS.escape(pid)+'"]'); if(!old) return;
   if(old.querySelector('.cbox:not([hidden])')||old.querySelector('[data-busy]')||old.contains(document.activeElement)) return;
