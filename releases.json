@@ -3,6 +3,38 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.37.0",
+      "date": "2026-11-04",
+      "title": "Comics drawn by AI",
+      "highlights": [
+        {
+          "icon": "✨",
+          "title": "Drawn by AI",
+          "text": "💥 Comic › ✨ Drawn by AI draws every page in full: panels, art, bubbles and lettering."
+        },
+        {
+          "icon": "📝",
+          "title": "Your style, really",
+          "text": "The pages follow your story instructions, so asking for a comic now gives a real comic."
+        },
+        {
+          "icon": "🧑‍🎨",
+          "title": "Your friends, cartooned",
+          "text": "Profile pictures and the day's photos guide how friends and places are drawn."
+        }
+      ],
+      "changes": [
+        "The story's AI plans the pages (panels, captions, speech bubbles) from the story, its photos and your story instructions; OpenAI's GPT Image model draws each page",
+        "Uses the newest GPT Image model your OpenAI key can reach (gpt-image-2 by default, gpt-image-1 if that isn't available); needs an OpenAI key, also when Claude writes the story",
+        "Each page gets a slim footer with the page number and who wrote and drew it; the last one has the QR code to the app",
+        "Two pages are drawn at a time, with progress in the story sheet; all pages open in the share sheet to save to Photos",
+        "The Pop, Cool and Old paper templates stay as quick options and no longer show script markers such as [PANEL 1] or [Visual]"
+      ],
+      "fixes": [
+        "Comic pages showed the story's comic script as plain text in caption boxes instead of drawing it"
+      ]
+    },
+    {
       "version": "1.36.0",
       "date": "2026-11-04",
       "title": "Early risers first",
