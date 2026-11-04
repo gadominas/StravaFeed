@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.35.1 (2026-11-03): Works without iCloud
+
+- 📱 **Opens without iCloud**: Strava Daily Digest now opens on iPhones that aren't signed in to iCloud.
+- 💾 **Kept on the phone**: Without iCloud, your settings are saved on the phone instead.
+- ☁️ **iCloud as before**: Signed in to iCloud? Nothing changes: everything stays in iCloud Drive.
+
+**Changes**
+
+- Without iCloud, settings are kept in Files › On My iPhone › Scriptable
+
+**Fixes**
+
+- On an iPhone not signed in to iCloud, Strava Daily Digest stopped at once with "iCloud is not supported"
+
 ## 1.35.0 (2026-11-03): Your activities, on top only
 
 - 🙋 **Not in your own feed**: Your activities only show in Your activities on top, never as a card waiting for kudos.
