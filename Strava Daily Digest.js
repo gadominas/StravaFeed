@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.37.0';
+const VERSION = '1.38.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -547,7 +547,7 @@ async function main() {
         else if (!keyFor('openai')) msg = 'NEED_OPENAI';
         else {
           const r = await aiComic(lastStory, ['pop', 'cool', 'paper'].includes(p.look) ? p.look : 'pop',
-            (step, done, total) => js(`window.__comicProgress && window.__comicProgress(${JSON.stringify({ step, done, total })})`));
+            (step, data) => js(`window.__comicProgress && window.__comicProgress(${JSON.stringify(Object.assign({ step }, data || {}))})`));
           if (r.needKey) msg = 'NEED_OPENAI';
           else { await ShareSheet.present(r.images); ok = true; msg = r.note || ''; track('story_comic', { pages: r.pages, style: 'ai', model: r.model, provider: aiSettings.aiProvider }); }
         }
@@ -1200,12 +1200,25 @@ function comicPageFooter(b64, k, n, by, model) {
 }
 
 // progress(step, done, total): 'reading' (photos), 'planning', 'drawing' (pages done of total)
+// The lettering in a page plan (Caption: "…", Bubble (Name): "…"), for the comic factory's storyboard
+const comicLines = d => [...String(d || '').matchAll(/(?:Caption|Bubble\s*\(([^)]*)\))\s*:\s*["“„]([^"“”]+)["“”]/g)].map(m => ({ who: (m[1] || '').trim(), text: m[2].trim() }));
+// A small copy of a drawn page, so the factory can show it the moment it's done
+function comicThumb(b64) {
+  try {
+    const img = Image.fromData(Data.fromBase64String(b64)), dc = new DrawContext();
+    dc.size = new Size(240, 360); dc.respectScreenScale = false; dc.opaque = true;
+    dc.drawImageInRect(img, new Rect(0, 0, 240, 360));
+    return 'data:image/jpeg;base64,' + Data.fromJPEG(dc.getImage()).toBase64String();
+  } catch (e) { return ''; }
+}
+
+// progress(step, data): 'reading', 'planning', 'plan' { title, pages: [{ lines }] }, 'page' { i, done, total, thumb }, 'printing'
 async function aiComic(story, look, progress = async () => {}) {
   if (!keyFor('openai')) return { needKey: true };
   if (!aiKey()) return { needKey: true };
   const language = story.lang && story.lang !== 'Auto' ? story.lang : 'the language the story is written in';
   // the story's photos (P1…) and everyone's profile picture, shrunk, numbered so the plan can point at them
-  await progress('reading', 0, 1);
+  await progress('reading');
   const photoIds = new Map(), photos = [];
   for (const p of story.paragraphs) for (const u of p.photos || []) {
     if (photoIds.has(u) || photoIds.size >= 9) continue;
@@ -1218,7 +1231,7 @@ async function aiComic(story, look, progress = async () => {}) {
     if (!c.avatar || /\/avatar\/athlete\/|default/i.test(c.avatar)) continue;   // Strava's grey placeholder: nothing to base a face on
     try { faces.set(first.toLowerCase(), { name: first, b64: await shrinkImage(c.avatar, 256) }); } catch (e) {}
   }
-  await progress('planning', 0, 1);
+  await progress('planning');
   const rules = String(settings.storyRules || '').trim(), tw = (STORY_TWEAKS.find(t => t.key === story.tweak) || {}).line || '';
   const data = {
     title: story.title,
@@ -1234,6 +1247,7 @@ async function aiComic(story, look, progress = async () => {}) {
   try { plan = parseJSON(repairJSON(text)); } catch (e) { throw new Error('The comic plan didn\u2019t come back right. Try again.'); }
   const pages = (Array.isArray(plan.pages) ? plan.pages : []).filter(p => p && String(p.description || '').trim()).slice(0, 6);
   if (!pages.length) throw new Error('No comic pages were planned. Try again.');
+  await progress('plan', { title: story.title, pages: pages.map(pg => ({ lines: comicLines(pg.description).slice(0, 4) })) });
   const byId = new Map(photos.map(p => [p.id, p]));
   const style = `${COMIC_LOOKS[look] || COMIC_LOOKS.pop}, unless the story instructions below ask for another look`;
   const prompts = pages.map((pg, k) => {
@@ -1253,18 +1267,18 @@ async function aiComic(story, look, progress = async () => {}) {
   });
   // two pages at a time: each takes a minute or so, and image rate limits are low on new keys
   const out = new Array(prompts.length), errs = []; let done = 0, next = 0;
-  await progress('drawing', 0, prompts.length);
   const worker = async () => {
     while (next < prompts.length) {
       const i = next++;
       try { out[i] = await drawComicPage(prompts[i].prompt, prompts[i].refs); }
       catch (e) { errs.push(String(e.message || e)); console.warn(`Comic page ${i + 1}: ${e.message}`); }
-      await progress('drawing', ++done, prompts.length);
+      await progress('page', { i, ok: !!out[i], done: ++done, total: prompts.length, thumb: out[i] ? comicThumb(out[i].b64) : '' });
     }
   };
   await Promise.all([worker(), worker()]);
   const drawn = out.filter(Boolean);
   if (!drawn.length) throw new Error('The pages couldn\u2019t be drawn: ' + (errs[0] || 'no picture came back').slice(0, 160));
+  await progress('printing');
   const by = story.by || PROVIDERS[aiSettings.aiProvider];
   return {
     images: drawn.map((d, k) => comicPageFooter(d.b64, k + 1, drawn.length, by, d.model)),
@@ -4155,11 +4169,79 @@ section.person .route{display:none}
 .cprow{display:flex;gap:8px}
 .cpb{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;background:var(--soft);color:var(--fg);border:2px solid transparent;border-radius:16px;font-size:calc(13px * var(--ts));font-weight:700}
 .cpb.on{border-color:var(--accent)}
-.cpai{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;margin:0 0 12px;padding:12px 14px;text-align:left;background:linear-gradient(120deg,#ff6b3d,#c13dff);color:#fff;border:2px solid transparent;border-radius:16px;font-size:calc(15px * var(--ts))}
-.cpai small{font-size:calc(12px * var(--ts));font-weight:600;opacity:.9}
-.cpai.on{border-color:var(--fg)}
-.cpai[disabled]{opacity:.45}
-#cpwait{margin:0;padding:10px 16px;border-top:1px solid var(--line);font-size:calc(13px * var(--ts));color:var(--mut);font-weight:600}
+.cpai{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;width:100%;margin:0 0 14px;padding:14px 14px 14px 12px;text-align:left;background:linear-gradient(120deg,#ff6b3d,#e0408f 55%,#a53dff);color:#fff;border:0;border-radius:18px;box-shadow:0 5px 0 #7b22b8,0 10px 22px rgba(165,61,255,.35);transform:translateY(0);transition:transform .08s,box-shadow .08s;-webkit-tap-highlight-color:transparent}
+.cpai:active{transform:translateY(4px);box-shadow:0 1px 0 #7b22b8,0 4px 10px rgba(165,61,255,.3)}
+.cpai::after{content:"";position:absolute;top:0;bottom:0;left:-40%;width:30%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);animation:cpshine 3.2s ease-in-out infinite}
+@keyframes cpshine{0%,55%{left:-40%}85%,100%{left:120%}}
+.cpaiic{flex:none;display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.22);font-size:22px}
+.cpait{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.cpait b{font-size:calc(16px * var(--ts));font-weight:800}
+.cpait small{font-size:calc(12px * var(--ts));font-weight:600;opacity:.92;line-height:1.3}
+.cpaigo{flex:none;padding:9px 14px;border-radius:999px;background:#fff;color:#7b22b8;font-weight:800;font-size:calc(14px * var(--ts));box-shadow:0 2px 6px rgba(0,0,0,.18)}
+.cpai[disabled]{background:var(--soft);color:var(--mut);box-shadow:none}
+.cpai[disabled]::after{display:none}
+.cpai[disabled] .cpaiic{background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.cpai[disabled] .cpaigo{background:transparent;color:var(--mut);box-shadow:none;border:1.5px solid var(--line)}
+#cfab{position:fixed;inset:0;z-index:9000;display:flex;flex-direction:column;background:radial-gradient(120% 80% at 50% 0%,#2b1f4a 0%,#120d22 55%,#07050f 100%);color:#fff;padding:calc(env(safe-area-inset-top,0px) + 14px) 0 calc(env(safe-area-inset-bottom,0px) + 10px);overflow:hidden;animation:cfin .35s ease-out both;font-family:-apple-system,system-ui,sans-serif}
+@keyframes cfin{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
+.cfreel{flex:none;height:18px;background:repeating-linear-gradient(90deg,#000 0 10px,transparent 10px 22px) 0 50%/44px 8px repeat-x,#1b1b1b;animation:cfreel 1.2s linear infinite;opacity:.9}
+@keyframes cfreel{to{background-position:44px 50%,0 0}}
+.cfhead{display:flex;align-items:center;gap:12px;padding:14px 18px 8px}
+.cfclap{font-size:30px;display:inline-block;transform-origin:20% 80%;animation:cfclap 1.6s ease-in-out infinite}
+@keyframes cfclap{0%,70%,100%{transform:rotate(0)}78%{transform:rotate(-14deg)}86%{transform:rotate(0)}}
+.cfhead div{flex:1;min-width:0}
+.cfhead b{display:block;font-size:20px;font-weight:900;letter-spacing:.5px}
+.cfhead small{display:block;margin-top:2px;color:#cbbcff;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cftime{font:700 15px ui-monospace,Menlo,monospace;color:#ffd36b;background:rgba(255,211,107,.12);padding:5px 9px;border-radius:8px}
+.cfline{display:flex;justify-content:space-between;list-style:none;margin:6px 14px 0;padding:0;position:relative}
+.cfline::before{content:"";position:absolute;left:18px;right:18px;top:19px;height:3px;background:repeating-linear-gradient(90deg,#3a2f5c 0 8px,#241c3d 8px 16px);animation:cfbelt .8s linear infinite}
+@keyframes cfbelt{to{background-position:16px 0}}
+.cfline li{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:18px;opacity:.38;transition:opacity .3s}
+.cfline li i{font-style:normal;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:#241c3d;border:2px solid #3a2f5c;transition:all .3s}
+.cfline li span{font-size:10px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:#cbbcff}
+.cfline li.done{opacity:.75}
+.cfline li.done i{background:#2fbf71;border-color:#2fbf71}
+.cfline li.on{opacity:1}
+.cfline li.on i{background:#ff6b3d;border-color:#ffd36b;box-shadow:0 0 0 6px rgba(255,107,61,.2),0 0 22px rgba(255,107,61,.6);animation:cfpulse 1.2s ease-in-out infinite}
+@keyframes cfpulse{50%{transform:scale(1.12)}}
+.cfstage{position:relative;flex:1;min-height:0;margin:14px 14px 0;border-radius:20px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);overflow:hidden;display:flex;align-items:center;justify-content:center;padding:16px}
+.cfstage::before{content:"";position:absolute;top:-30%;left:-20%;width:60%;height:160%;background:radial-gradient(closest-side,rgba(255,236,170,.16),transparent);animation:cfspot 5s ease-in-out infinite alternate;pointer-events:none}
+@keyframes cfspot{to{left:60%}}
+.cfscene{position:relative;width:100%;display:flex;flex-wrap:wrap;justify-content:center;align-content:center;gap:14px 10px}
+.cfscene h4{width:100%;margin:0 0 6px;text-align:center;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#ffd36b}
+.cfstar{display:flex;flex-direction:column;align-items:center;gap:6px;width:78px;animation:cfpop .55s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes cfpop{from{opacity:0;transform:translateY(24px) scale(.4)}to{opacity:1;transform:none}}
+.cfstar .cff{width:62px;height:62px;border-radius:50%;border:3px solid #ffd36b;background:#3a2f5c center/cover;display:grid;place-items:center;font-weight:900;font-size:20px;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+.cfstar b{max-width:78px;font-size:11px;font-weight:800;background:#fff;color:#111;padding:2px 7px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transform:rotate(-3deg)}
+.cfpol{width:96px;padding:6px 6px 18px;background:#fff;border-radius:3px;box-shadow:0 8px 20px rgba(0,0,0,.5);animation:cffly .7s cubic-bezier(.2,1.3,.4,1) both}
+.cfpol img{display:block;width:84px;height:84px;object-fit:cover;background:#ddd}
+@keyframes cffly{from{opacity:0;transform:translate(120px,-60px) rotate(30deg) scale(.6)}}
+.cfpaper{width:100%;max-width:420px;max-height:100%;overflow:hidden;background:#fbf6e6;color:#2b1d10;border-radius:6px;padding:18px 18px 22px;box-shadow:0 10px 30px rgba(0,0,0,.5);font:15px/1.5 "American Typewriter","Courier New",monospace;transform:rotate(-1.2deg);animation:cfpop .5s both}
+.cfpaper b{display:block;margin-bottom:10px;font-size:17px;text-transform:uppercase;letter-spacing:1px}
+.cfpaper p{margin:0;min-height:4.5em}
+.cfpaper p::after{content:"▌";animation:cfblink .7s steps(1) infinite}
+@keyframes cfblink{50%{opacity:0}}
+.cfpages{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:12px;width:100%;max-width:440px}
+.cfpage{position:relative;aspect-ratio:2/3;border-radius:8px;background:#f4efe1 repeating-linear-gradient(45deg,transparent 0 9px,rgba(0,0,0,.06) 9px 10px);color:#222;padding:8px;overflow:hidden;box-shadow:0 8px 18px rgba(0,0,0,.45);animation:cfpop .5s both;transform-style:preserve-3d}
+.cfpage .cfpn{position:absolute;top:6px;left:8px;font:900 11px/1 system-ui;letter-spacing:1px;color:#7b22b8}
+.cfpage .cfbub{display:block;margin-top:16px;font-size:9px;line-height:1.25;font-weight:600;background:#fff;border:1.5px solid #222;border-radius:10px;padding:3px 6px;animation:cfpop .45s both}
+.cfpage .cfbub+.cfbub{margin-top:5px}
+.cfpage.inking::after{content:"🖌️";position:absolute;font-size:22px;animation:cfbrush 2.4s ease-in-out infinite}
+@keyframes cfbrush{0%{left:8%;top:20%}25%{left:70%;top:35%}50%{left:15%;top:60%}75%{left:65%;top:78%}100%{left:8%;top:20%}}
+.cfpage.inking{background:linear-gradient(110deg,#f4efe1 30%,#ffe9a8 45%,#f4efe1 60%) 0 0/250% 100%,#f4efe1;animation:cfpop .5s both,cfwet 1.8s linear infinite}
+@keyframes cfwet{to{background-position:-250% 0}}
+.cfpage.ready{padding:0;animation:cfflip .7s ease-out both}
+.cfpage.ready img{width:100%;height:100%;object-fit:cover;display:block}
+.cfpage.ready::before{content:"✓";position:absolute;right:6px;bottom:6px;width:22px;height:22px;border-radius:50%;background:#2fbf71;color:#fff;display:grid;place-items:center;font-weight:900;font-size:13px}
+.cfpage.failed{background:#3a1f2a;color:#ffb3c7;display:grid;place-items:center;font-size:11px;font-weight:700;text-align:center}
+@keyframes cfflip{from{transform:rotateY(90deg)}to{transform:none}}
+.cfstamp{position:absolute;left:50%;top:50%;padding:10px 18px;border:4px solid #ff3d6e;border-radius:10px;color:#ff3d6e;font:900 26px/1 system-ui;letter-spacing:3px;background:rgba(7,5,15,.55);transform:translate(-50%,-50%) rotate(-12deg);animation:cfstamp .45s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes cfstamp{from{opacity:0;transform:translate(-50%,-50%) rotate(-12deg) scale(2.4)}}
+.cfquip{margin:12px 18px 0;min-height:1.3em;text-align:center;color:#ffd36b;font-size:14px;font-weight:700;transition:opacity .3s}
+.cfbar{margin:10px 18px 0;height:8px;border-radius:99px;background:rgba(255,255,255,.1);overflow:hidden}
+.cfbar i{display:block;height:100%;width:3%;border-radius:99px;background:linear-gradient(90deg,#ff6b3d,#ffd36b,#a53dff);background-size:200% 100%;transition:width .8s ease;animation:cfwet 2s linear infinite}
+.cfnote{margin:8px 18px 10px;text-align:center;color:#8e84ad;font-size:12px}
+@media (prefers-reduced-motion:reduce){.cpai::after,.cfreel,.cfclap,.cfline::before,.cfline li.on i,.cfstage::before,.cfpaper p::after,.cfpage.inking::after,.cfbar i{animation:none}}
 .cpsw{display:flex;gap:3px;padding:5px;border:3px solid;border-radius:8px}
 .cpsw i{display:block;width:16px;height:26px;border-radius:2px}
 .stlw .lngs{display:flex;gap:2px;padding:3px;border-radius:999px;background:var(--soft)}
@@ -5794,7 +5876,7 @@ function comicPicker(btn){
   if(!STORY||btn.disabled) return;
   var f=btn.closest('.stf'), old=document.getElementById('cpick'); if(old){ old.remove(); return; }
   var el=document.createElement('div'); el.id='cpick'; el.setAttribute('role','group'); el.setAttribute('aria-label','Comic style');
-  el.innerHTML='<button class="cpai'+(COMICSTYLE==='ai'?' on':'')+'" data-cstyle="ai"'+(COMICDRAW?'':' disabled')+'><b>✨ Drawn by AI</b><small>'+(COMICDRAW?'Whole comic pages drawn in the style your story instructions ask for. About a minute per page.':'Needs an OpenAI key: Settings › AI')+'</small></button>'+
+  el.innerHTML='<button class="cpai" data-cstyle="ai"'+(COMICDRAW?'':' disabled')+'><span class="cpaiic" aria-hidden="true">✨</span><span class="cpait"><b>Drawn by AI</b><small>'+(COMICDRAW?'Real comic pages in your story’s style · about 1 min a page':'Needs an OpenAI key in Settings › AI')+'</small></span><span class="cpaigo" aria-hidden="true">'+(COMICDRAW?'Draw ›':'No key')+'</span></button>'+
     '<p>Or a quick template</p><div class="cprow">'+Object.keys(COMIC_THEMES).map(function(k){ var t=COMIC_THEMES[k];
     return '<button class="cpb'+(k===COMICSTYLE?' on':'')+'" data-cstyle="'+k+'"><span class="cpsw" style="background:'+t.paper+';border-color:'+t.line+'"><i style="background:'+t.coverBg+'"></i><i style="background:'+t.cap+'"></i><i style="background:'+t.panels[0]+'"></i></span>'+escH(t.label)+'</button>'; }).join('')+'</div>';
   f.parentNode.insertBefore(el,f);
@@ -5815,19 +5897,113 @@ function storyImage(btn,style){
     }).catch(function(e){ done('Couldn’t draw the pages: '+(e&&e.message||e)); });
   });
 }
+// ✨ Drawn by AI runs as a "comic factory" over the whole screen: the cast walks on, the locations fly in, the script types
+// itself, the storyboard fills with the real lettering, then each page is inked and flips over as the real page arrives.
+var CF=null, CF_STATIONS=[['cast','🎭','Casting'],['scout','📸','Locations'],['script','✍️','Script'],['board','🎞','Storyboard'],['ink','🎨','Ink'],['print','🖨','Print']];
+var CF_QUIPS={
+  cast:['Fitting {n} for a cape','Handing {n} the lead role','Checking everyone’s good side','Polishing {n}’s helmet'],
+  scout:['Scouting today’s locations','Framing the best shots','Moving the sunset a bit left','Asking the clouds to hold still'],
+  script:['The writers argue about the title','Counting kudos for the plot twist','Cutting a joke about {n}','Sharpening the punchlines'],
+  board:['Pinning up the storyboard','Fitting words into bubbles','Deciding who gets the last line'],
+  ink:['Inking {n}’s best side','Colouring inside the lines, mostly','Adding speed lines to {n}','The colourist wants more orange','Lettering every accent by hand'],
+  print:['Hot off the press','Stacking the pages','Opening the share sheet']
+};
+function cfEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function cfFirst(n){ return String(n||'').split(' ')[0]; }
+function cfFace(c,k){
+  var nm=cfFirst(c.name), ini=nm.charAt(0).toUpperCase()+(String(c.name||'').split(' ')[1]||'').charAt(0).toUpperCase();
+  var img=c.avatar&&!/avatar.athlete|default/i.test(c.avatar)?' style="background-image:url(&quot;'+cfEsc(c.avatar)+'&quot;)"':'';
+  return '<div class="cfstar" style="animation-delay:'+(k*0.16)+'s"><span class="cff"'+img+'>'+(img?'':cfEsc(ini))+'</span><b>'+cfEsc(nm)+'</b></div>';
+}
+function cfOpen(){
+  cfClose(true);
+  var ov=document.createElement('div'); ov.id='cfab'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-label','Drawing the comic');
+  ov.innerHTML='<div class="cfreel"></div><div class="cfhead"><span class="cfclap" aria-hidden="true">🎬</span><div><b>COMIC FACTORY</b><small id="cfsub">'+cfEsc(STORY.title||'The day’s story')+'</small></div><span class="cftime" id="cftime">0:00</span></div>'+
+    '<ol class="cfline">'+CF_STATIONS.map(function(s){ return '<li data-st="'+s[0]+'"><i>'+s[1]+'</i><span>'+s[2]+'</span></li>'; }).join('')+'</ol>'+
+    '<div class="cfstage" id="cfstage" aria-live="polite"></div><p class="cfquip" id="cfquip"></p><div class="cfbar"><i id="cfbar"></i></div>'+
+    '<p class="cfnote">Drawing takes about a minute per page. Keep the app open.</p><div class="cfreel"></div>';
+  document.body.appendChild(ov); document.body.style.overflow='hidden';
+  CF={st:'',t0:Date.now(),timers:[],pages:[],total:0,done:0,type:null,quip:0};
+  CF.timers.push(setInterval(function(){ var s=Math.floor((Date.now()-CF.t0)/1000), el=document.getElementById('cftime'); if(el) el.textContent=Math.floor(s/60)+':'+('0'+s%60).slice(-2); },1000));
+  CF.timers.push(setInterval(cfQuip,3200));
+  cfGo('cast');
+  CF.timers.push(setTimeout(function(){ cfGo('scout'); },2800));
+  CF.timers.push(setTimeout(function(){ cfGo('script'); },5800));
+}
+function cfClose(now){
+  if(!CF&&!document.getElementById('cfab')) return;
+  if(CF){ CF.timers.forEach(function(t){ clearInterval(t); clearTimeout(t); }); clearInterval(CF.type); }
+  CF=null; var ov=document.getElementById('cfab'); if(ov) ov.remove(); document.body.style.overflow='';
+}
+function cfIdx(st){ for(var i=0;i<CF_STATIONS.length;i++) if(CF_STATIONS[i][0]===st) return i; return -1; }
+function cfGo(st){
+  if(!CF||cfIdx(st)<=cfIdx(CF.st)) return;
+  CF.st=st; var on=cfIdx(st);
+  [].forEach.call(document.querySelectorAll('#cfab .cfline li'),function(li,k){ li.classList.toggle('on',k===on); li.classList.toggle('done',k<on); });
+  clearInterval(CF.type); cfQuip(); cfBar();
+  var stage=document.getElementById('cfstage'); if(!stage) return;
+  if(st==='cast') stage.innerHTML='<div class="cfscene"><h4>Starring</h4>'+STORY.cast.slice(0,12).map(cfFace).join('')+'</div>';
+  else if(st==='scout'){
+    var urls=storyPhotoUrls();
+    stage.innerHTML='<div class="cfscene"><h4>On location</h4>'+(urls.length?urls.map(function(u,k){ return '<div class="cfpol" style="animation-delay:'+(k*0.22)+'s;transform:rotate('+((k%2?1:-1)*(3+k%4*2))+'deg)"><img src="'+cfEsc(u)+'" alt=""></div>'; }).join(''):'<div class="cfpaper"><b>No photos today</b><p>The scenes come straight from the story.</p></div>')+'</div>';
+  }
+  else if(st==='script'){
+    stage.innerHTML='<div class="cfpaper"><b>'+cfEsc(STORY.title||'The day’s story')+'</b><p id="cftype"></p></div>';
+    var paras=STORY.paragraphs.map(function(x){ return String(x.text||'').replace(/\\[[^\\]]*\\]\\s*/g,''); }).filter(Boolean), pi=0, ci=0;
+    CF.type=setInterval(function(){
+      var el=document.getElementById('cftype'); if(!el||!paras.length) return;
+      var t=paras[pi%paras.length]; ci+=2; el.textContent=t.slice(Math.max(0,ci-220),ci);
+      if(ci>=t.length+30){ pi++; ci=0; }
+    },45);
+  }
+  else if(st==='board'||st==='ink') cfPages(true);
+  else if(st==='print'){ var sb=document.getElementById('cfsub'), ok=CF.pages.filter(function(p){ return p.thumb; }).length; if(sb) sb.textContent=(ok||CF.total)+' page'+((ok||CF.total)===1?'':'s')+' ready'; cfPages(false); stage.insertAdjacentHTML('beforeend','<div class="cfstamp">PRINTED</div>'); }
+}
+function cfQuip(){
+  if(!CF) return; var list=CF_QUIPS[CF.st]||[]; if(!list.length) return;
+  var names=STORY.cast.map(function(c){ return cfFirst(c.name); }).filter(Boolean), q=list[CF.quip++%list.length].replace('{n}',names[CF.quip%Math.max(1,names.length)]||'the hero');
+  var el=document.getElementById('cfquip'); if(el){ el.style.opacity=0; setTimeout(function(){ el.textContent=q+'…'; el.style.opacity=1; },250); }
+  var sub=document.getElementById('cfsub'); if(sub&&CF.st==='ink'&&CF.total) sub.textContent='Drawing page '+Math.min(CF.total,CF.done+1)+' of '+CF.total;
+}
+function cfBar(){
+  if(!CF) return; var base={cast:5,scout:10,script:18,board:34,ink:38,print:100}[CF.st]||0;
+  if(CF.st==='ink'&&CF.total) base=38+Math.round(58*CF.done/CF.total);
+  var el=document.getElementById('cfbar'); if(el) el.style.width=base+'%';
+}
+function cfPages(build){
+  var stage=document.getElementById('cfstage'); if(!stage||!CF) return;
+  var wrap=document.getElementById('cfpages');
+  if(build||!wrap){ stage.innerHTML='<div class="cfscene"><h4>'+(CF.st==='board'?'Storyboard':CF.st==='print'?'Printed':'Ink & colour')+'</h4><div class="cfpages" id="cfpages"></div></div>'; wrap=document.getElementById('cfpages'); }
+  wrap.innerHTML=CF.pages.map(function(p,k){
+    if(p.thumb) return '<div class="cfpage ready">'+(p.thumb==='ok'?'<span class="cfpn">PAGE '+(k+1)+'</span>':'<img src="'+p.thumb+'" alt="Page '+(k+1)+'">')+'</div>';
+    if(p.failed) return '<div class="cfpage failed">Page '+(k+1)+'<br>didn’t come out</div>';
+    return '<div class="cfpage'+(CF.st==='ink'?' inking':'')+'" style="animation-delay:'+(k*0.15)+'s"><span class="cfpn">PAGE '+(k+1)+'</span>'+(p.lines||[]).slice(0,3).map(function(l,j){ return '<span class="cfbub" style="animation-delay:'+(0.3+k*0.15+j*0.25)+'s">'+(l.who?'<b>'+cfEsc(l.who)+':</b> ':'')+cfEsc(l.text)+'</span>'; }).join('')+'</div>';
+  }).join('');
+  var h=wrap.parentNode.querySelector('h4'); if(h) h.textContent=CF.st==='board'?'Storyboard':CF.st==='print'?'Printed':'Ink & colour';
+}
+// what the app reports while it works: plan (the pages and their lettering), page (one drawn), printing
+function cfProgress(p){
+  if(!CF) return;
+  if(p.step==='plan'){
+    CF.pages=(p.pages||[]).map(function(x){ return {lines:x.lines||[]}; }); CF.total=CF.pages.length;
+    var sub=document.getElementById('cfsub'); if(sub&&p.title) sub.textContent=p.title;
+    cfGo('board'); CF.timers.push(setTimeout(function(){ cfGo('ink'); cfPages(true); },3200));
+  } else if(p.step==='page'){
+    if(!CF.pages[p.i]) CF.pages[p.i]={};
+    if(p.ok===false) CF.pages[p.i].failed=true; else CF.pages[p.i].thumb=p.thumb||'ok';
+    CF.done=p.done||CF.done+1; CF.total=p.total||CF.total;
+    if(cfIdx(CF.st)<cfIdx('ink')) cfGo('ink'); cfPages(false); cfBar(); cfQuip();
+  } else if(p.step==='printing') cfGo('print');
+}
 // ✨ Drawn by AI: the app plans the pages with the story's AI and has OpenAI's image model draw each one in full
 function comicDraw(){
   var b=document.querySelector('#storysheet [data-act="story-image"]'); if(!STORY||!b||b.disabled) return;
   var pk=document.getElementById('cpick'); if(pk) pk.remove();
   if(COMICSTYLE!=='ai'){ COMICLOOK=COMIC_THEMES[COMICSTYLE]?COMICSTYLE:COMICLOOK; COMICSTYLE='ai'; send('setcomicstyle',{style:'ai'}); }
-  var was=b.textContent, f=b.closest('.stf'), w=document.createElement('p'); w.id='cpwait'; w.textContent='Reading the photos…';
-  f.parentNode.insertBefore(w,f); b.disabled=true; b.textContent='✨ Drawing…';
-  window.__comicProgress=function(p){
-    var t=p.step==='planning'?'Planning the pages from your story instructions…':p.step==='drawing'?(p.total?'Drawing the pages: '+p.done+' of '+p.total+' done. Keep the app open.':'Drawing the pages…'):'Reading the photos…';
-    var el=document.getElementById('cpwait'); if(el) el.textContent=t;
-  };
+  b.disabled=true; cfOpen();
+  window.__comicProgress=cfProgress;
   send('story-ai-comic',{look:COMICLOOK},function(ok,msg){
-    window.__comicProgress=null; var el=document.getElementById('cpwait'); if(el) el.remove(); b.disabled=false; b.textContent=was;
+    window.__comicProgress=null; cfClose(); b.disabled=false;
     if(msg==='NEED_OPENAI') return toast('Drawing needs an OpenAI key: Settings › AI');
     if(!ok) return toast(msg||'The pages couldn’t be drawn'); if(msg) toast(msg);
   });
