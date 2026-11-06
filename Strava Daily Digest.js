@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.38.1';
+const VERSION = '1.38.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -116,17 +116,19 @@ const APP_ID = 'stravafeed';   // unique per app, never changes
 // inventory tools read it without running the script, and Settings › Built with shows it.
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
-  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.0', since: '1.35.2' },
-  { id: 'in-app-updates', name: 'In-app updates', version: '1.0.1', since: '1.35.2' },
+  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.1', since: '1.38.2' },
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.0', since: '1.38.2' },
   { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.35.2' },
-  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.9.1' },
-  { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.12.0' },
-  { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.13.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.1', since: '1.38.2' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.1', since: '1.38.2' },
+  { id: 'widgets', name: 'Widgets', version: '1.1.1', since: '1.38.2' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.16.0' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.24.1' },
 ];
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
+// In a native shell (BuildIt) new versions come from the App Store or TestFlight, never from GitHub (Step 8).
+const NATIVE_SHELL = (() => { try { return config.runsInNativeShell === true; } catch (e) { return false; } })();
 
 const STRAVA = 'https://www.strava.com';
 const SCHEME = 'strava-digest://';
@@ -205,7 +207,7 @@ async function main() {
       b.id = 'sd-back'; b.textContent = '‹ Back to digest';
       b.style.cssText = 'position:fixed;z-index:2147483647;left:50%;transform:translateX(-50%);border:0;border-radius:999px;background:#fc4c02;color:#fff;font-family:-apple-system,system-ui,sans-serif;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.35)';
       b.style.bottom = (20 * k) + 'px'; b.style.fontSize = (17 * k) + 'px'; b.style.padding = (13 * k) + 'px ' + (24 * k) + 'px';
-      b.onclick = function () { location.href = '${SCHEME}back'; };
+      b.onclick = function () { var url = '${SCHEME}back'; if (window.__hostBridge) window.__hostBridge(url); else window.location.href = url; };   // portable-bridge recipe
       document.body.appendChild(b);
     })(); 'ok'`).catch(() => {});
   }
@@ -1878,7 +1880,7 @@ function settingsState() {
     settings: Object.fromEntries(Object.keys(SET_KEYS).map(k => [k, settings[k]])),
     cfg: Object.fromEntries(CFG_FLAT.map(d => [d.k, cfg(d.k)])),
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
-    palettes: PALETTES, version: VERSION, appName: "Daily Digest",
+    palettes: PALETTES, version: VERSION, nativeShell: NATIVE_SHELL, appName: "Daily Digest",
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
@@ -1904,6 +1906,7 @@ function updateSnoozed() {
 }
 
 async function checkForUpdate() {
+  if (NATIVE_SHELL) return null;   // Step 8: updates come through the App Store
   if (!settings.checkUpdates || updateSnoozed()) return null;
   try {
     const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
@@ -1924,6 +1927,7 @@ async function checkForUpdate() {
 }
 
 async function applyUpdate(info) {
+  if (NATIVE_SHELL) throw new Error('This app is updated through the App Store.');   // Step 8: never download code
   const req = new Request(`${REPO_RAW}${encodeURI(info.script)}?t=${Date.now()}`);
   req.timeoutInterval = 30;
   const code = await req.loadString();
@@ -4634,7 +4638,9 @@ function send(action,params,cb){
   var qs=Object.keys(p).map(function(k){return k+'='+encodeURIComponent(p[k]);}).join('&');
   q.push('${SCHEME}'+action+'?'+qs); pump();
 }
-function pump(){ if(busy||!q.length) return; busy=true; location.href=q.shift(); setTimeout(function(){busy=false;pump();},300); }
+function pump(){ if(busy||!q.length) return; busy=true; var url=q.shift();
+  if (window.__hostBridge) window.__hostBridge(url); else window.location.href = url;   // portable-bridge recipe
+  setTimeout(function(){busy=false;pump();},300); }
 var aiLang=document.querySelector('.lng.on[data-lang]')?document.querySelector('.lng.on[data-lang]').dataset.lang:'';
 var aiMode=document.querySelector('.mode.on')?document.querySelector('.mode.on').dataset.mode:'mystyle';
 function setMode(mode, from){
@@ -5282,8 +5288,10 @@ function renderCfg(){
       swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
       '<div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">'+escH(SET.usageStatus||'Sends one test event now and shows PostHog’s answer.')+'</small></div><button class="sm" data-act="usage-test">Send test</button></div>':'')+
     '<h3 class="sec">Updates</h3>'+
-      swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
-      '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>'+
+      (SET.nativeShell
+        ? '<div class="srow"><div class="grow"><b>Updates</b><small class="muted">You have Daily Digest '+escH(SET.version)+'. New versions come through the App Store (or TestFlight).</small></div></div>'
+        : swRow('checkUpdates','Offer new versions','You have Daily Digest '+escH(SET.version)+'. “Later” waits two days.')+
+      '<div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>')+
       '<div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Daily Digest opened</small></div><button class="sm" data-act="startlog">Show</button></div>'+
       '<pre id="startlog" class="startlog" hidden></pre>'+
     SET.cfgSchema.filter(function(sec){ return sec.title!=='Comments'; }).map(function(sec){ return '<h3 class="sec">'+escH(sec.title)+'</h3>'+sec.items.map(fieldHTML).join('')+(sec.title==='Account'?logoutRow():''); }).join('')+
