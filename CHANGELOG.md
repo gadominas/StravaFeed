@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.38.2 (2026-11-07): App Store ready
+
+- 📱 **Ready for the App Store**: Built as an app of its own, Daily Digest gets new versions from the App Store instead of downloading them.
+- ✅ **Checked on every change**: Every change now runs the shared app tests: start-up, widget, updates and usage counts.
+- 🔙 **Same buttons, any home**: Every button in the digest, and Back to digest on Strava's page, works the same way in Scriptable and as an app of its own.
+
+**Changes**
+
+- In-app updates 1.1.0: in a native shell (BuildIt) there is no update check or installer, and Settings › Updates says new versions come through the App Store
+- Portable bridge recipe: the page, and the Back to digest button on Strava's page, hand their messages to window.__hostBridge when a native shell provides one
+- Testing recipe: the app-blueprints testkit (lint and five conformance packs) runs on every push (.github/workflows/tests.yml), next to the app test
+- Blueprint trace: Stability patterns 1.0.1, AI configuration 1.0.1, Launch screen 1.0.1, Widgets 1.1.1
+
 ## 1.38.1 (2026-11-04): Share when you're ready
 
 - 📤 **Share comic**: A finished comic waits for you: tap Share comic when you want to send or save it.
