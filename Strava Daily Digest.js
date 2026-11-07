@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.43.0';
+const VERSION = '1.43.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -6057,7 +6057,7 @@ function paHead(title){
 function paKeep(){
   var t=document.getElementById('patitle'), d=document.getElementById('padesc'), w=document.getElementById('patweak');
   if(POST){ if(t) POST.title=t.value; if(d) POST.desc=d.value; if(w) POST.tweak=w.value; }
-  var pw=document.getElementById('phtweak'); if(PHOTO&&pw) PHOTO.tweak=pw.value;
+  var pw=document.getElementById('phtweak'); if(PHOTO&&pw){ PHOTO.tw=PHOTO.tw||{}; PHOTO.tw[photoMode()]=pw.value; }   // your wishes, kept per mode
 }
 function renderPost(){
   var b=document.querySelector('#msheet .msb'); paHead('Title &amp; description'); paFoot();
@@ -6142,7 +6142,7 @@ function photoStatsNote(by,stats){ return escH(by)+' · '+(stats||[]).map(functi
 function photoDesign(){
   paKeep(); var P=PHOTO; if(!P||!P.im) return;
   P.busy='Designing your stats…'; P.err=''; renderPhoto();
-  send('post-design',{id:P.id,tweak:P.tweak||''},function(ok,msg){
+  send('post-design',{id:P.id,tweak:(P.tw||{}).clean||''},function(ok,msg){
     if(PHOTO!==P) return; P.busy='';
     if(!ok){ P.err=msg||'The design didn’t come back. Try again.'; return renderPhoto(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
@@ -6152,6 +6152,7 @@ function photoDesign(){
     renderPhoto();
   });
 }
+var PA_IDEAS_CLEAN=[['↗️','Top right corner'],['🔢','One big hero number'],['🧮','Every stat in a grid'],['🤏','Minimal: just distance and pace'],['🗺','Add the route line'],['⬛','Dark panel behind the stats'],['🔠','Bigger text']];
 var PA_IDEAS=[['📼','Retro 80s poster'],['🎞','Old film photo from the 1970s'],['🦸','Comic book hero'],['🖌','Watercolour painting'],['🌃','Neon night, synthwave'],['🏆','Epic movie poster'],['😂','Add a funny quote']];
 function renderPhoto(){
   var b=document.querySelector('#msheet .msb'); paHead(photoMode()==='ai'?'Photo redesign':'Stats on a photo'); paFoot();
@@ -6163,16 +6164,17 @@ function renderPhoto(){
     html+=paStudioHTML(P);
   } else {
     if(r&&r.out&&!P.busy) html+=paCompare(P,r,ai);   // before and after, side by side, whole pictures; tap for full screen
-    else html+='<div class="paprev'+(P.busy?' working':'')+(ai&&!P.busy?' small':'')+'">'+(P.src?'<button class="paview" data-act="photo-view" data-which="orig" aria-label="See the original full screen"><img src="'+P.src+'" alt="Your photo"></button>':'')+
-      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(ai&&!P.busy?'<span class="paorig">Original · not redesigned yet</span><span class="paexp" aria-hidden="true">⤢</span>':'')+'</div>';
+    else html+='<div class="paprev'+(P.busy?' working':'')+(!P.busy?' small':'')+'">'+(P.src?'<button class="paview" data-act="photo-view" data-which="orig" aria-label="See the original full screen"><img src="'+P.src+'" alt="Your photo"></button>':'')+
+      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(!P.busy?'<span class="paorig">Original · '+(ai?'not redesigned yet':'no stats yet')+'</span><span class="paexp" aria-hidden="true">⤢</span>':'')+'</div>';
     if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
     if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
-    if(P.src&&ai){
-      html+='<div class="paask"><div class="msect">🎨 <b>How should it look?</b></div>'+
-        '<textarea id="phtweak" class="pain" rows="3" maxlength="300" placeholder="Your wishes for this photo, e.g. a retro 1970s film photo with every stat and a funny quote. Leave empty to use your instructions in Settings." aria-label="Your wishes for this photo">'+escH(P.tweak||'')+'</textarea>'+
-'<button class="cpai pago" data-act="photo-again"'+(P.busy?' disabled':'')+'><span class="cpaiic" aria-hidden="true">🎨</span><span class="cpait"><b>'+(r?'Redesign again':'Redesign my photo')+'</b><small>Repainted by AI with your wishes · about a minute</small></span><span class="cpaigo" aria-hidden="true">Go ›</span></button>'+
-        '<small class="muted">Need ideas? Tap to add:</small><div class="pachips">'+PA_IDEAS.map(function(x,i){ return '<button class="stchip" data-phidea="'+i+'">'+x[0]+' '+escH(x[1])+'</button>'; }).join('')+'</div>'+'</div>';
-    } else if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="Change it? e.g. top right, bigger, only distance and pace" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
+    if(P.src){   // both modes wait for your wishes and a tap; nothing is made until then
+      var ideas=ai?PA_IDEAS:PA_IDEAS_CLEAN, tw=(P.tw||{})[photoMode()]||'';
+      html+='<div class="paask"><div class="msect">'+(ai?'🎨':'📊')+' <b>'+(ai?'How should it look?':'How should the stats look?')+'</b></div>'+
+        '<textarea id="phtweak" class="pain" rows="3" maxlength="300" placeholder="'+(ai?'Your wishes for this photo, e.g. a retro 1970s film photo with every stat and a funny quote.':'Your wishes for the stats, e.g. top right, one big distance, every stat in a grid.')+' Leave empty to use your instructions in Settings." aria-label="Your wishes for this photo">'+escH(tw)+'</textarea>'+
+        '<button class="cpai pago" data-act="photo-again"'+(P.busy?' disabled':'')+'><span class="cpaiic" aria-hidden="true">'+(ai?'🎨':'📊')+'</span><span class="cpait"><b>'+(ai?(r?'Redesign again':'Redesign my photo'):(r?'Draw the stats again':'Draw my stats'))+'</b><small>'+(ai?'Repainted by AI with your wishes · about a minute':'On your photo as it is · a few seconds')+'</small></span><span class="cpaigo" aria-hidden="true">Go ›</span></button>'+
+        '<small class="muted">Need ideas? Tap to add:</small><div class="pachips">'+ideas.map(function(x,i){ return '<button class="stchip" data-phidea="'+i+'">'+x[0]+' '+escH(x[1])+'</button>'; }).join('')+'</div></div>';
+    }
   }
   b.innerHTML=html;
 }
@@ -6183,8 +6185,7 @@ function photoPick(src,i){
     if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
     var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; PHOTO.busy='';
-      if(photoMode()==='ai'){ renderPhoto(); var ta=document.getElementById('phtweak'); if(ta) ta.scrollIntoView({block:'center',behavior:'smooth'}); }   // AI redesign waits for your wishes
-      else photoDesign(); };
+      renderPhoto(); var ta=document.getElementById('phtweak'); if(ta) ta.scrollIntoView({block:'center',behavior:'smooth'}); };   // waits for your wishes and a tap, in both modes
     im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
     im.src=d.img;
   });
@@ -6238,7 +6239,7 @@ function photoRedraw(){
     if(step==='painting'){ S.model=data.model||''; S.size=data.size||''; if(data.headline) S.headline=data.headline; S.dist=data.dist||''; S.tPaint=Date.now(); S.pct=Math.max(S.pct,30); }
     if(paStageIdx(step)>paStageIdx(S.step)){ S.step=step; S.n=0; S.line=paLine(P); S.lt=(Date.now()-P.t0)/1000; renderPhoto(); }
   };
-  send('post-redraw',{id:P.id,tweak:P.tweak||''},function(ok,msg){
+  send('post-redraw',{id:P.id,tweak:(P.tw||{}).ai||''},function(ok,msg){
     window.__photoProgress=null;
     if(PHOTO!==P){ clearInterval(P.tick); return; }
     function finish(){ clearInterval(P.tick); P.busy=''; P.studio=null; renderPhoto(); }
@@ -6908,8 +6909,8 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='photo-open'){ MINEVIEW='photo'; if(PHOTO&&MINE&&PHOTO.id!==MINE.id) PHOTO=null; renderPhoto(); var qb=document.querySelector('#msheet .msb'); if(qb) qb.scrollTop=0; return; }
   if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0);
   if(t.dataset.act==='photo-again') return photoRun();
-  if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; if(PHOTOMODE==='clean'&&PHOTO&&PHOTO.im&&!(PHOTO.res&&PHOTO.res.clean)) return photoDesign(); return renderPhoto(); }   // AI redesign waits for Redesign my photo
-  if(t.dataset.phidea!=null){ paKeep(); var idea=PA_IDEAS[+t.dataset.phidea]; if(PHOTO&&idea){ var cur=String(PHOTO.tweak||'').trim(); PHOTO.tweak=cur?(cur.indexOf(idea[1])>=0?cur:cur+', '+idea[1].toLowerCase()):idea[1]; renderPhoto(); } return; }
+  if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; return renderPhoto(); }   // nothing is made until you tap the button
+  if(t.dataset.phidea!=null){ paKeep(); var idea=(photoMode()==='ai'?PA_IDEAS:PA_IDEAS_CLEAN)[+t.dataset.phidea]; if(PHOTO&&idea){ PHOTO.tw=PHOTO.tw||{}; var md=photoMode(), cur=String(PHOTO.tw[md]||'').trim(); PHOTO.tw[md]=cur?(cur.indexOf(idea[1])>=0?cur:cur+', '+idea[1].toLowerCase()):idea[1]; renderPhoto(); } return; }
   if(t.dataset.act==='photo-other'){ if(PHOTO&&PHOTO.busy) return; PHOTO=null; return renderPhoto(); }
   if(t.dataset.act==='photo-share') return photoShare();
   if(t.dataset.act==='photo-view') return photoView(t.dataset.which||'orig');
