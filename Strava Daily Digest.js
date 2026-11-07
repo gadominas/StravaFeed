@@ -108,23 +108,34 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.43.3';
+const VERSION = '1.44.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
-// Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
+// Shared blueprints this app was built with. One line per blueprint, in this exact shape:
 // inventory tools read it without running the script, and Settings › Built with shows it.
-const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
-  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.1', since: '1.38.2' },
-  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.0', since: '1.38.2' },
-  { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.35.2' },
-  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.1', since: '1.38.2' },
-  { id: 'launch-screen', name: 'Launch screen', version: '1.0.1', since: '1.38.2' },
+  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.2', since: '1.44.0' },
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.1', since: '1.44.0' },
+  { id: 'settings', name: 'Settings', version: '2.0.1', since: '1.44.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.2', since: '1.44.0' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.2', since: '1.44.0' },
   { id: 'widgets', name: 'Widgets', version: '1.1.1', since: '1.38.2' },
-  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.16.0' },
-  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.24.1' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.2', since: '1.44.0' },
+  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.1', since: '1.44.0' },
 ];
+// What each blueprint is, shown when a Built with row is tapped (settings blueprint, Step 9).
+// Written by `node tools/about.js` in app-blueprints from the versions in BLUEPRINTS; never edit by hand.
+const BLUEPRINT_ABOUT = {
+  'stability-patterns': { what: "The rules that keep the app opening on any iPhone.", does: "Uses iCloud only when this iPhone has it, keeps data on the phone otherwise, and checks the Keychain before reading from it.", drives: "Where the app keeps its data, the widget, the installer and in-app updates.", why: "A new phone, one without iCloud or one with nothing saved yet still opens the app, instead of stopping with an error." },
+  'in-app-updates': { what: "The way the app offers and installs its own new versions.", does: "When the app opens it checks for a newer version, shows its three best features, and installs it with Update now; Later waits two days.", drives: "The update sheet, Settings › Updates and the installer.", why: "Fixes and features reach you without reinstalling by hand, and the app only replaces itself with a checked, newer copy." },
+  'settings': { what: "The shared Settings sheet every app has.", does: "Keeps the app's look, behaviour and limits in one place; changes apply at once and survive updates.", drives: "Appearance (colours, layout, text size, font), the app's own choices, Updates, every adjustable value, and this Built with list.", why: "Nobody edits code to change a setting, and every app is set up the same familiar way." },
+  'ai-configuration': { what: "How the app connects to Claude or OpenAI.", does: "Keeps your key in the iPhone Keychain, lets you pick the provider and model, tests the connection and counts the tokens each feature uses.", drives: "Settings › AI settings, every AI feature, and the ✦ AI label on everything AI wrote.", why: "Your key goes only to its own provider, you can see what AI uses, and the app still works without a key." },
+  'launch-screen': { what: "The branded screen the app opens on.", does: "Shows the app's logo, name and tagline for about two and a half seconds; a tap skips it, and Reduce Motion keeps it still.", drives: "The first moment after the app opens, with the same logo as the icon and the widget.", why: "The app starts the same recognisable way every time while its page gets ready behind the screen, and the screen can never get stuck." },
+  'widgets': { what: "The shared design for the app's Home Screen and Lock Screen widgets.", does: "Draws the app's logo and name, one headline figure or title, a few rows and an updated line, from the app's own data.", drives: "Every widget size, the Lock Screen versions, and the widget's settings.", why: "Widgets name their app, look like one family, say when their data is old, and never show a script error." },
+  'ai-invitation': { what: "A short card that shows what AI adds to this app.", does: "While no AI key is set, it names three things AI can do here and takes you straight to adding a key; it comes back every few days at most, and Don't remind me again ends it.", drives: "The invitation at launch, and the hand-over to Settings › AI settings.", why: "Features that need a key are hidden without one, so they are easy to miss; this shows them without nagging or covering anything else." },
+  'usage-analytics': { what: "Optional, anonymous counts of which features get used.", does: "Only after you say yes, it sends counts and fixed choices, never names, text, links or keys; turning it off stops sending and forgets the install ID.", drives: "The one-time question on the main page and Settings › Privacy.", why: "It shows what to improve next without collecting anything personal." },
+};
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StravaFeed/main/';
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;
 // In a native shell (BuildIt) new versions come from the App Store or TestFlight, never from GitHub (Step 8).
@@ -420,10 +431,6 @@ async function main() {
     if (head === 'settings-done') {   // the sheet closed: redraw or reload once for everything that needs it
       const effect = settingsEffect; settingsEffect = '';
       if (feed && effect) await showDay(effect === 'reload');
-      return;
-    }
-    if (head === 'openurl') {   // Built with: only the blueprints repository opens from here
-      if (p.v === BLUEPRINTS_REPO || String(p.v).startsWith(BLUEPRINTS_REPO + '/')) await Safari.openInApp(p.v, false);
       return;
     }
     if (head === 'update-check') {
@@ -2139,7 +2146,7 @@ function settingsState() {
     cfg: Object.fromEntries(CFG_FLAT.map(d => [d.k, cfg(d.k)])),
     cfgSchema: CONFIG.map(([title, items]) => ({ title, items })),
     palettes: PALETTES, version: VERSION, nativeShell: NATIVE_SHELL, appName: "Daily Digest",
-    blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
+    blueprints: BLUEPRINTS, blueprintAbout: BLUEPRINT_ABOUT,
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
     defaultRules: DEFAULT_COMMENT_RULES, defaultStoryRules: DEFAULT_STORY_RULES, defaultPostRules: DEFAULT_POST_RULES, defaultOverlayRules: DEFAULT_OVERLAY_RULES, storyTweaks: STORY_TWEAKS, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
@@ -4889,6 +4896,19 @@ body.loading .person{opacity:.45}
 .tline{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.d-compact .stats,body.d-tiny .stats{margin-top:8px;gap:8px}
 #cfgsheet{position:fixed;inset:0;z-index:49;background:var(--paper);color:var(--ink);transform:translateY(102%);visibility:hidden;transition:transform .28s ease,visibility 0s linear .28s;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;text-align:left}
+#bpabout{position:fixed;inset:0;z-index:51;pointer-events:none}
+#bpabout.open{pointer-events:auto}
+.bp-dim{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;transition:opacity .2s}
+#bpabout.open .bp-dim{opacity:1}
+.bp-card{position:absolute;left:0;right:0;bottom:0;max-height:86vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--paper);color:var(--ink);border-top:1px solid var(--rule);border-radius:20px 20px 0 0;padding:18px 20px calc(env(safe-area-inset-bottom) + 28px);transform:translateY(102%);transition:transform .28s ease}
+#bpabout.open .bp-card{transform:none}
+.bp-top{display:flex;align-items:flex-start;gap:12px;margin-bottom:6px}
+.bp-top .grow{flex:1;min-width:0}
+.bp-kick{display:block;font:700 calc(11.5px * var(--ts))/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+.bp-card h2{font:700 calc(24px * var(--ts))/1.15 var(--display);margin:4px 0 4px}
+.bp-l{font:700 calc(12.5px * var(--ts))/1.2 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:20px 0 6px}
+.bp-p{margin:0;font-size:calc(16px * var(--ts));line-height:1.45}
+@media (prefers-reduced-motion: reduce){.bp-card,.bp-dim{transition:none}}
 #cfgsheet.open{transform:none;visibility:visible;transition:transform .28s ease}
 #cfgsheet button{font:inherit;color:inherit;background:none;border:0;border-radius:0;padding:0;font-weight:inherit;cursor:pointer;text-align:inherit}
 #cfgsheet .sh-head{position:sticky;top:0;z-index:2;background:var(--paper);display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 14px) 18px 12px;border-bottom:1px solid var(--rule)}
@@ -5564,11 +5584,37 @@ function fieldHTML(d){
     '<button data-act="cfgstep" data-k="'+d.k+'" data-v="1" aria-label="Increase" '+(v>=d.max?'disabled':'')+'>+</button>'+
     '<span class="unit">'+escH(d.unit||'')+'</span><span class="range">'+fmtCfg(d,d.min)+'–'+fmtCfg(d,d.max)+(ch?' — original '+fmtCfg(d,d.def):'')+'</span></div></div>';
 }
-function bpLink(b){ return SET.blueprintsRepo+'/blob/'+b.id+'-v'+b.version+'/blueprints/'+b.id+'.md'; }
+// Settings › Built with (settings blueprint 2.0.1, Step 9): a tap shows what a blueprint is, from text bundled in the app.
+var bpOpen = null;   // a blueprint id, "*" for About blueprints, or null
+var BP_KEYS = ["what", "does", "drives", "why"];
+var BP_EN = {"fields": ["What it is", "What it does", "What it drives", "Why it matters"], "allTitle": "About blueprints", "allSub": "What they are and why every app has them", "kick": "Blueprint", "kickAll": "Built with", "none": "This version of the app carries no description of this blueprint.", "all": {"what": "Shared designs this app and its sister apps are built from, one for each part they have in common.", "does": "Each one fixes how its part works: what you see, the words used, where data is kept and the safety rules.", "drives": "Every row above; each says which version this app follows, and since which version of the app.", "why": "A fix or improvement made once reaches every app the same way, so the apps stay alike and dependable."}};
+var BP_I18N = {};   // the About text in the app's other languages (BLUEPRINT_ABOUT stays English)
+function bpT(k) { var t = BP_I18N["en"]; return t && t[k] != null ? t[k] : BP_EN[k]; }
+function bpEl() {
+  var el = document.getElementById("bpabout");
+  if (!el) {
+    el = document.createElement("div"); el.id = "bpabout"; el.setAttribute("aria-hidden", "true"); document.body.appendChild(el);
+    el.addEventListener("click", function (e) { e.stopPropagation(); var t = e.target.closest('[data-act]'), act = t && t.getAttribute('data-act'); if (act === 'bpclose') { bpOpen = null; renderBp(); } });
+  }
+  return el;
+}
+function renderBp() {
+  var el = bpEl(), b = null, items = (BP_I18N["en"] || {}).items || {};
+  SET.blueprints.forEach(function (x) { if (x.id === bpOpen) b = x; });
+  var a = bpOpen === "*" ? bpT("all") : b ? (items[b.id] || (SET.blueprintAbout || {})[b.id]) : null;
+  el.classList.toggle("open", !!(a || b)); el.setAttribute("aria-hidden", a || b ? "false" : "true");
+  if (!a && !b) return;   // closing: keep the old content while the card slides away
+  var F = bpT("fields");
+  el.innerHTML = '<div class="bp-dim" data-act="bpclose"></div><div class="bp-card" role="dialog" aria-modal="true" aria-labelledby="bp-h">' +
+    '<div class="bp-top"><div class="grow"><small class="bp-kick">' + escH(b ? bpT("kick") : bpT("kickAll")) + '</small><h2 id="bp-h">' + escH(b ? b.name : bpT("allTitle")) + '</h2>' +
+    (b ? '<small class="muted">' + escH("Blueprint " + b.version + " · since " + SET.appName + " " + b.since) + '</small>' : '') + '</div><button class="link" data-act="bpclose">' + escH("Done") + '</button></div>' +
+    (a ? BP_KEYS.map(function (k, i) { return '<h3 class="bp-l">' + escH(F[i]) + '</h3><p class="bp-p">' + escH(a[k]) + '</p>'; }).join("") : '<p class="bp-p muted">' + escH(bpT("none")) + '</p>') + '</div>';
+  el.querySelector(".bp-card").scrollTop = 0;
+}
 function builtWithHTML(){
-  return '<h3 class="sec">Built with</h3><p class="hint">'+escH(SET.appName)+' is built from shared blueprints that the other apps use too. Tap one to read how that part works.</p>'+
-    SET.blueprints.map(function(b){ return '<button class="srow bp" data-act="openurl" data-v="'+escH(bpLink(b))+'"><div class="grow"><b>'+escH(b.name)+'</b><small class="muted">Blueprint '+escH(b.version)+' · since '+escH(SET.appName)+' '+escH(b.since)+'</small></div><span class="chev" aria-hidden="true">›</span></button>'; }).join('')+
-    '<button class="srow bp" data-act="openurl" data-v="'+escH(SET.blueprintsRepo)+'"><div class="grow"><b>All blueprints</b><small class="muted">'+escH(SET.blueprintsRepo.replace('https://',''))+'</small></div><span class="chev" aria-hidden="true">›</span></button>';
+  return '<h3 class="sec">Built with</h3><p class="hint">'+escH(SET.appName)+' is built from shared blueprints that the other apps use too. Tap one to see what it does.</p>'+
+    SET.blueprints.map(function(b){ return '<button class="srow bp" data-act="bpabout" data-v="'+escH(b.id)+'"><div class="grow"><b>'+escH(b.name)+'</b><small class="muted">Blueprint '+escH(b.version)+' · since '+escH(SET.appName)+' '+escH(b.since)+'</small></div><span class="chev" aria-hidden="true">›</span></button>'; }).join('')+
+    '<button class="srow bp" data-act="bpabout" data-v="'+escH("*")+'"><div class="grow"><b>About blueprints</b><small class="muted">'+escH(bpT("allSub"))+'</small></div><span class="chev" aria-hidden="true">›</span></button>';
 }
 var STYLE=null, STYLEMSG='';   // STYLE: Learn my style in progress { found, wanted, text }
 // ── Learn my style: a pop-up you can hide; a small pill brings it back; the app must stay open ──
@@ -5765,7 +5811,7 @@ function openSettings(){
   if(cfgOpen) return;
   send('settings-get',{},function(ok,msg){ if(!ok){ toast('Settings could not be loaded'); return; } cfgOpen=true; setState(ok,msg); cfgSheet().scrollTop=0; });
 }
-function closeSettings(){ cfgOpen=false; cfgArmed=false; renderCfg(); send('settings-done',{}); }
+function closeSettings(){ bpOpen=null; renderBp(); cfgOpen=false; cfgArmed=false; renderCfg(); send('settings-done',{}); }
 function cfgAction(t,act){
   var v=t.dataset.v, k=t.dataset.k;
   if(act==='look'){ var val=k==='textSize'?+v:v; LOOK[k]=val; applyLook(); renderCfg(); send('set',{k:k,v:val},setState); return; }
@@ -5775,7 +5821,7 @@ function cfgAction(t,act){
   if(act==='cfgall'){ if(cfgArmed){ cfgArmed=false; send('cfg',{k:'*'},setState); } else { cfgArmed=true; renderCfg(); setTimeout(function(){ if(cfgArmed){ cfgArmed=false; renderCfg(); } },3500); } return; }
   if(act==='updcheck'){ var um=document.getElementById('updmsg'); t.disabled=true; if(um) um.textContent='Checking…';
     send('update-check',{},function(ok,res){ t.disabled=false; if(um) um.textContent=res||''; if(/available/.test(res||'')) closeSettings(); }); return; }
-  if(act==='openurl'){ send('openurl',{v:v}); return; }
+  if(act==='bpabout'){ bpOpen=v; renderBp(); return; }
   if(act==='usage-test'){ var um=document.getElementById('usagemsg'); if(um) um.textContent='Sending…'; t.disabled=true; send('usage-test',{},function(ok,msg){ t.disabled=false; var m=document.getElementById('usagemsg'); if(m) m.textContent=(ok?'✓ ':'✗ ')+msg; }); return; }
   if(act==='startlog'){   // safe-startup: the last 40 lines of the start-up log
     var pre=document.getElementById('startlog');
@@ -6992,7 +7038,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','post-rules-reset','overlay-rules-reset','logout','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','bpabout','startlog','rules-reset','story-rules-reset','post-rules-reset','overlay-rules-reset','logout','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
