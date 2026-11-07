@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.42.0 (2026-11-07): Before and after
+
+- ↔️ **Before and after**: The original and the result sit side by side, each shown whole, never cropped.
+- ⤢ **Full screen**: Tap a picture to see it full screen; tap again to flip between original and result.
+
+**Changes**
+
+- 📸 Photo with your stats: after a redesign or clean stats, the original (left) and the result (right) show side by side in the photo's own shape
+- Full-screen view fits the whole picture to the screen, with Original and Redesigned buttons, tap-to-compare, and Save or share
+- The original alone, before a redesign, is shown whole too and opens full screen
+
+**Fixes**
+
+- The redesigned photo showed as a cropped strip, so you couldn't see the whole result
+
 ## 1.41.0 (2026-11-07): The redesign studio
 
 - ✍️ **Your wishes first**: A picked photo waits for your wishes; nothing is repainted until you tap Redesign my photo.
