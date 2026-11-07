@@ -2,7 +2,7 @@
 
 ## The app test (`app.test.js`)
 
-Logging in and posting comments must always work, so this test runs before every release and on every push (`.github/workflows/app-test.yml`).
+Logging in and posting comments must always work, so this test runs before every release, on your computer or in a Claude session (there is no GitHub workflow).
 It runs the real script in the Scriptable emulator from [app-blueprints](https://github.com/gadominas/app-blueprints) (`repo-site`)
 against a pretend strava.com whose session can end and start again, and checks what a person does:
 

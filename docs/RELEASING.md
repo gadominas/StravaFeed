@@ -7,7 +7,7 @@
 1. **Bump the version** in `Strava Daily Digest.js`: `const VERSION = '1.7.0';`. Use [semantic versioning](https://semver.org): a new feature bumps the middle number, a fix-only release the last.
 2. **Add a release at the top of `releases.json`**, with the same version.
 3. **Regenerate the changelog**: `node tools/changelog.js`.
-4. **Run the app test**: `node tests/app.test.js` (see `tests/README.md`). Logging in and out and posting comments must always work; don't release while it fails.
+4. **Run the tests**: `node tests/app.test.js` and `node ../app-blueprints/testkit/bin/run.js` (see `tests/README.md` and `docs/TESTING.md`). They run only on your computer or in a Claude session, not on GitHub; don't release while either fails.
 5. **Commit everything to `main`**: the script first, then `releases.json` and `CHANGELOG.md`. In that order the update offer can never appear before the new script is there to download.
 
 Users see the update the next time they open the digest. GitHub can take a few minutes to serve new files.
