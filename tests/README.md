@@ -39,6 +39,21 @@ against a pretend strava.com whose session can end and start again, and checks w
     Days in the header changes the header; comment, story, post and photo instructions are saved, reach their AI requests
     and reset; untouched old photo instructions move to the new default; a broken settings file opens with the defaults.
 
+13. **Comment ideas: draft, tone, language and photos** (`13-comment-ideas.js`): your draft goes with the request and the
+    ideas are marked “Built on your draft” (the first as closest); ↻ after picking an idea sends your draft, not the idea;
+    a new tone asks again with that mood; Lithuanian asks again, and once more when the answer comes back in English; the
+    activity's photos are looked at once and the writer gets what was seen; a model that can't read photos still gives
+    ideas; without a key there is no ✨ Suggest; Cancel ignores a late answer.
+14. **The day's story and the template comic** (`14-story.js`): written from the day's people; a language pick and a Rewrite
+    it tweak write it again; 💥 Pop draws 1080 × 1350 pages with no picture requests and shares them on 📤 Share comic;
+    without a key a note and no request.
+15. **Learn my style and AI settings** (`15-style-and-ai.js`): your comments are gathered, the AI is asked once, the style is
+    saved, used in comment ideas and cleared; an OpenAI key pasted in the key prompt is kept in the Keychain, the models
+    are listed (GPT Image newest first), OpenAI becomes the provider and gets the next request, removing the key (two taps)
+    goes back to Claude; Token usage names every feature.
+16. **Days, refresh and retry** (`16-days.js`): Yesterday shows yesterday's activities and date; Refresh reads the feed again;
+    a failing feed shows Try again, which brings the digest back.
+
 Sections 0 to 7 are in `app.test.js`; 8 and up are one file each in `tests/app/` (`{ n, title, run(browser, H) }`).
 They share `tests/lib/`:
 
@@ -49,6 +64,8 @@ They share `tests/lib/`:
 | `lib/fake-strava.js` | More of strava.com: kudos that can be refused, the activity edit page and its save requests (`edit.mode`: form, inline, form-refused, refuse) |
 | `fixtures/lake.jpg` | The photo Photos hands over (900 × 1200, drawn) |
 
+`opened()` also takes `routes` (checked first), `alerts` (answers for Alert prompts), `data` (the app's own files, e.g. `sent-comments`), `files` (any file by the end of its name) and `settingsRaw` (the settings file as text).
+
 A test opens the app with what it needs: `opened(browser, { ai: fakeAI({ comments: ['One', 'Two'] }), strava, openaiKey: true,
 photos: { library: [photo()] }, settings: { … } })`, then checks what the page shows and what reached the pretend services
 (`ai.of('image')`, `strava.kudos`, `emu.shared`, `emu.pasteboard`, `savedSettings(emu)`).
@@ -56,6 +73,6 @@ photos: { library: [photo()] }, settings: { … } })`, then checks what the page
 ```sh
 # app-blueprints checked out next to this repository
 (cd ../app-blueprints/repo-site && npm install && npm install --no-save playwright && npx playwright install chromium)
-node tests/app.test.js        # everything, about 2.5 minutes; VERBOSE=1 shows the emulator's log
+node tests/app.test.js        # everything, about 3.5 minutes; VERBOSE=1 shows the emulator's log
 node tests/app.test.js 9 10   # only those sections
 ```

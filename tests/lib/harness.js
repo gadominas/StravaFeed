@@ -17,7 +17,7 @@ const STRAVA_LOGIN_PAGE = `<!doctype html><html><head><title>Log In | Strava</ti
 const PHOTO = path.join(ROOT, 'tests', 'fixtures', 'lake.jpg');   // 900 × 1200, a lake: what Photos hands over
 
 // auth: { loggedIn, sticky, density, settings (merged into settings.json), aiSettings (merged into the AI settings),
-//         keychain, openaiKey, noAIKey, ai (a fakeAI), strava (fake-strava state), photos ({ library, camera }) }
+//         keychain, openaiKey, noAIKey, ai (a fakeAI), strava (fake-strava state), photos ({ library, camera }), alerts, routes, data, files }
 function fixtures(auth) {
   auth.posted = auth.posted || []; auth.logins = auth.logins || 0; auth.logoutCalls = auth.logoutCalls || 0;
   const base = sc.fixtures({ id: 'app-test', density: auth.density });
@@ -26,8 +26,16 @@ function fixtures(auth) {
     if (auth.aiSettings && /ai-settings\.json$/.test(k)) Object.assign(base.files[k], auth.aiSettings);
     if (auth.settingsRaw != null && /StravaFeed\/settings\.json$/.test(k)) base.files[k] = auth.settingsRaw;   // a file as it is on disk, broken or not
   }
+  if (auth.data) {   // the app's own data files, e.g. { 'sent-comments': [...] } → StravaFeed/sent-comments.json
+    const dir = Object.keys(base.files).find((k) => /StravaFeed\/settings\.json$/.test(k)).replace(/settings\.json$/, '');
+    for (const [n, v] of Object.entries(auth.data)) base.files[dir + n + '.json'] = v;
+  }
+  if (auth.files) for (const [k, v] of Object.entries(auth.files)) {   // by the end of the name, e.g. { 'strava-digest-usage.json': {...} }
+    const at = Object.keys(base.files).find((x) => x.endsWith('/' + k)); base.files[at || k] = v;
+  }
   const out = { status: 401, body: 'You need to log in', contentType: 'text/html' };
   const routes = [
+    ...(auth.routes || []),
     ...(auth.ai ? auth.ai.routes : []),
     ...(auth.strava ? stravaRoutes(auth.strava) : []),
     // posting a comment (the app's learned request, see the keychain below)
@@ -43,6 +51,7 @@ function fixtures(auth) {
   if (auth.noAIKey) { delete keychain.STRAVA_DIGEST_ANTHROPIC_KEY; delete keychain.STRAVA_DIGEST_OPENAI_KEY; }
   const fx = Object.assign({}, base, { routes: routes.concat(base.routes), keychain });
   if (auth.photos) fx.photos = auth.photos;
+  if (auth.alerts) fx.alerts = auth.alerts;   // answers for Alert.present(): numbers or { index, text: [...] }
   return fx;
 }
 
