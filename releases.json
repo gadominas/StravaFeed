@@ -3,6 +3,26 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.43.2",
+      "date": "2026-11-07",
+      "title": "The right number of ideas",
+      "highlights": [
+        {
+          "icon": "✨",
+          "title": "Ideas per tap, respected",
+          "text": "✨ Comment ideas per tap in Settings now always gives you that many ideas."
+        }
+      ],
+      "changes": [
+        "The AI is asked for exactly the number set, and told to send all of them",
+        "If fewer come back, or two are the same, the app asks once for the missing ones",
+        "New app tests cover 1 to 5 ideas, the default of 3, too many, too few and repeated ideas"
+      ],
+      "fixes": [
+        "Comment ideas could come back as 3 when Settings asked for 4 or 5"
+      ]
+    },
+    {
       "version": "1.43.1",
       "date": "2026-11-07",
       "title": "Clean stats wait for you",
