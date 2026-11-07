@@ -2,6 +2,22 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.41.0 (2026-11-07): The redesign studio
+
+- ✍️ **Your wishes first**: A picked photo waits for your wishes; nothing is repainted until you tap Redesign my photo.
+- 🎞 **A show while it paints**: Your photo cycles through sketch, darkroom, pop art, glitch and neon effects as the AI works.
+- 🎬 **See the plan**: Live steps, a progress bar, the art director's headline and stats, and running jokes.
+
+**Changes**
+
+- 🎨 AI redesign: a box for your wishes with one-tap ideas (retro 80s, 1970s film photo, comic hero, watercolour, neon, movie poster, funny quote) and a big Redesign my photo button right under it
+- Switching to 🎨 AI redesign no longer starts a redesign by itself; 📊 Clean stats still draws straight away
+- The redesign studio takes the whole sheet: steps (Reading the numbers, Art direction, Painting), a progress bar, the model and size, a timer and the plan (headline, stats, style)
+
+**Fixes**
+
+- Picking a photo started an AI redesign at once, before you could say how it should look
+
 ## 1.40.1 (2026-11-07): Clean stats that fit
 
 - 📐 **Stats that fit**: 📊 Clean stats always stay inside the photo, with a margin on every side.
