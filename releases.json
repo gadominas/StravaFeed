@@ -3,6 +3,25 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.43.1",
+      "date": "2026-11-07",
+      "title": "Clean stats wait for you",
+      "highlights": [
+        {
+          "icon": "📊",
+          "title": "Your wishes first",
+          "text": "📊 Clean stats now waits for your wishes and a tap on Draw my stats, like AI redesign."
+        }
+      ],
+      "changes": [
+        "📊 Clean stats: a “How should the stats look?” box, one-tap ideas (top right corner, one big hero number, every stat in a grid, minimal, route line, dark panel, bigger text) and a big Draw my stats button",
+        "Picking a photo or switching modes never starts anything by itself; each mode keeps its own wishes"
+      ],
+      "fixes": [
+        "📊 Clean stats started designing as soon as a photo was picked, before you could say how it should look"
+      ]
+    },
+    {
       "version": "1.43.0",
       "date": "2026-11-07",
       "title": "Ideas built on your draft",
