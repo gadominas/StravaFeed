@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.43.3 (2026-11-07): Tested end to end
+
+- 🧪 **Many more tests**: Kudos, Save to Strava, photos, AI redesign, comics and Settings are now tested on every change.
+
+**Changes**
+
+- The app test now covers kudos and 👍 All, the posting assistant and Save to Strava, picking and uploading photos, the AI redesign's retries, comics drawn by AI and Settings (322 checks)
+- A pretend Claude and OpenAI and a fuller pretend strava.com behind them, so nothing real is touched
+
+**Fixes**
+
+- When a comic page couldn't be drawn, the note was replaced at once by “Your comic is ready”; both now show together
+
 ## 1.43.2 (2026-11-07): The right number of ideas
 
 - ✨ **Ideas per tap, respected**: ✨ Comment ideas per tap in Settings now always gives you that many ideas.

@@ -20,4 +20,6 @@ node ../app-blueprints/testkit/bin/lint.js   # lint only
 
 ## The app test
 
-`tests/app.test.js` runs the real script in the Scriptable emulator against a pretend strava.com: logging in and out, posting comments, the order of people in the feed and the number of ✨ comment ideas (Claude answers from the test, with too many, too few or repeated ideas). It runs on every push (`.github/workflows/app-test.yml`); how to run it locally is in [tests/README.md](../tests/README.md).
+`tests/app.test.js` runs the real script in the Scriptable emulator against a pretend strava.com and a pretend Claude and OpenAI: logging in and out, posting comments, kudos and 👍 All, the order of people, the number of ✨ comment ideas, the posting assistant and Save to Strava, photos (picking, clean stats, the AI redesign's upload and capped retries), comics drawn by AI, and Settings (limits, instructions, migration, a broken file). It runs on every push (`.github/workflows/app-test.yml`); the sections, the shared fakes and how to run it are in [tests/README.md](../tests/README.md).
+
+**Not covered yet:** comment ideas built on your draft and tone or language changes, the photo scan and its fallback, the day's story's language and tweaks, the template comic, Learn my style, AI settings (provider, keys, models, token usage), the day picker, refresh and retry, and liking comments.

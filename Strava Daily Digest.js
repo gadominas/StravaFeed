@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.43.2';
+const VERSION = '1.43.3';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -6772,19 +6772,18 @@ function comicDraw(){
     if(msg==='NEED_OPENAI') return toast('Drawing needs an OpenAI key: Settings › AI');
     if(!ok) return toast(msg||'The pages couldn’t be drawn');
     var r={}; try{ r=JSON.parse(msg); }catch(e){}
-    if(r.note) toast(r.note);
-    comicReadyShow('ai',r.pages||0);
+    comicReadyShow('ai',r.pages||0,r.note);
   });
 }
 // A drawn comic waits for the user: "📤 Share comic" in the story's footer shares (or saves) its pages
 var COMICREADY=null;
-function comicReadyShow(kind,n){
+function comicReadyShow(kind,n,note){
   COMICREADY={kind:kind,n:n};
   var f=document.querySelector('#storysheet .stf'); if(!f) return;
   var b=f.querySelector('[data-act="story-comic-share"]');
   if(!b){ b=document.createElement('button'); b.setAttribute('data-act','story-comic-share'); f.insertBefore(b,f.lastElementChild); }
   b.textContent='📤 Share comic'+(n?' ('+n+' page'+(n===1?'':'s')+')':'');
-  toast('Your comic is ready: tap Share comic to send or save it');
+  toast((note?note+'. ':'')+'Your comic is ready: tap Share comic to send or save it');   // one toast, so a missing page is never hidden
 }
 function comicShare(b){
   if(!COMICREADY||b.disabled) return;

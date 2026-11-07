@@ -3,7 +3,11 @@
 // strava.com whose session can be ended and started again, and checks every step a person takes.
 //
 //   node tests/app.test.js            (app-blueprints checked out next to this repository, its repo-site deps installed)
+//   node tests/app.test.js 8 9        only those sections
 //   APP_BLUEPRINTS=/path/to/app-blueprints node tests/app.test.js
+//
+// Sections 0 to 7 are below; 8 and up are in tests/app/, one file per area. The shared emulator set-up, the pretend
+// strava.com (tests/lib/fake-strava.js) and the pretend Claude and OpenAI (tests/lib/fake-ai.js) are in tests/lib/.
 //
 // Flows:
 //   1. Opening while logged out: the login page shows, "Log in to Strava" opens Strava's login, logging in opens the digest.
@@ -16,60 +20,11 @@
 //   7. Comment ideas: exactly the number set in Settings › ✨ Comment ideas per tap (1 to 5, 3 by default). The AI is asked
 //      for that many; extra ones are dropped; when it sends fewer or repeats itself, the app asks once for the missing ones.
 'use strict';
+const fs = require('fs');
 const path = require('path');
-const ROOT = path.resolve(__dirname, '..');
-const BP = process.env.APP_BLUEPRINTS || path.join(ROOT, '..', 'app-blueprints');
-const SITE = path.join(BP, 'repo-site');
-const { chromium } = require(require.resolve('playwright', { paths: [SITE] }));
-const { Emulator, sleep } = require(path.join(SITE, 'tools', 'scriptable-emulator'));
-const sc = require(path.join(ROOT, 'docs', 'site', 'scenario.js'));
-process.env.TZ = sc.timezone || 'Europe/Vilnius';
-
-const COMMENT_TPL = { method: 'POST', enc: 'json', ct: 'application/json', url: 'https://www.strava.com/feed/activity/{{ID}}/comment', body: '{"text":"{{TEXT}}"}' };
-const STRAVA_LOGIN_PAGE = `<!doctype html><html><head><title>Log In | Strava</title><meta name="csrf-token" content="t0k3n"></head>
-<body><h1>Log in to Strava</h1><form id="login" action="/session/new-login" method="get"><input name="email"><button id="signin" type="submit">Log In</button></form></body></html>`;
-
-// strava.com as far as logging in and out goes; everything else comes from the screenshot scenario's fixtures
-function fixtures(auth) {
-  auth.posted = auth.posted || [];
-  const base = sc.fixtures({ id: 'app-test', density: auth.density });
-  if (auth.settings) for (const k of Object.keys(base.files || {})) if (/settings\.json$/.test(k) && !/ai-settings/.test(k)) Object.assign(base.files[k], auth.settings);
-  const out = { status: 401, body: 'You need to log in', contentType: 'text/html' };
-  const routes = [
-    // ✨ comment ideas: Claude answers with as many ideas as the test says (auth.ideas), and every request is kept
-    ...(auth.ideas ? [{ match: 'api.anthropic.com/v1/messages', respond: (req) => {
-      const b = (req.json && req.json()) || {}, sys = typeof b.system === 'string' ? b.system : JSON.stringify(b.system || '');
-      if (!/You write comments on a friend/.test(sys)) return null;   // photo scans and the rest: the scenario's own answers
-      auth.ideaCalls.push(sys);
-      const list = auth.ideas(auth.ideaCalls.length, sys);
-      return { json: { id: 'msg_test', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text: JSON.stringify(list) }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 40 } } };
-    } }] : []),
-    // posting a comment (the app's learned request, see the keychain below)
-    { match: (url, req) => /strava\.com\/feed\/activity\/\d+\/comment$/.test(url) && (req.method || 'GET') !== 'GET', respond: (req) => { auth.posted.push(req.json ? req.json() : req.body); return { json: { ok: true } }; } },
-    { match: /strava\.com\/login/, respond: { body: STRAVA_LOGIN_PAGE, contentType: 'text/html' } },
-    { match: /strava\.com\/session\/new-login/, respond: () => { auth.loggedIn = true; auth.logins++; return { body: '<html><body>Dashboard</body></html>', contentType: 'text/html' }; } },
-    { match: /strava\.com\/(session|logout)(\?|$)/, respond: () => { if (!auth.sticky) auth.loggedIn = false; auth.logoutCalls++; return { body: 'bye', contentType: 'text/html' }; } },
-    // with the session gone, every page that needs a login refuses
-    { match: (url) => /strava\.com\/(dashboard|settings|athlete|athletes|feed|activities)/.test(url) && !auth.loggedIn, respond: out },
-  ];
-  const keychain = Object.assign({}, auth.keychain || base.keychain, { 'strava-digest-comment-request': JSON.stringify(COMMENT_TPL) });
-  return Object.assign({}, base, { routes: routes.concat(base.routes), keychain });
-}
-
-let failures = 0, passes = 0;
-function check(ok, what) { if (ok) { passes++; console.log('  ✓ ' + what); } else { failures++; console.log('  ✗ ' + what); } }
-async function until(fn, ms = 15000, step = 200) { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await fn()) return true; } catch (e) {} await sleep(step); } return false; }
-
-async function start(browser, auth) {
-  const emu = new Emulator({ browser, fixtures: fixtures(auth), scriptPath: path.join(ROOT, sc.app.script), now: sc.now,
-    locale: 'en_US', timezone: sc.timezone, log: (s) => { if (process.env.VERBOSE || / ! /.test(s)) console.log(s); } });
-  emu.run();
-  await emu.waitForPresent();
-  return emu;
-}
-const pg = (emu) => emu.presented._page;
-const has = (emu, sel) => pg(emu).locator(sel).filter({ visible: true }).count().then((n) => n > 0);
-const tap = (emu, sel) => pg(emu).locator(sel).filter({ visible: true }).first().click({ timeout: 5000 });
+const H = require('./lib/harness');
+const { ROOT, chromium, sc, check, until, start, pg, has, tap, sleep, results, noErrors } = H;
+const { fakeAI } = require('./lib/fake-ai');
 
 // From the app's login page: the button opens Strava's login, and logging in there brings the digest
 async function logInFromLoginPage(emu, auth) {
@@ -94,7 +49,6 @@ async function logOutInSettings(emu) {
 
 // Every button's data-act must be handled by the page or the app: a button nothing answers looks fine and does nothing.
 function staticCheck() {
-  console.log('▸ 0. Every button does something');
   const src = require('fs').readFileSync(path.join(ROOT, sc.app.script), 'utf8');
   const acts = new Set([...src.matchAll(/data-act=\\?["']([a-z0-9-]+)/g)].map((m) => m[1]));
   const handled = new Set([...src.matchAll(/act\s*===\s*'([a-z0-9-]+)'/g)].map((m) => m[1]));
@@ -140,135 +94,151 @@ async function ideasShown(emu, open) {
   return pg(emu).locator('#csheet .sugs .sug').allTextContents();
 }
 
+// Sections 1 to 7: each gets the browser and opens the app as many times as it needs
+const SECTIONS = [
+  { n: 0, title: 'Every button does something', run: async () => staticCheck(true) },
+  { n: 1, title: 'Opening while logged out', run: async (browser) => {  {
+    const auth = { loggedIn: false, logins: 0, logoutCalls: 0, keychain: {} };
+    const emu = await start(browser, auth);
+    await logInFromLoginPage(emu, auth);
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+  { n: 2, title: 'Logging out in Settings, then logging back in', run: async (browser) => {  {
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0 };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), 'the digest opens while logged in');
+    await logOutInSettings(emu);
+    check(await until(() => auth.logoutCalls > 0 && !auth.loggedIn, 15000), 'Strava is asked to end the session');
+    check(await until(() => !emu.keychain.has('strava-digest-athlete-id'), 5000), 'the remembered athlete ID is forgotten');
+    await logInFromLoginPage(emu, auth);
+    // and once more, to be sure the second round works as well as the first
+    await logOutInSettings(emu);
+    check(await until(() => !auth.loggedIn, 15000), 'a second log out works');
+    await logInFromLoginPage(emu, auth);
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+  { n: 3, title: 'Logging out when Strava keeps the session', run: async (browser) => {  {
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0, sticky: true };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), 'the digest opens while logged in');
+    await logOutInSettings(emu);
+    check(await until(() => pg(emu).getByText('Almost logged out').count().then((n) => n > 0), 20000), 'the "Almost logged out" page explains what to do');
+    check(await until(() => has(emu, '[data-act="login"]'), 3000), 'its Open Strava button is there');
+    await tap(emu, '[data-act="login"]');
+    check(await until(() => /strava\.com\/login/.test(pg(emu).url()), 8000), 'Open Strava opens Strava\'s page');
+    auth.sticky = false; auth.loggedIn = false;   // the person taps Log Out on Strava's page
+    check(await until(() => has(emu, '[data-act="login"]') && pg(emu).getByText('Log in to Strava').count().then((n) => n > 0), 20000), 'the app notices and shows its login page');
+    await logInFromLoginPage(emu, auth);
+    await emu.close();
+  }
+  } },
+  { n: 4, title: 'Posting a comment', run: async (browser) => {  for (const density of ['comfortable', 'tiny']) {
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+    await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 1)' : '.act[data-id="9100101"] [data-act="toggle-comment"]');
+    await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 2)' : '.act[data-id="9100102"] [data-act="toggle-comment"]');   // and a second one
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+  { n: 5, title: 'Your own activities', run: async (browser) => {  for (const density of ['comfortable', 'tiny']) {
+    // the old "Show my own activities" switch still saved as on: it must not bring them back
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density, settings: { includeMe: true } };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+    const mine = await pg(emu).evaluate(() => ({
+      inFeed: [...document.querySelectorAll('section.person')].filter((s) => /Sam Rivers/.test(s.textContent)).length,
+      strip: document.querySelectorAll('#mine .mt').length,
+      stripRow: (() => { const t = [...document.querySelectorAll('#mine .mt')].map((x) => x.getBoundingClientRect()); return t.length > 1 && Math.abs(t[0].top - t[1].top) < 2 && t[1].left > t[0].left; })(),
+      allCount: (document.querySelector('.allk') || {}).textContent || '',
+      waiting: document.querySelectorAll('section.person:not([data-counted]) .kudo:not([disabled]), section.person:not([data-counted]) .person-k').length,
+    }));
+    check(mine.inFeed === 0, 'your own activities are not in the feed');
+    check(mine.strip >= 2, 'they are in Your activities on top');
+    check(mine.stripRow, 'side by side, left to right');
+    check(!/Sam/.test(mine.allCount), '👍 All doesn\'t count you');
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+  { n: 6, title: 'The order of people', run: async (browser) => {  for (const density of ['comfortable', 'tiny']) {
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
+    await sleep(4000);   // the details load and may reorder the lines
+    const groups = await pg(emu).evaluate(() => [...document.querySelectorAll('h2.sec')].map((h) => {
+      const out = []; let n = h.nextElementSibling;
+      while (n && n.matches('section.person')) {
+        out.push({ name: (n.querySelector('.pn b') || {}).textContent, rank: +n.dataset.rank, t: +n.dataset.t,
+          early: !!n.querySelector('.avtag'), photos: !!n.querySelector('[data-photo]') || /📷/.test((n.querySelector('.ind') || {}).textContent || '') });
+        n = n.nextElementSibling;
+      }
+      return { title: h.firstChild.textContent, people: out };
+    }));
+    let ok = groups.length > 0, why = '';
+    for (const g of groups) g.people.forEach((p, i) => {
+      const want = p.early ? 0 : p.photos ? 1 : 2;
+      if (p.rank !== want) { ok = false; why = why || `${p.name} ranked ${p.rank}, should be ${want}`; }
+      const q = g.people[i - 1];
+      if (!q) return;
+      if (q.rank > p.rank) { ok = false; why = why || `${q.name} (${q.rank}) before ${p.name} (${p.rank})`; }
+      if (q.rank === p.rank && (p.rank === 0 ? q.t > p.t : q.t < p.t)) { ok = false; why = why || `${q.name} and ${p.name} out of time order`; }
+    });
+    check(ok, 'early risers first (earliest first), then photos, then the rest (newest first)' + (why ? ': ' + why : ''));
+    const top = groups[0] && groups[0].people[0];
+    check(!!top && top.early, 'the first line of the day is an early riser' + (top ? ` (${top.name})` : ''));
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+  { n: 7, title: 'Comment ideas: exactly the number set in Settings', run: async (browser) => {  const idea = (k) => ['Strong finish on that last climb!', 'Early start, big reward 🌅', 'Those splits look smooth', 'Lovely route today', 'Legs of steel', 'Fast and steady', 'What a view up there'][k % 7];
+  const cases = [
+    { label: '4 set, 4 sent', set: 4, ideas: (call) => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
+    { label: '4 set, only 3 sent: the 4th is asked for', set: 4, ideas: (call) => call === 1 ? [0, 1, 2].map(idea) : [idea(3)], want: 4, calls: 2 },
+    { label: '5 set, 2 sent with a repeat: the missing 3 are asked for', set: 5, ideas: (call) => call === 1 ? [idea(0), idea(0).toUpperCase(), idea(1)] : [4, 5, 6].map(idea), want: 5, calls: 2 },
+    { label: '2 set, 5 sent: only 2 shown', set: 2, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 2, calls: 1 },
+    { label: '1 set', set: 1, ideas: () => [0, 1, 2].map(idea), want: 1, calls: 1 },
+    { label: 'nothing set: the default of 3', set: null, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 3, calls: 1 },
+    { label: '"4" saved as text still means 4', set: '4', ideas: () => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
+  ];
+  for (const c of cases) {
+    const ai = fakeAI({ comments: (call, n) => c.ideas(n, call.system) });
+    const auth = { loggedIn: true, logins: 0, logoutCalls: 0, ai, settings: c.set == null ? {} : { cfg: { suggestions: c.set } } };
+    const emu = await start(browser, auth);
+    check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${c.label})`);
+    const shown = await ideasShown(emu, '.act[data-id="9100101"] [data-act="toggle-comment"]');
+    check(shown.length === c.want, `${c.want} idea${c.want === 1 ? '' : 's'} shown (got ${shown.length})`);
+    const want = typeof c.set === 'string' ? +c.set : c.set == null ? 3 : c.set;
+    const asked = ai.of('comments').map((x) => x.system);
+    check(new RegExp(`exactly ${want} (different )?(option|comment)`).test(asked[0] || ''), `the AI is asked for exactly ${want}`);
+    check(asked.length === c.calls, c.calls === 1 ? 'one request is enough' : `the missing ones are asked for once (${asked.length} requests)`);
+    check(new Set(shown.map((x) => x.toLowerCase())).size === shown.length, 'no idea is shown twice');
+    check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+    await emu.close();
+  }
+  } },
+];
+
 async function main() {
-  staticCheck();
+  const only = process.argv.slice(2).map(Number).filter((x) => !isNaN(x));
+  const suites = SECTIONS.concat(fs.readdirSync(path.join(__dirname, 'app')).filter((f) => /^\d+-.*\.js$/.test(f)).sort()
+    .map((f) => require(path.join(__dirname, 'app', f))));
   const browser = await chromium.launch();
   try {
-    console.log('▸ 1. Opening while logged out');
-    {
-      const auth = { loggedIn: false, logins: 0, logoutCalls: 0, keychain: {} };
-      const emu = await start(browser, auth);
-      await logInFromLoginPage(emu, auth);
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
-    }
-    console.log('▸ 2. Logging out in Settings, then logging back in');
-    {
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0 };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), 'the digest opens while logged in');
-      await logOutInSettings(emu);
-      check(await until(() => auth.logoutCalls > 0 && !auth.loggedIn, 15000), 'Strava is asked to end the session');
-      check(await until(() => !emu.keychain.has('strava-digest-athlete-id'), 5000), 'the remembered athlete ID is forgotten');
-      await logInFromLoginPage(emu, auth);
-      // and once more, to be sure the second round works as well as the first
-      await logOutInSettings(emu);
-      check(await until(() => !auth.loggedIn, 15000), 'a second log out works');
-      await logInFromLoginPage(emu, auth);
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
-    }
-    console.log('▸ 3. Logging out when Strava keeps the session');
-    {
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, sticky: true };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), 'the digest opens while logged in');
-      await logOutInSettings(emu);
-      check(await until(() => pg(emu).getByText('Almost logged out').count().then((n) => n > 0), 20000), 'the "Almost logged out" page explains what to do');
-      check(await until(() => has(emu, '[data-act="login"]'), 3000), 'its Open Strava button is there');
-      await tap(emu, '[data-act="login"]');
-      check(await until(() => /strava\.com\/login/.test(pg(emu).url()), 8000), 'Open Strava opens Strava\'s page');
-      auth.sticky = false; auth.loggedIn = false;   // the person taps Log Out on Strava's page
-      check(await until(() => has(emu, '[data-act="login"]') && pg(emu).getByText('Log in to Strava').count().then((n) => n > 0), 20000), 'the app notices and shows its login page');
-      await logInFromLoginPage(emu, auth);
-      await emu.close();
-    }
-    console.log('▸ 4. Posting a comment');
-    for (const density of ['comfortable', 'tiny']) {
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
-      await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 1)' : '.act[data-id="9100101"] [data-act="toggle-comment"]');
-      await postComment(emu, auth, density === 'tiny' ? ':nth-match(.tcm, 2)' : '.act[data-id="9100102"] [data-act="toggle-comment"]');   // and a second one
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
-    }
-    console.log('▸ 5. Your own activities');
-    for (const density of ['comfortable', 'tiny']) {
-      // the old "Show my own activities" switch still saved as on: it must not bring them back
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density, settings: { includeMe: true } };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
-      const mine = await pg(emu).evaluate(() => ({
-        inFeed: [...document.querySelectorAll('section.person')].filter((s) => /Sam Rivers/.test(s.textContent)).length,
-        strip: document.querySelectorAll('#mine .mt').length,
-        stripRow: (() => { const t = [...document.querySelectorAll('#mine .mt')].map((x) => x.getBoundingClientRect()); return t.length > 1 && Math.abs(t[0].top - t[1].top) < 2 && t[1].left > t[0].left; })(),
-        allCount: (document.querySelector('.allk') || {}).textContent || '',
-        waiting: document.querySelectorAll('section.person:not([data-counted]) .kudo:not([disabled]), section.person:not([data-counted]) .person-k').length,
-      }));
-      check(mine.inFeed === 0, 'your own activities are not in the feed');
-      check(mine.strip >= 2, 'they are in Your activities on top');
-      check(mine.stripRow, 'side by side, left to right');
-      check(!/Sam/.test(mine.allCount), '👍 All doesn\'t count you');
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
-    }
-    console.log('▸ 6. The order of people');
-    for (const density of ['comfortable', 'tiny']) {
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, density };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${density})`);
-      await sleep(4000);   // the details load and may reorder the lines
-      const groups = await pg(emu).evaluate(() => [...document.querySelectorAll('h2.sec')].map((h) => {
-        const out = []; let n = h.nextElementSibling;
-        while (n && n.matches('section.person')) {
-          out.push({ name: (n.querySelector('.pn b') || {}).textContent, rank: +n.dataset.rank, t: +n.dataset.t,
-            early: !!n.querySelector('.avtag'), photos: !!n.querySelector('[data-photo]') || /📷/.test((n.querySelector('.ind') || {}).textContent || '') });
-          n = n.nextElementSibling;
-        }
-        return { title: h.firstChild.textContent, people: out };
-      }));
-      let ok = groups.length > 0, why = '';
-      for (const g of groups) g.people.forEach((p, i) => {
-        const want = p.early ? 0 : p.photos ? 1 : 2;
-        if (p.rank !== want) { ok = false; why = why || `${p.name} ranked ${p.rank}, should be ${want}`; }
-        const q = g.people[i - 1];
-        if (!q) return;
-        if (q.rank > p.rank) { ok = false; why = why || `${q.name} (${q.rank}) before ${p.name} (${p.rank})`; }
-        if (q.rank === p.rank && (p.rank === 0 ? q.t > p.t : q.t < p.t)) { ok = false; why = why || `${q.name} and ${p.name} out of time order`; }
-      });
-      check(ok, 'early risers first (earliest first), then photos, then the rest (newest first)' + (why ? ': ' + why : ''));
-      const top = groups[0] && groups[0].people[0];
-      check(!!top && top.early, 'the first line of the day is an early riser' + (top ? ` (${top.name})` : ''));
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
-    }
-    console.log('▸ 7. Comment ideas: exactly the number set in Settings');
-    const idea = (k) => ['Strong finish on that last climb!', 'Early start, big reward 🌅', 'Those splits look smooth', 'Lovely route today', 'Legs of steel', 'Fast and steady', 'What a view up there'][k % 7];
-    const cases = [
-      { label: '4 set, 4 sent', set: 4, ideas: (call) => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
-      { label: '4 set, only 3 sent: the 4th is asked for', set: 4, ideas: (call) => call === 1 ? [0, 1, 2].map(idea) : [idea(3)], want: 4, calls: 2 },
-      { label: '5 set, 2 sent with a repeat: the missing 3 are asked for', set: 5, ideas: (call) => call === 1 ? [idea(0), idea(0).toUpperCase(), idea(1)] : [4, 5, 6].map(idea), want: 5, calls: 2 },
-      { label: '2 set, 5 sent: only 2 shown', set: 2, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 2, calls: 1 },
-      { label: '1 set', set: 1, ideas: () => [0, 1, 2].map(idea), want: 1, calls: 1 },
-      { label: 'nothing set: the default of 3', set: null, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 3, calls: 1 },
-      { label: '"4" saved as text still means 4', set: '4', ideas: () => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
-    ];
-    for (const c of cases) {
-      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, ideaCalls: [], ideas: c.ideas, settings: c.set == null ? {} : { cfg: { suggestions: c.set } } };
-      const emu = await start(browser, auth);
-      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${c.label})`);
-      const shown = await ideasShown(emu, '.act[data-id="9100101"] [data-act="toggle-comment"]');
-      check(shown.length === c.want, `${c.want} idea${c.want === 1 ? '' : 's'} shown (got ${shown.length})`);
-      const want = typeof c.set === 'string' ? +c.set : c.set == null ? 3 : c.set;
-      check(new RegExp(`exactly ${want} (different )?(option|comment)`).test(auth.ideaCalls[0] || ''), `the AI is asked for exactly ${want}`);
-      check(auth.ideaCalls.length === c.calls, c.calls === 1 ? 'one request is enough' : `the missing ones are asked for once (${auth.ideaCalls.length} requests)`);
-      check(new Set(shown.map((x) => x.toLowerCase())).size === shown.length, 'no idea is shown twice');
-      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
-      await emu.close();
+    for (const t of suites) {
+      if (only.length && !only.includes(t.n)) continue;
+      console.log(`▸ ${t.n}. ${t.title}`);
+      try { await t.run(browser, H); }
+      catch (e) { check(false, `${t.title}: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' / ') : e}`); }
     }
   } finally { await browser.close(); }
-  console.log(`\n${passes} passed, ${failures} failed`);
-  process.exit(failures ? 1 : 0);
+  console.log(`\n${results.passes} passed, ${results.failures} failed`);
+  if (results.failures) console.log('Failed:\n  ' + results.failed.join('\n  '));
+  process.exit(results.failures ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -3,6 +3,25 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.43.3",
+      "date": "2026-11-07",
+      "title": "Tested end to end",
+      "highlights": [
+        {
+          "icon": "🧪",
+          "title": "Many more tests",
+          "text": "Kudos, Save to Strava, photos, AI redesign, comics and Settings are now tested on every change."
+        }
+      ],
+      "changes": [
+        "The app test now covers kudos and 👍 All, the posting assistant and Save to Strava, picking and uploading photos, the AI redesign's retries, comics drawn by AI and Settings (322 checks)",
+        "A pretend Claude and OpenAI and a fuller pretend strava.com behind them, so nothing real is touched"
+      ],
+      "fixes": [
+        "When a comic page couldn't be drawn, the note was replaced at once by “Your comic is ready”; both now show together"
+      ]
+    },
+    {
       "version": "1.43.2",
       "date": "2026-11-07",
       "title": "The right number of ideas",
