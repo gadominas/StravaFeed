@@ -2,6 +2,21 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.43.0 (2026-11-07): Ideas built on your draft
+
+- ✍️ **Your draft leads**: Whatever you've typed or dictated becomes the heart of every comment idea.
+- 🟢 **Clearly marked**: “Built on your draft” above the ideas, and the closest one is labelled.
+
+**Changes**
+
+- Comment ideas keep your draft's message (who it's for, what it praises, any detail or joke) and turn it into a finished comment in the tone and language you pick
+- Dictated drafts are tidied up: misheard names and words are corrected from the activity, and “I would like to give…” becomes a comment to your friend
+- After you tap an idea, ↻ and tone or language changes go back to your own draft, not the idea you picked
+
+**Fixes**
+
+- Comment ideas could ignore what you had already written in the box
+
 ## 1.42.0 (2026-11-07): Before and after
 
 - ↔️ **Before and after**: The original and the result sit side by side, each shown whole, never cropped.
