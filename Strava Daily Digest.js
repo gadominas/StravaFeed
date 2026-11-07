@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.39.0';
+const VERSION = '1.40.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -554,7 +554,7 @@ async function main() {
         for (const u of urls.slice(0, 9)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 900); } catch (e) { console.warn('Story image photo: ' + e.message); } }
         for (const u of avs.slice(0, 12)) { try { out.avatars[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 200); } catch (e) { console.warn('Story image avatar: ' + e.message); } }
         ok = true; msg = JSON.stringify(out);
-      } else if (head === 'post-ideas' || head === 'post-save' || head === 'post-photo' || head === 'post-design' || head === 'post-share') {
+      } else if (head === 'post-ideas' || head === 'post-save' || head === 'post-photo' || head === 'post-design' || head === 'post-redraw' || head === 'post-share') {
         // ✍️ Posting assistant, on your own activity
         const a = feed && feed.mineGet(String(p.id));
         if (!a) throw new Error('Activity not found. Pull to refresh and try again.');
@@ -608,7 +608,8 @@ async function main() {
           if (!img) msg = 'CANCELLED';
           else {
             const big = fitImage(img, 2048), small = fitImage(img, 640);
-            postPhoto = { id: a.id, small: Data.fromJPEG(small).toBase64String() };
+            const mid = fitImage(img, 1536);
+            postPhoto = { id: a.id, small: Data.fromJPEG(small).toBase64String(), big: Data.fromJPEG(mid).toBase64String(), w: mid.size.width, h: mid.size.height };
             ok = true; msg = JSON.stringify({ img: 'data:image/jpeg;base64,' + Data.fromJPEG(big).toBase64String(), w: big.size.width, h: big.size.height });
           }
         } else if (head === 'post-design') {
@@ -617,6 +618,16 @@ async function main() {
           const spec = await aiOverlay(stats, route, postPhoto && postPhoto.id === a.id ? postPhoto.small : null, String(p.tweak || '').slice(0, 300));
           ok = true; msg = JSON.stringify({ spec, route, stats });
           track('overlay_designed', { provider: spec.by ? aiSettings.aiProvider : 'none', tweak: !!p.tweak, stats: spec.stats.length, layout: spec.layout || '' });
+        } else if (head === 'post-redraw') {
+          if (!postPhoto || postPhoto.id !== a.id) throw new Error('Pick a photo first.');
+          if (!keyFor('openai')) msg = 'NEED_OPENAI';
+          else {
+            const say = (step) => js(`window.__photoProgress && window.__photoProgress(${JSON.stringify(step)})`);
+            await say('reading'); await ownDetails(a);
+            const r = await aiRedesign(a, overlayStats(a), postPhoto, String(p.tweak || '').slice(0, 300), say);
+            if (r.needKey) msg = 'NEED_OPENAI';
+            else { ok = true; msg = JSON.stringify(r); track('overlay_redrawn', { model: r.model, planned: !!r.by, tweak: !!p.tweak, stats: r.stats.length }); }
+          }
         } else if (head === 'post-share') {
           const b64 = await ui.evaluateJavaScript('window.__postImg || ""');
           if (!b64) msg = 'The picture wasn\u2019t made. Try again.';
@@ -1224,7 +1235,10 @@ const COMIC_PLAN_PROMPT = (language, maxPages, rules, look) => [
 
 // One page from the image model: edits with reference pictures when there are any, generations otherwise.
 // A model the key can't use falls back to the older GPT Image model; refused references fall back to no references.
-async function drawComicPage(prompt, refs) {
+// opts: size, quality, feature (for token usage), fidelity ('high' keeps faces and details of the input), keepRefs (never drop the input picture)
+async function drawComicPage(prompt, refs, opts = {}) {
+  const size = opts.size || IMAGE_SIZE, quality = opts.quality || IMAGE_QUALITY;
+  let fidelity = opts.fidelity || '';
   const key = keyFor('openai');
   const go = async (model, pics) => {
     const r = new Request(`https://api.openai.com/v1/images/${pics.length ? 'edits' : 'generations'}`);
@@ -1232,16 +1246,17 @@ async function drawComicPage(prompt, refs) {
     r.headers = { 'Authorization': 'Bearer ' + key };
     if (pics.length) {
       r.addParameterToMultipart('model', model); r.addParameterToMultipart('prompt', prompt);
-      r.addParameterToMultipart('size', IMAGE_SIZE); r.addParameterToMultipart('quality', IMAGE_QUALITY); r.addParameterToMultipart('n', '1');
+      r.addParameterToMultipart('size', size); r.addParameterToMultipart('quality', quality); r.addParameterToMultipart('n', '1');
+      if (fidelity) r.addParameterToMultipart('input_fidelity', fidelity);
       pics.forEach((im, i) => r.addFileDataToMultipart(Data.fromBase64String(im.b64), 'image/jpeg', 'image[]', `ref${i + 1}.jpg`));
     } else {
       r.headers['Content-Type'] = 'application/json';
-      r.body = JSON.stringify({ model, prompt, size: IMAGE_SIZE, quality: IMAGE_QUALITY, n: 1 });
+      r.body = JSON.stringify({ model, prompt, size, quality, n: 1 });
     }
     const j = await r.loadJSON();
     if (j.error) { const e = new Error(j.error.message || 'The image request failed'); e.code = j.error.code || ''; throw e; }
     const u = j.usage || {};
-    recordUsage('openai', model, 'comic', u.input_tokens || 0, u.output_tokens || 0);
+    recordUsage('openai', model, opts.feature || 'comic', u.input_tokens || 0, u.output_tokens || 0);
     const b64 = j.data && j.data[0] && j.data[0].b64_json;
     if (!b64) throw new Error('No picture came back');
     return { b64, model };
@@ -1252,8 +1267,9 @@ async function drawComicPage(prompt, refs) {
     catch (e) {
       const m = String(e.message || e) + ' ' + e.code;
       if (tries > 3) throw e;
+      if (fidelity && /input_fidelity|fidelity|unknown param|unrecognized/i.test(m)) { fidelity = ''; continue; }
       if (model !== IMAGE_MODEL_OLD && /model|does not exist|not found|not supported|access/i.test(m) && !/safety|moderation/i.test(m)) { model = IMAGE_MODEL_OLD; continue; }
-      if (pics.length && /safety|moderation|rejected|policy|image|invalid/i.test(m)) { console.warn('Comic page without references: ' + m); pics = []; continue; }
+      if (pics.length && !opts.keepRefs && /safety|moderation|rejected|policy|image|invalid/i.test(m)) { console.warn('Comic page without references: ' + m); pics = []; continue; }
       throw e;
     }
   }
@@ -1387,11 +1403,18 @@ DESCRIPTION
 - Retell Strava's own insights about the activity (Athlete Intelligence, PRs, achievements, splits) in my words when there are any.
 - Weather, the route and the photos are good material. No hashtags, no "Great job", no list of every stat.`;
 
-const DEFAULT_OVERLAY_RULES = `Put my activity's stats on my photo like a clean sports poster.
+const OLD_OVERLAY_RULES = `Put my activity's stats on my photo like a clean sports poster.
 - Distance, time and pace (speed for rides) are the heroes; add elevation, heart rate or a PR only when they are impressive.
 - Place them over a calm part of the photo (sky, ground, a wall), never over faces or the main subject.
 - White bold condensed text with a soft shadow and Strava orange as the accent. Draw the route line when there is one.
 - 3 to 5 numbers, labels in small capitals.`;
+// 1.40.0: the photo is redesigned as a whole and shows every number worth showing (OLD_OVERLAY_RULES, if untouched, moves to this)
+const DEFAULT_OVERLAY_RULES = `Turn my photo into a Strava-ready poster of this activity.
+- Show everything worth showing: distance, time, pace or speed, elevation, heart rate, cadence, power, calories, weather, place, start time, PRs and achievements. Lead with the most impressive number and group the rest.
+- A short punchy headline from the activity, in the language of its title.
+- 🎨 AI redesign: restyle the whole photo to match the mood of the activity (light, colour grade, texture, bold graphic shapes, the route line when there is one), but keep me, my face and the place real and recognisable.
+- 📊 Clean stats: big condensed numbers, small capital labels, Strava orange accent.
+- Never cover faces.`;
 
 const POST_PROMPT = (language, rules, nTitles, nDesc, tweak) => [
   `You write the title and the description for the user's own Strava activity, in ${language}, as the user, in the first person.`,
@@ -1408,7 +1431,7 @@ const OVERLAY_PROMPT = (rules, tweak) => [
   rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
   tweak ? `For this version only, on top of the instructions: ${tweak}` : '',
   'Look at the photo: put the stats where they don\'t cover faces or the main subject, and pick colours that read well there and suit the photo.',
-  'Use only stats from the list, with their values exactly as given; you may shorten a label (Distance → DIST) and pick the order.',
+  'Use only stats from the list, with their values exactly as given; you may shorten a label (Distance → DIST) and pick the order. Show as many as the instructions ask for; when they don\'t say, show every stat worth showing (often 6 to 10) and use the grid or hero layout for many.',
   'Reply with JSON only, no other text: {"position": "top-left|top|top-right|left|center|right|bottom-left|bottom|bottom-right", "layout": "stack|row|grid|hero", "font": "condensed|sans|rounded|serif|mono|marker|futura", "weight": "bold|black|regular", "uppercase": true, "text": "#ffffff", "label": "#ffffff", "accent": "#fc4c02", "panel": null or "rgba(0,0,0,0.35)", "shadow": true, "scale": 1.0 (0.6 to 1.6), "title": null or "short headline", "route": true, "route_color": "#fc4c02", "stats": [{"label": "DIST", "value": "8.9 km"}]}',
 ].filter(Boolean).join('\n');
 
@@ -1416,7 +1439,7 @@ const OVERLAY_PROMPT = (rules, tweak) => [
 function overlayStats(a) {
   const out = [], seen = new Set(), add = (label, value) => {
     const v = value == null ? '' : String(value).trim(), key = String(label).toLowerCase();
-    if (!v || v === '0' || seen.has(key) || out.length >= 14) return; seen.add(key); out.push({ label: String(label), value: v });
+    if (!v || v === '0' || seen.has(key) || out.length >= 24) return; seen.add(key); out.push({ label: String(label), value: v });
   };
   (a.stats || []).forEach(s => add(s.label, s.value));
   if (a.hr && !a.hrInStats) add('Heart rate', String(a.hr).split(',')[0]);
@@ -1424,6 +1447,10 @@ function overlayStats(a) {
   if (a.ach && a.ach.prs) add('PRs', a.ach.prs);
   if (a.ach && a.ach.total) add('Achievements', a.ach.total);
   try { const t = weatherHints(a).temp; if (t != null) add('Temperature', `${Math.round(t)}°C`); } catch (e) {}
+  if (a.weatherText) add('Weather', String(a.weatherText).slice(0, 60));
+  else if (a.weather) { const w = Object.entries(a.weather).filter(([k, v]) => typeof v !== 'object' && !/temp/i.test(k)).slice(0, 2).map(([k, v]) => `${k} ${v}`).join(', '); if (w) add('Weather', w); }
+  if (a.ach && a.ach.list) a.ach.list.filter(x => x.name).slice(0, 3).forEach((x, i) => add(i ? `Achievement ${i + 1}` : 'Achievement', [x.type, x.name].filter(Boolean).join(': ')));
+  if (a.ts) add('Date', new Date(a.ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
   if (a.clock) add('Start', fmtClock(a.clock));
   if (a.location) add('Where', a.location);
   if (a.type) add('Sport', a.type);
@@ -1432,7 +1459,50 @@ function overlayStats(a) {
 // Used without AI, and whenever the AI's design can't be read: three heroes bottom-left, white on a soft shadow.
 function defaultOverlay(stats, route) {
   const pick = [/dist/i, /moving|elapsed|^time/i, /pace|speed/i, /elev/i].map(rx => stats.find(s => rx.test(s.label))).filter(Boolean);
-  return { position: 'bottom-left', layout: 'stack', font: 'condensed', weight: 'bold', uppercase: true, text: '#ffffff', label: '#ffffff', accent: '#fc4c02', panel: null, shadow: true, scale: 1, title: null, route: !!route, route_color: '#fc4c02', stats: (pick.length ? pick : stats).slice(0, 4) };
+  return { position: 'bottom-left', layout: pick.length > 3 ? 'grid' : 'stack', font: 'condensed', weight: 'bold', uppercase: true, text: '#ffffff', label: '#ffffff', accent: '#fc4c02', panel: null, shadow: true, scale: 1, title: null, route: !!route, route_color: '#fc4c02', stats: (pick.length ? pick : stats).slice(0, 4) };
+}
+const REDESIGN_PROMPT = (rules, tweak) => [
+  'You are the art director of a Strava post. An image model restyles the user\'s attached photo into a finished poster of the activity, working from your prompt alone. You write that prompt.',
+  rules ? `Follow the user's instructions below. They decide the look, the mood and what goes on the picture, and take priority over every default here.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
+  tweak ? `For this version only, on top of the instructions: ${tweak}` : '',
+  'Look at the photo and read all of the activity data: sport, title, description, every stat, the telemetry, weather, place, date and start time, PRs, achievements and Strava\'s insights. Find what makes this activity special and build the whole design around it.',
+  'Your prompt must: (1) say how to restyle the entire photo (light, colour grade, texture, graphic shapes, frame, effects) while the people, their faces and the place stay recognisable and real; (2) list every piece of text to letter, word for word, numbers and units exactly as in the data, and where each goes; (3) keep text off faces and the main subject; (4) ask for crisp, correctly spelled lettering and no other text, logos, brand names or watermark.',
+  'Show as many stats as the instructions ask for. When they don\'t say, show 5 to 8 of the most telling ones, grouped, with one hero number.',
+  'Write the prompt in English; letter the text in the language of the activity title unless the instructions say otherwise.',
+  'Reply with JSON only, no other text: {"prompt": "the complete prompt for the image model", "headline": "the headline on the picture, or null", "stats": [{"label": "DIST", "value": "8.90 km"}]}. List in "stats" every stat the picture shows.',
+].filter(Boolean).join('\n');
+
+// 🎨 AI redesign: the text model art-directs from your instructions, the photo and every number of the activity;
+// OpenAI's GPT Image model then repaints the photo as a finished poster. progress(step): 'directing', 'painting'
+async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
+  if (!keyFor('openai')) return { needKey: true };
+  const rules = String(settings.overlayRules || '').trim();
+  const facts = activityFacts(a);
+  delete facts.friend_first_name; delete facts.comments; delete facts.kudos_so_far; delete facts.comment_count;
+  const data = Object.assign(facts, { all_stats: stats, strava_insights: (a.insights || []).slice(0, 4), has_route: !!(a.route || a.poly) });
+  let plan = null;
+  if (aiKey()) {
+    await progress('directing');
+    try {
+      const text = await aiCall(REDESIGN_PROMPT(rules, tweak), JSON.stringify(data), 1800, 'overlay', aiSettings.aiProvider, [{ label: 'The photo', b64: photo.small }]);
+      plan = parseJSON(repairJSON(text));
+      if (!plan || !String(plan.prompt || '').trim()) plan = null;
+    } catch (e) { console.warn('Photo art direction: ' + e.message); plan = null; }
+  }
+  const shown = (plan && Array.isArray(plan.stats) && plan.stats.length ? plan.stats : stats.slice(0, 8))
+    .filter(s => s && s.value != null).map(s => ({ label: String(s.label || '').slice(0, 24), value: String(s.value).slice(0, 30) }));
+  const exact = 'Numbers to letter, exactly as written: ' + shown.map(s => `${s.label} ${s.value}`).join(' · ');
+  const prompt = plan ? `${String(plan.prompt).slice(0, 8000)}\n\n${exact}` : [
+    'Restyle this photo into a bold, finished sports poster of the activity, keeping the people, their faces and the place recognisable and real.',
+    rules ? `The user's wishes for the look:\n${rules.slice(0, 3000)}` : '', tweak ? `Also: ${tweak}` : '',
+    `Letter a short headline: "${a.name || a.type || 'Today'}", and these stats, grouped, with the first one as the hero number.`, exact,
+    'Keep text off faces. Crisp, correctly spelled lettering, no other text, no logos or brand names, no watermark.',
+  ].filter(Boolean).join('\n\n');
+  await progress('painting');
+  const size = photo.h / photo.w > 1.15 ? '1024x1536' : photo.w / photo.h > 1.15 ? '1536x1024' : '1024x1024';
+  const out = await drawComicPage(prompt, [{ b64: photo.big }], { size, quality: 'high', fidelity: 'high', feature: 'overlay', keepRefs: true });
+  const img = Image.fromData(Data.fromBase64String(out.b64));
+  return { img: 'data:image/jpeg;base64,' + Data.fromJPEG(img).toBase64String(), model: out.model, by: plan ? PROVIDERS[aiSettings.aiProvider] : '', headline: (plan && plan.headline) || '', stats: shown };
 }
 async function aiOverlay(stats, route, photoB64, tweak) {
   const base = defaultOverlay(stats, route);
@@ -1444,7 +1514,7 @@ async function aiOverlay(stats, route, photoB64, tweak) {
   catch (e) { if (!photoB64 || !/image|vision|multimodal|content|media/i.test(e.message)) throw e; text = await ask([]); }
   let s; try { s = parseJSON(repairJSON(text)); } catch (e) { return Object.assign(base, { by: '' }); }
   const known = new Map(stats.map(x => [x.value, x]));
-  const list = (Array.isArray(s.stats) ? s.stats : []).filter(x => x && x.value != null).map(x => ({ label: String(x.label || (known.get(String(x.value)) || {}).label || '').slice(0, 24), value: String(x.value).slice(0, 24) })).slice(0, 8);
+  const list = (Array.isArray(s.stats) ? s.stats : []).filter(x => x && x.value != null).map(x => ({ label: String(x.label || (known.get(String(x.value)) || {}).label || '').slice(0, 24), value: String(x.value).slice(0, 30) })).slice(0, 12);
   return Object.assign(base, s, { stats: list.length ? list : base.stats, route: !!route && s.route !== false, by: PROVIDERS[aiSettings.aiProvider] });
 }
 
@@ -1967,6 +2037,7 @@ async function loadSettings() {
   { const norm = (t) => String(t || '').replace(/[“”„]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();   // pasted text may differ in quotes and spaces
     const r = norm(settings.commentRules), full = norm(DEFAULT_COMMENT_RULES);
     if (saved && r.length >= 500 && r.length < full.length && full.startsWith(r)) settings.commentRules = DEFAULT_COMMENT_RULES; }
+  if (saved && String(settings.overlayRules || '').trim() === OLD_OVERLAY_RULES.trim()) settings.overlayRules = DEFAULT_OVERLAY_RULES;
   // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
   const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, storyLang: "" };
   for (const k of Object.keys(d)) if (setSetting(k, settings[k]) === null) settings[k] = d[k];
@@ -4378,7 +4449,14 @@ textarea.pain{resize:vertical;line-height:1.4}
 .pafoot button{flex:1}
 .paprev{position:relative;border-radius:14px;overflow:hidden;background:var(--soft);min-height:180px}
 .paprev img{display:block;width:100%;height:auto}
-.pabusy{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.45);color:#fff;font-size:14px}
+.pabusy{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:0 24px;text-align:center;background:rgba(0,0,0,.5);color:#fff;font-size:14px}
+.pabusy small{opacity:.75;font-size:12px}
+.paprev.working img{filter:saturate(.6) blur(1px);animation:pabreath 2.4s ease-in-out infinite}
+@keyframes pabreath{50%{filter:saturate(1.2) blur(0)}}
+.pamode{display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--soft)}
+.pamode button{flex:1;padding:9px 8px;border-radius:999px;background:transparent;color:var(--mut);font-size:14px}
+.pamode button.on{background:var(--accent);color:#fff}
+.pamode button[disabled]{opacity:.45}
 @media (prefers-reduced-motion:reduce){.paspin{animation-duration:2.4s}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
@@ -5873,12 +5951,12 @@ var POST=null, PHOTO=null;
 function paBlock(){
   return '<div class="msec"><div class="msect">✍️ <b>Posting assistant</b></div><div class="pabtns">'+
     '<button class="pabtn" data-act="post-open"><span class="paic" aria-hidden="true">✨</span><b>Title &amp; description</b><small>From your stats, photos and Strava’s own insights</small><i aria-hidden="true">›</i></button>'+
-    '<button class="pabtn" data-act="photo-open"><span class="paic" aria-hidden="true">📸</span><b>Stats on a photo</b><small>Your numbers on a picture, the way you like</small><i aria-hidden="true">›</i></button></div></div>';
+    '<button class="pabtn" data-act="photo-open"><span class="paic" aria-hidden="true">📸</span><b>Photo with your stats</b><small>AI repaints your photo into a poster of the activity, or adds clean stats</small><i aria-hidden="true">›</i></button></div></div>';
 }
 function paFoot(){
   var f=document.querySelector('#msheet .msf'); if(!f) return;
   if(MINEVIEW==='post') f.innerHTML='<div class="pafoot"><button class="ghost" data-act="post-copy"'+(POST&&!POST.loading?'':' disabled')+'>Copy</button><button data-act="post-save"'+(POST&&!POST.loading&&!POST.saving?'':' disabled')+'>'+(POST&&POST.saving?'Saving…':'Save to Strava')+'</button></div>';
-  else if(MINEVIEW==='photo') f.innerHTML='<div class="pafoot"><button class="ghost" data-act="photo-other">Other photo</button><button data-act="photo-share"'+(PHOTO&&PHOTO.out&&!PHOTO.busy?'':' disabled')+'>Save or share</button></div>';
+  else if(MINEVIEW==='photo'){ var pr=PHOTO&&PHOTO.res&&PHOTO.res[photoMode()]; f.innerHTML='<div class="pafoot"><button class="ghost" data-act="photo-other">Other photo</button><button data-act="photo-share"'+(pr&&pr.out&&!PHOTO.busy?'':' disabled')+'>Save or share</button></div>'; }
   else f.innerHTML='<button class="ghost" data-act="mine-strava">Open in Strava</button>';
 }
 function paHead(title){
@@ -5937,32 +6015,45 @@ function postSave(){
     if(MINEVIEW==='post') renderPost();
   });
 }
+// 🎨 AI redesign (the image model repaints the whole photo from your instructions and every number) or 📊 Clean stats (drawn here)
+var PHOTOMODE='';
+function photoMode(){ return PHOTOMODE||(COMICDRAW?'ai':'clean'); }
+function paModes(){
+  var m=photoMode();
+  return '<div class="pamode" role="group" aria-label="How to decorate the photo">'+
+    '<button data-act="photo-mode" data-mode="ai" class="'+(m==='ai'?'on':'')+'"'+(COMICDRAW?'':' disabled')+' aria-pressed="'+(m==='ai')+'">🎨 AI redesign</button>'+
+    '<button data-act="photo-mode" data-mode="clean" class="'+(m==='clean'?'on':'')+'" aria-pressed="'+(m==='clean')+'">📊 Clean stats</button></div>'+
+    '<p class="mnote">'+(m==='ai'?'The whole photo is repainted into a poster of the activity, with every number worth showing, the way your instructions say. About a minute.':(COMICDRAW?'Your numbers drawn on the photo as it is, placed and styled by your instructions.':'Your numbers drawn on the photo as it is. 🎨 AI redesign needs an OpenAI key: Settings › AI.'))+'</p>';
+}
 function renderPhoto(){
-  var b=document.querySelector('#msheet .msb'); paHead('Stats on a photo'); paFoot();
-  var P=PHOTO||{}, html='';
+  var b=document.querySelector('#msheet .msb'); paHead(photoMode()==='ai'?'Photo redesign':'Stats on a photo'); paFoot();
+  var P=PHOTO||{}, html=paModes(), r=P.res&&P.res[photoMode()];
   if(!P.src&&!P.busy){
-    html+='<p class="mnote">Pick a photo and your stats go on it the way your instructions say (Settings › Posting assistant). Ask for changes below the preview.</p>'+
-      '<div class="pasrc"><button class="pabtn" data-act="photo-pick" data-src="library"><span class="paic">🖼</span><b>Photos</b></button><button class="pabtn" data-act="photo-pick" data-src="camera"><span class="paic">📷</span><b>Camera</b></button></div>';
+    html+='<div class="pasrc"><button class="pabtn" data-act="photo-pick" data-src="library"><span class="paic">🖼</span><b>Photos</b></button><button class="pabtn" data-act="photo-pick" data-src="camera"><span class="paic">📷</span><b>Camera</b></button></div>';
     if((MINE.photos||[]).length) html+='<div class="msect">From this activity</div><div class="paths">'+MINE.photos.map(function(u,i){ return '<button data-act="photo-pick" data-src="activity" data-i="'+i+'" aria-label="Activity photo '+(i+1)+'"><img src="'+escH(u)+'" alt=""></button>'; }).join('')+'</div>';
   } else {
-    html+='<div class="paprev">'+(P.out||P.src?'<img src="'+(P.out||P.src)+'" alt="Your photo with your stats">':'')+(P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+'</div>';
+    var shown=P.busy?P.src:(r&&r.out)||P.src;
+    html+='<div class="paprev'+(P.busy?' working':'')+'">'+(shown?'<img src="'+shown+'" alt="Your photo'+(r&&r.out?', decorated':'')+'">':'')+
+      (P.busy?'<div class="pabusy"><span class="paspin"></span><b id="pabusy">'+escH(P.busy)+'</b><small id="patime"></small></div>':'')+'</div>';
     if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
-    if(P.spec) html+='<p class="mnote">'+(P.spec.by?'Designed by '+escH(P.spec.by):'The standard design (add an AI key for designs that follow your instructions)')+' · '+(P.spec.stats||[]).map(function(s){ return escH(s.label); }).join(', ')+'</p>';
-    if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="Change it? e.g. top right, bigger, only distance and pace" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
+    if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
+    if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="'+(photoMode()==='ai'?'Change it? e.g. retro 80s poster, add a funny quote':'Change it? e.g. top right, bigger, only distance and pace')+'" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
   }
   b.innerHTML=html;
 }
 function photoPick(src,i){
-  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…'}; renderPhoto();
+  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…',res:{}}; renderPhoto();
   send('post-photo',{id:id,src:src,i:i||0},function(ok,msg){
     if(!PHOTO||PHOTO.id!==id) return;
     if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
-    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; photoDesign(); };
+    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; photoRun(); };
     im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
     im.src=d.img;
   });
 }
+function photoRun(){ return photoMode()==='ai'?photoRedraw():photoDesign(); }
+function photoStatsNote(by,stats){ return escH(by)+' · '+(stats||[]).map(function(s){ return escH(s.label); }).join(', '); }
 function photoDesign(){
   paKeep(); var P=PHOTO; if(!P||!P.im) return;
   P.busy='Designing your stats…'; P.err=''; renderPhoto();
@@ -5970,14 +6061,32 @@ function photoDesign(){
     if(PHOTO!==P) return; P.busy='';
     if(!ok){ P.err=msg||'The design didn’t come back. Try again.'; return renderPhoto(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
-    P.spec=d.spec||{}; P.route=d.route||null;
-    try{ P.out=postCompose(P.im,P.spec,P.route); }catch(e){ P.err='Couldn’t draw the stats: '+(e&&e.message||e); }
+    var spec=d.spec||{};
+    try{ P.res.clean={out:postCompose(P.im,spec,d.route||null),note:photoStatsNote(spec.by?'Designed by '+spec.by:'The standard design (add an AI key for designs that follow your instructions)',spec.stats)}; }
+    catch(e){ P.err='Couldn’t draw the stats: '+(e&&e.message||e); }
+    renderPhoto();
+  });
+}
+var PA_STEPS={reading:'Reading every number of your activity…',directing:'Art-directing from your instructions and the photo…',painting:'Repainting your photo…'};
+function photoRedraw(){
+  paKeep(); var P=PHOTO; if(!P||!P.im) return;
+  P.busy=PA_STEPS.reading; P.err=''; P.t0=Date.now(); renderPhoto();
+  clearInterval(P.tick); P.tick=setInterval(function(){ var el=document.getElementById('patime'); if(!el||PHOTO!==P||!P.busy){ return; } el.textContent=Math.round((Date.now()-P.t0)/1000)+' s · usually about a minute'; },1000);
+  window.__photoProgress=function(step){ if(PHOTO!==P||!P.busy) return; P.busy=PA_STEPS[step]||P.busy; var el=document.getElementById('pabusy'); if(el) el.textContent=P.busy; };
+  send('post-redraw',{id:P.id,tweak:P.tweak||''},function(ok,msg){
+    clearInterval(P.tick); window.__photoProgress=null;
+    if(PHOTO!==P) return; P.busy='';
+    if(msg==='NEED_OPENAI'){ P.err='🎨 AI redesign needs an OpenAI key: Settings › AI.'; return renderPhoto(); }
+    if(!ok){ P.err=msg||'The redesign didn’t come back. Try again.'; return renderPhoto(); }
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    P.res.ai={out:d.img,note:photoStatsNote('Repainted by '+(d.model||'GPT Image')+(d.by?', art direction by '+d.by:''),d.stats)};
     renderPhoto();
   });
 }
 function photoShare(){
-  if(!PHOTO||!PHOTO.out||PHOTO.busy) return;
-  window.__postImg=PHOTO.out.split(',')[1];
+  var r=PHOTO&&PHOTO.res&&PHOTO.res[photoMode()];
+  if(!r||!r.out||PHOTO.busy) return;
+  window.__postImg=r.out.split(',')[1];
   send('post-share',{id:PHOTO.id},function(ok,msg){ window.__postImg=null; if(!ok&&msg) toast(msg); });
 }
 var PA_FONTS={condensed:'"DIN Condensed","Avenir Next Condensed","Arial Narrow",Impact,sans-serif',sans:'"Avenir Next","Helvetica Neue",Arial,sans-serif',rounded:'"SF Pro Rounded","Arial Rounded MT Bold","Avenir Next",sans-serif',serif:'Georgia,"Times New Roman",serif',mono:'Menlo,"Courier New",monospace',marker:'"Marker Felt","Chalkboard SE",cursive',futura:'Futura,"Avenir Next",sans-serif'};
@@ -5990,7 +6099,7 @@ function postCompose(im,spec,route){
   var fam=PA_FONTS[spec.font]||PA_FONTS.condensed, wt=spec.weight==='black'?'900':spec.weight==='regular'?'500':'700', up=spec.uppercase!==false;
   var lay=spec.layout||'stack', gap=Math.round(18*u), TS=Math.round(42*u), txt=spec.text||'#ffffff', acc=spec.accent||'#fc4c02';
   function lab(s){ var l=String(s.label||''); return up?l.toUpperCase():l; }
-  var items=(spec.stats||[]).slice(0,8).map(function(s,k){
+  var items=(spec.stats||[]).slice(0,12).map(function(s,k){
     var vs=lay==='hero'?(k===0?Math.round(130*u):Math.round(46*u)):Math.round(70*u), ls=lay==='hero'&&k>0?Math.round(20*u):Math.round(25*u);
     c.font=wt+' '+vs+'px '+fam; var vw=c.measureText(String(s.value)).width; c.font='600 '+ls+'px '+fam; var lw=c.measureText(lab(s)).width;
     return {s:s,vs:vs,ls:ls,w:Math.max(vw,lw),h:ls+Math.round(6*u)+vs};
@@ -6613,8 +6722,9 @@ document.addEventListener('click',function(e){
   if(t.dataset.pdesc!=null){ paKeep(); if(POST){ POST.desc=(POST.descriptions||[])[+t.dataset.pdesc]||POST.desc; renderPost(); } return; }
   if(t.dataset.act==='photo-open'){ MINEVIEW='photo'; if(PHOTO&&MINE&&PHOTO.id!==MINE.id) PHOTO=null; renderPhoto(); var qb=document.querySelector('#msheet .msb'); if(qb) qb.scrollTop=0; return; }
   if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0);
-  if(t.dataset.act==='photo-again') return photoDesign();
-  if(t.dataset.act==='photo-other'){ PHOTO=null; return renderPhoto(); }
+  if(t.dataset.act==='photo-again') return photoRun();
+  if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; if(PHOTO&&PHOTO.im&&!(PHOTO.res&&PHOTO.res[PHOTOMODE])) return photoRun(); return renderPhoto(); }
+  if(t.dataset.act==='photo-other'){ if(PHOTO&&PHOTO.busy) return; PHOTO=null; return renderPhoto(); }
   if(t.dataset.act==='photo-share') return photoShare();
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
   if(t.dataset.act==='det-close') return closeDetail();
