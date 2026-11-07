@@ -1,5 +1,6 @@
-# Logging in and out and posting comments must always work: the app test runs on every push.
-# It runs the real script in the Scriptable emulator from gadominas/app-blueprints (repo-site).
+# The app test runs on every push: the real script in the Scriptable emulator from gadominas/app-blueprints (repo-site),
+# against a pretend strava.com, Claude and OpenAI (tests/README.md lists what it covers).
+# app-blueprints is private: the APP_BLUEPRINTS_TOKEN secret (a token that can read it) lets the checkout through.
 name: App test
 on:
   push:
@@ -8,12 +9,12 @@ on:
 jobs:
   login:
     runs-on: ubuntu-24.04   # Playwright's browser dependencies are published for this release
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with: { path: StravaFeed }
       - uses: actions/checkout@v5
-        with: { repository: gadominas/app-blueprints, path: app-blueprints }
+        with: { repository: gadominas/app-blueprints, path: app-blueprints, token: '${{ secrets.APP_BLUEPRINTS_TOKEN }}' }
       - uses: actions/setup-node@v5
         with: { node-version: 22 }
       - name: Emulator dependencies
@@ -24,7 +25,7 @@ jobs:
       - name: Headless Chromium
         working-directory: app-blueprints/repo-site
         run: npx playwright install --with-deps chromium
-      - name: Login, log-out and commenting flows
+      - name: App tests (sections 0 to 16)
         working-directory: StravaFeed
         env:
           APP_BLUEPRINTS: ${{ github.workspace }}/app-blueprints
