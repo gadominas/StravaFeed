@@ -2,6 +2,25 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.39.0 (2026-11-07): Your posting assistant
+
+- ✨ **Titles and descriptions**: Tap your activity for title and description ideas written as you, then save them to Strava.
+- 📸 **Stats on a photo**: Pick a photo and your distance, pace and route go on it, placed the way you like.
+- 📝 **Your instructions**: Settings › Posting assistant sets the tone of your posts and the look of your photo stats.
+
+**Changes**
+
+- Your activities › any activity › ✍️ Posting assistant: ✨ Title & description and 📸 Stats on a photo
+- Ideas use everything the activity page knows: stats, splits, heart rate, weather, achievements, your photos, the current text and Strava's own insights (such as Athlete Intelligence) when the page has them
+- Save to Strava changes the title and description through Strava's edit form, keeping every other setting, and checks the change arrived; if Strava refuses, the text is copied to paste in Strava
+- Ask for something different (funnier, mention the sunset) and get new ideas; titles and descriptions stay editable before saving
+- Stats on a photo: from Photos, the camera or the activity's own photos; the AI looks at the photo to keep stats off faces, picks the numbers, fonts and colours from your instructions, adds the route line, and you can ask for changes; Save or share opens the share sheet
+- AI settings › Token usage names the new features (Titles & descriptions, Photo stats) and Comics
+
+**Fixes**
+
+- AI settings › Token usage showed the raw tag "comic" instead of Comics
+
 ## 1.38.2 (2026-11-07): App Store ready
 
 - 📱 **Ready for the App Store**: Built as an app of its own, Daily Digest gets new versions from the App Store instead of downloading them.
