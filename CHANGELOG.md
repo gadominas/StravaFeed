@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.43.1 (2026-11-07): Clean stats wait for you
+
+- 📊 **Your wishes first**: 📊 Clean stats now waits for your wishes and a tap on Draw my stats, like AI redesign.
+
+**Changes**
+
+- 📊 Clean stats: a “How should the stats look?” box, one-tap ideas (top right corner, one big hero number, every stat in a grid, minimal, route line, dark panel, bigger text) and a big Draw my stats button
+- Picking a photo or switching modes never starts anything by itself; each mode keeps its own wishes
+
+**Fixes**
+
+- 📊 Clean stats started designing as soon as a photo was picked, before you could say how it should look
+
 ## 1.43.0 (2026-11-07): Ideas built on your draft
 
 - ✍️ **Your draft leads**: Whatever you've typed or dictated becomes the heart of every comment idea.
