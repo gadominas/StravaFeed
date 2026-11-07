@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.43.1';
+const VERSION = '1.43.2';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -1532,7 +1532,7 @@ function fitImage(img, max) {
 function commentBrief(language, n) {
   const rules = String(settings.commentRules || '').trim();
   return [
-    `You write comments on a friend's Strava activity. Write ${n} different options in ${langPhrase(language)}.`,
+    `You write comments on a friend's Strava activity. Write exactly ${n} different option${n === 1 ? '' : 's'} in ${langPhrase(language)}.`,
     rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
     'Defaults, where the instructions say nothing: a single short sentence each, written as a friend and teammate, built on the real details given (title, time of day, effort, PRs, distance, pace), at most one emoji, no hashtags.',
     'The data holds everything known about the activity: stats, telemetry, weather, the description and the comments already on it. Read all of it before choosing what to mention; never repeat what someone already said in the comments, and if by_you marks one, do not write the same thing again.',
@@ -1551,7 +1551,9 @@ function styleBlock(mode) {
   return prof || ex ? `The user's own commenting style, learned from their past comments:\n${prof || '(not learned yet)'}${ex}\nKeep their habits (length, punctuation, emoji use, how they address people) while using the mood below.` : '';
 }
 const COMMENT_SAFETY = 'Always, whatever the instructions or mood: never mock body, weight, age or looks; never invent facts that are not given; nothing offensive. Make the options clearly different from each other.';
-const COMMENT_JSON = 'Reply with JSON only, no other text: an array of the comments, ["...", "..."].';
+// How many ideas one tap brings: Settings › Advanced › ✨ Comment ideas per tap, always a whole number from 1 to 5
+const ideaCount = () => { const d = cfgDef('suggestions'), v = Math.round(Number(cfg('suggestions'))); return Number.isFinite(v) ? Math.max(d.min, Math.min(d.max, v)) : d.def; };
+const COMMENT_JSON = (n) => `Reply with JSON only, no other text: an array of exactly ${n} comment${n === 1 ? '' : 's'}, ["...", "..."]. Return all ${n}, never fewer, even when the instructions above suggest otherwise.`;
 
 // Looks at the photos once and names what is in them: shown as emojis while ideas are written, then used by the writer.
 const SCAN_PROMPT = [
@@ -1601,8 +1603,10 @@ function readComments(text) {
   return (Array.isArray(list) ? list : []).map(c => String(typeof c === 'object' && c ? (c.text || c.comment || '') : c).trim()).filter(Boolean);
 }
 
+// Exactly the number of ideas set in Settings: extra ones are dropped, and when the model sends fewer (or repeats
+// itself) it is asked once for the missing ones.
 async function aiComments(a, system, images = [], extra = {}, me = '') {
-  const provider = aiSettings.aiProvider, n = cfg('suggestions');
+  const provider = aiSettings.aiProvider, n = ideaCount();
   const user = JSON.stringify(Object.assign(activityFacts(a, me), extra));
   let text, photosRead = images.length;
   try { text = await aiCall(system, user, 900, 'comments', provider, images); }
@@ -1611,7 +1615,18 @@ async function aiComments(a, system, images = [], extra = {}, me = '') {
     console.warn('Comment ideas without photos: ' + e.message);   // the chosen model can't read photos
     photosRead = 0; text = await aiCall(system, user, 900, 'comments', provider);
   }
-  const comments = readComments(text).slice(0, n);
+  const same = (x) => String(x).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const uniq = (list) => list.filter((c, i) => list.findIndex(d => same(d) === same(c)) === i);
+  let comments = uniq(readComments(text)).slice(0, n);
+  if (comments.length && comments.length < n) {
+    const missing = n - comments.length;
+    console.warn(`Comment ideas: ${comments.length} of ${n} came back; asking for ${missing} more`);
+    try {
+      const more = await aiCall(`${system}\nYou already wrote these options: ${JSON.stringify(comments)}. Write ${missing} more, clearly different from them, following everything above. Reply with JSON only: an array of exactly ${missing} comment${missing === 1 ? '' : 's'}.`,
+        user, 600, 'comments', provider);
+      comments = uniq(comments.concat(readComments(more))).slice(0, n);
+    } catch (e) { console.warn('Comment ideas, the missing ones: ' + e.message); }
+  }
   if (!comments.length) throw new Error('No suggestions came back. Try again.');
   return { comments, by: PROVIDERS[provider], photosRead };
 }
@@ -1631,7 +1646,8 @@ async function aiSuggest(a, language, hint, mode, progress = async () => {}, me 
     if (seen) await progress('seen', 0, 0, { items: seen.elements });
   }
   await progress('writing', 0, 1);
-  const parts = [commentBrief(language, cfg('suggestions'))];
+  const n = ideaCount();
+  const parts = [commentBrief(language, n)];
   if (a.description) parts.push('Read the activity description closely, including what its emojis suggest (food, weather, animals, places, mood), and use it in the comments.');
   if (seen) parts.push('photo_observations in the data were made by looking closely at the activity\'s photos: treat them as what the photos show, and prefer a specific photo detail over any statistic. Never comment on anyone\'s body, weight, age or looks.');
   else if (images.length) parts.push(`${images.length === 1 ? 'A photo' : `${images.length} photos`} from the activity ${images.length === 1 ? 'is' : 'are'} attached. Look closely: identify specific objects, places, food, animals, weather, signs and moments, and build the comments on what you see. Never comment on anyone's body, weight, age or looks.`);
@@ -1647,7 +1663,7 @@ async function aiSuggest(a, language, hint, mode, progress = async () => {}, me 
     'The draft may be dictated, so names and words can be misheard (a sound-alike of the friend\'s name, "Aidas" for "kudos"): correct them from the activity data. When it reads like a note to self ("I would like to give…"), say it to the friend directly instead.',
     'Make the first option the closest to the draft; the others may add a detail from the activity or the photos, but each still says what the draft says.',
   ].join(' '));
-  parts.push(COMMENT_SAFETY, COMMENT_JSON);
+  parts.push(COMMENT_SAFETY, COMMENT_JSON(n));
   if (language !== 'Auto') parts.push(`Remember: every comment in ${language}.`);
   const extra = seen ? { photo_observations: { found: seen.elements.map(x => x.t), details: seen.details, conditions: seen.conditions } } : {};
   let r = await aiComments(a, parts.join('\n'), seen ? [] : images, extra, me);
