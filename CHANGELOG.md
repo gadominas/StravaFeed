@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.43.2 (2026-11-07): The right number of ideas
+
+- ✨ **Ideas per tap, respected**: ✨ Comment ideas per tap in Settings now always gives you that many ideas.
+
+**Changes**
+
+- The AI is asked for exactly the number set, and told to send all of them
+- If fewer come back, or two are the same, the app asks once for the missing ones
+- New app tests cover 1 to 5 ideas, the default of 3, too many, too few and repeated ideas
+
+**Fixes**
+
+- Comment ideas could come back as 3 when Settings asked for 4 or 5
+
 ## 1.43.1 (2026-11-07): Clean stats wait for you
 
 - 📊 **Your wishes first**: 📊 Clean stats now waits for your wishes and a tap on Draw my stats, like AI redesign.
