@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.42.0';
+const VERSION = '1.43.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -534,7 +534,7 @@ async function main() {
           }
           const r = await aiSuggest(a, p.lang || settings.aiLang, p.hint || '', p.mode || settings.aiMode, say, String(feed.me() || ''));
           if (r.needKey) msg = 'NEED_KEY';
-          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0, seen: r.seen || [] }); track('ai_ideas', { mode: p.mode || settings.aiMode, language: p.lang || settings.aiLang, photos: r.photosRead || 0, provider: aiSettings.aiProvider, has_style: !!settings.styleProfile }); }
+          else { ok = true; msg = JSON.stringify({ comments: r.comments, by: r.by, photosRead: r.photosRead || 0, seen: r.seen || [], draft: String(p.hint || '').trim().slice(0, 300) }); track('ai_ideas', { mode: p.mode || settings.aiMode, language: p.lang || settings.aiLang, photos: r.photosRead || 0, provider: aiSettings.aiProvider, has_style: !!settings.styleProfile }); }
         }
       } else if (head === 'story') {
         const people = storyDay ? groupByAthlete(storyDay.acts) : [];
@@ -1641,7 +1641,12 @@ async function aiSuggest(a, language, hint, mode, progress = async () => {}, me 
     const m = DIGEST.AI.MODES.find(x => x.key === mode && x.style);
     if (m) parts.push(`Mood for these options: ${m.style}. Where this mood clashes with the user's instructions about tone, use the mood; every other instruction still applies.`);
   }
-  if (hint) parts.push(`The user's own draft idea; keep its spirit: "${hint}".`);
+  if (hint) parts.push([
+    `The user has already started this comment: "${hint}".`,
+    'The draft says what they want to say, so build every option on it: keep its message and intent (who it is for, what it praises or thanks for, any detail, question or joke in it) and turn it into a finished comment in the mood and language asked for.',
+    'The draft may be dictated, so names and words can be misheard (a sound-alike of the friend\'s name, "Aidas" for "kudos"): correct them from the activity data. When it reads like a note to self ("I would like to give…"), say it to the friend directly instead.',
+    'Make the first option the closest to the draft; the others may add a detail from the activity or the photos, but each still says what the draft says.',
+  ].join(' '));
   parts.push(COMMENT_SAFETY, COMMENT_JSON);
   if (language !== 'Auto') parts.push(`Remember: every comment in ${language}.`);
   const extra = seen ? { photo_observations: { found: seen.elements.map(x => x.t), details: seen.details, conditions: seen.conditions } } : {};
@@ -4777,6 +4782,12 @@ section.person .route{display:none}
 .sugs:not(:empty){margin-bottom:2px}
 .sug{background:var(--soft);color:var(--fg);font-weight:500;text-align:left;border-radius:14px;padding:10px 12px;line-height:1.35;border-left:3px solid color-mix(in srgb,var(--accent) 55%,transparent)}
 .sug.picked{background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
+.sdraft{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:12px;background:color-mix(in srgb,#2fbf71 12%,var(--bg));border:1px dashed color-mix(in srgb,#2fbf71 55%,transparent);font-size:12.5px}
+.sdraft b{color:#2fbf71;font-size:12px}
+.sdraft q{color:var(--mut);font-style:italic}
+.sug.fromdraft{border-left-color:#2fbf71}
+.sug.fromdraft::after{content:"✍️ from your draft";display:block;margin-top:4px;font-size:11px;font-weight:700;color:#2fbf71;opacity:.9}
+.sug.fromdraft.closest::after{content:"✍️ closest to your draft"}
 .keyrow{display:flex;gap:6px}.keyrow input{flex:1;min-width:0;font:inherit;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px}
 .keyhelp{font-size:calc(12px * var(--ts));color:var(--mut);margin:0}
 textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:8px 10px;resize:none}
@@ -5120,7 +5131,9 @@ function aiReply(box,ok,msg,label){
   var res={}; try{ res=JSON.parse(msg); }catch(e){}
   var list=res.comments||[];
   if(list.length){ var lab=document.createElement('span'); lab.className='badge-ai'; lab.textContent='✨ '+label+' by '+(res.by||'AI')+((res.seen&&res.seen.length)?'  '+res.seen.join(' '):''); if(res.photosRead) lab.title='Looked at '+res.photosRead+' photo'+(res.photosRead===1?'':'s'); sugs.appendChild(lab); }
-  list.forEach(function(c){ var b=document.createElement('button'); b.className='sug'; b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
+  // ✍️ when the ideas were built on what you had already written
+  if(list.length&&res.draft){ var dn=document.createElement('div'); dn.className='sdraft'; dn.innerHTML='<b>✍️ Built on your draft</b><q>'+escH(res.draft.length>90?res.draft.slice(0,90)+'…':res.draft)+'</q>'; sugs.appendChild(dn); }
+  list.forEach(function(c,i){ var b=document.createElement('button'); b.className='sug'+(res.draft?' fromdraft'+(i===0?' closest':''):''); b.dataset.sug=''; b.textContent=c; sugs.appendChild(b); });
   return true;
 }
 // While comment ideas are written: the composer is covered by a sky, with the friend's photo as the sun.
@@ -5199,7 +5212,9 @@ function suggest(btn){
   [go,again].forEach(function(b){ if(b){ b.disabled=true; b.dataset.busy='1'; } });
   if(go) go.textContent='✨ Writing…';
   var io=ideaOverlay(box);
-  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:ta.value.trim(),mode:aiMode},function(ok,msg){
+  // your own draft steers the ideas; an idea you picked isn't your draft, so ↻ and tone changes go back to what you wrote
+  var cur=ta.value.trim(), draft=(ta.dataset.picked&&cur===ta.dataset.picked)?(ta.dataset.draft||''):cur; ta.dataset.draft=draft;
+  send('suggest',{id:btn.dataset.suggest,lang:aiLang,hint:draft,mode:aiMode},function(ok,msg){
     window.__ideaProgress=null;
     [go,again].forEach(function(b){ if(b){ b.disabled=false; delete b.dataset.busy; } });
     if(go) go.textContent='✨ Suggest comments';
@@ -6931,7 +6946,7 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='cs-close') return closeComposer();
   if(t.dataset.mode) return setMode(t.dataset.mode, t);
   if(t.dataset.sug!==undefined){
-    var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent;
+    var ta=t.closest('.cbox').querySelector('textarea'); ta.value=t.textContent; ta.dataset.picked=t.textContent;
     t.parentNode.querySelectorAll('.sug').forEach(function(b){ b.classList.toggle('picked', b===t); });
     var cpost=document.querySelector('#csheet .cpost'); if(cpost&&cpost.textContent==='Post') cpost.disabled=false;
     ta.focus(); return;
