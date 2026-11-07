@@ -3,6 +3,24 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.40.1",
+      "date": "2026-11-07",
+      "title": "Clean stats that fit",
+      "highlights": [
+        {
+          "icon": "📐",
+          "title": "Stats that fit",
+          "text": "📊 Clean stats always stay inside the photo, with a margin on every side."
+        }
+      ],
+      "changes": [
+        "Rows of stats wrap onto the next line instead of running past the edge, and the whole block shrinks until it fits"
+      ],
+      "fixes": [
+        "📊 Clean stats with many numbers ran off the sides of the photo and cut values like the place and start time"
+      ]
+    },
+    {
       "version": "1.40.0",
       "date": "2026-11-07",
       "title": "Your photo, redesigned",
