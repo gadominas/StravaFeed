@@ -3,6 +3,36 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.40.0",
+      "date": "2026-11-07",
+      "title": "Your photo, redesigned",
+      "highlights": [
+        {
+          "icon": "🎨",
+          "title": "AI photo redesign",
+          "text": "OpenAI's image model repaints your whole photo into a poster of the activity, your way."
+        },
+        {
+          "icon": "📊",
+          "title": "Every number",
+          "text": "Heart rate, cadence, power, weather, place, PRs and more: whatever makes the activity special."
+        },
+        {
+          "icon": "📝",
+          "title": "Instructions drive it",
+          "text": "Settings › Posting assistant sets the look; ask for changes like “retro 80s, add a funny quote”."
+        }
+      ],
+      "changes": [
+        "Your activities › Photo with your stats: choose 🎨 AI redesign or 📊 Clean stats; both results are kept so you can switch between them",
+        "AI redesign: the AI in use art-directs from your instructions, the photo and every number of the activity, then GPT Image repaints the photo at high quality, keeping you and the place recognisable",
+        "Progress while it paints, with the step and a timer; Redesign takes your request for changes",
+        "Clean stats now shows every stat worth showing (often 6 to 10), in a grid when there are many, and reads weather, achievements and the date too",
+        "New default instructions for photos; if you never changed the old ones, they move to the new default"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.39.0",
       "date": "2026-11-07",
       "title": "Your posting assistant",
