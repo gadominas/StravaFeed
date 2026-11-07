@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.40.1 (2026-11-07): Clean stats that fit
+
+- 📐 **Stats that fit**: 📊 Clean stats always stay inside the photo, with a margin on every side.
+
+**Changes**
+
+- Rows of stats wrap onto the next line instead of running past the edge, and the whole block shrinks until it fits
+
+**Fixes**
+
+- 📊 Clean stats with many numbers ran off the sides of the photo and cut values like the place and start time
+
 ## 1.40.0 (2026-11-07): Your photo, redesigned
 
 - 🎨 **AI photo redesign**: OpenAI's image model repaints your whole photo into a poster of the activity, your way.
