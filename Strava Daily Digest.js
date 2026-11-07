@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.41.0';
+const VERSION = '1.42.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -4459,6 +4459,27 @@ textarea.pain{resize:vertical;line-height:1.4}
 .pamode button.on{background:var(--accent);color:#fff}
 .pamode button[disabled]{opacity:.45}
 @media (prefers-reduced-motion:reduce){.paspin{animation-duration:2.4s}}
+.paview{display:block;width:100%;padding:0;border:0;border-radius:0;background:none}
+.paexp{position:absolute;right:10px;top:10px;width:30px;height:30px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:grid;place-items:center;font-size:15px;pointer-events:none}
+.pacmp{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+.pacell{position:relative;display:flex;flex-direction:column;gap:6px;padding:0;border:0;background:none;color:var(--fg);text-align:center}
+.pabox{display:block;width:100%;max-height:46vh;border-radius:12px;overflow:hidden;background:#000;border:2px solid var(--line)}
+.pacell.res .pabox{border-color:var(--accent);box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 30%,transparent)}
+.pabox img{display:block;width:100%;height:100%;object-fit:contain}
+.pacell b{font-size:13px}
+.pacell.res b{color:var(--accent)}
+.pacell i{position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:grid;place-items:center;font-style:normal;font-size:14px}
+.pahint{text-align:center}
+#paview{position:fixed;inset:0;z-index:9500;display:flex;flex-direction:column;background:#000;padding:calc(env(safe-area-inset-top,0px) + 10px) 12px calc(env(safe-area-inset-bottom,0px) + 12px)}
+#paview[hidden]{display:none}
+.pvtop{display:flex;align-items:center;gap:12px;color:#fff}
+.pvtop .pamode{flex:1;max-width:320px;margin:0 auto}
+.pvtop b{flex:1;text-align:center}
+.pvsp{width:36px;flex:none}
+.pvimg{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;margin:10px 0;padding:0;border:0;border-radius:0;background:none}
+.pvimg img{max-width:100%;max-height:100%;object-fit:contain;animation:pvin .25s ease-out}
+@keyframes pvin{from{opacity:.4;transform:scale(.98)}}
+.pvbot{display:flex;align-items:center;justify-content:space-between;gap:12px;color:rgba(255,255,255,.6);font-size:13px}
 .paorig{position:absolute;left:10px;top:10px;padding:4px 9px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700}
 .paask{display:flex;flex-direction:column;gap:8px}
 .paask textarea.pain{font-size:15px}
@@ -4466,7 +4487,7 @@ textarea.pain{resize:vertical;line-height:1.4}
 .pastudio{display:flex;flex-direction:column;gap:12px}
 .pafxwrap{position:relative;border-radius:14px;overflow:hidden;background:#000;box-shadow:0 10px 26px rgba(0,0,0,.35)}
 .pafxwrap{height:min(38vh,380px)}
-.paprev.small img{max-height:30vh;object-fit:cover}
+.paprev.small img{max-height:34vh;width:100%;object-fit:contain;background:#000}
 .pafxwrap img{display:block;width:100%;height:100%;object-fit:cover;transition:filter 1.2s ease;transform-origin:50% 45%}
 .pafxwrap i{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1s ease}
 .pafxtag{position:absolute;left:10px;top:10px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:800;letter-spacing:.3px}
@@ -5955,7 +5976,7 @@ function openMine(btn){
     renderMine();
   });
 }
-function closeMine(){ paKeep(); var ov=document.getElementById('msheet'); if(ov) ov.hidden=true; MINE=null; PHOTO=null; document.body.style.overflow=''; }
+function closeMine(){ paKeep(); photoViewClose(); var ov=document.getElementById('msheet'); if(ov) ov.hidden=true; MINE=null; PHOTO=null; document.body.style.overflow=''; }
 function renderMine(){
   var ov=document.getElementById('msheet'); if(!ov||!MINE) return;
   if(MINEVIEW==='post') return renderPost();
@@ -6082,6 +6103,26 @@ function paModes(){
     '<p class="mnote">'+(m==='ai'?'The whole photo is repainted into a poster of the activity, with every number worth showing, the way your instructions say. About a minute.':(COMICDRAW?'Your numbers drawn on the photo as it is, placed and styled by your instructions.':'Your numbers drawn on the photo as it is. 🎨 AI redesign needs an OpenAI key: Settings › AI.'))+'</p>';
 }
 function photoRun(){ return photoMode()==='ai'?photoRedraw():photoDesign(); }
+// Before and after: the original on the left, the result on the right, each whole (no cropping), the photo's own shape
+function paCompare(P,r,ai){
+  var ar=P.im&&P.im.naturalWidth?(P.im.naturalWidth+' / '+P.im.naturalHeight):'2 / 3';
+  function cell(which,src,label){ return '<button class="pacell'+(which==='out'?' res':'')+'" data-act="photo-view" data-which="'+which+'" aria-label="'+label+', full screen"><span class="pabox" style="aspect-ratio:'+ar+'"><img src="'+src+'" alt="'+label+'"></span><b>'+label+'</b><i aria-hidden="true">⤢</i></button>'; }
+  return '<div class="pacmp">'+cell('orig',P.src,'Original')+cell('out',r.out,ai?'Redesigned':'With stats')+'</div><p class="mnote pahint">Tap a picture to see it full screen.</p>';
+}
+// Full screen: the whole picture fitted to the screen, Original and Result one tap apart (tap the picture to flip)
+function photoView(which){
+  var P=PHOTO; if(!P||!P.src) return; var r=P.res&&P.res[photoMode()], has=!!(r&&r.out);
+  if(which==='out'&&!has) which='orig';
+  var ov=document.getElementById('paview');
+  if(!ov){ ov=document.createElement('div'); ov.id='paview'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); document.body.appendChild(ov); }
+  ov.dataset.which=which;
+  ov.innerHTML='<div class="pvtop"><button class="mbtn" data-act="photo-view-close" aria-label="Close">✕</button>'+
+    (has?'<div class="pamode"><button data-act="photo-view" data-which="orig" class="'+(which==='orig'?'on':'')+'">Original</button><button data-act="photo-view" data-which="out" class="'+(which==='out'?'on':'')+'">'+(photoMode()==='ai'?'Redesigned':'With stats')+'</button></div>':'<b>Original</b>')+'<span class="pvsp"></span></div>'+
+    '<button class="pvimg" data-act="photo-view" data-which="'+(has?(which==='out'?'orig':'out'):'orig')+'" aria-label="'+(has?'Show the other one':'Your photo')+'"><img src="'+(which==='out'?r.out:P.src)+'" alt="'+(which==='out'?'Result':'Original')+'"></button>'+
+    (has?'<div class="pvbot"><small>Tap the picture to compare</small><button data-act="photo-share">Save or share</button></div>':'');
+  ov.hidden=false;
+}
+function photoViewClose(){ var ov=document.getElementById('paview'); if(ov){ ov.hidden=true; ov.innerHTML=''; } }
 function photoStatsNote(by,stats){ return escH(by)+' · '+(stats||[]).map(function(s){ return escH(s.label); }).join(', '); }
 function photoDesign(){
   paKeep(); var P=PHOTO; if(!P||!P.im) return;
@@ -6106,9 +6147,9 @@ function renderPhoto(){
   } else if(P.busy&&P.studio){
     html+=paStudioHTML(P);
   } else {
-    var shown=(r&&r.out)||P.src;
-    html+='<div class="paprev'+(P.busy?' working':'')+(ai&&!r&&!P.busy?' small':'')+'">'+(shown?'<img src="'+shown+'" alt="Your photo'+(r&&r.out?', decorated':'')+'">':'')+
-      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(ai&&!r&&!P.busy?'<span class="paorig">Original · not redesigned yet</span>':'')+'</div>';
+    if(r&&r.out&&!P.busy) html+=paCompare(P,r,ai);   // before and after, side by side, whole pictures; tap for full screen
+    else html+='<div class="paprev'+(P.busy?' working':'')+(ai&&!P.busy?' small':'')+'">'+(P.src?'<button class="paview" data-act="photo-view" data-which="orig" aria-label="See the original full screen"><img src="'+P.src+'" alt="Your photo"></button>':'')+
+      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(ai&&!P.busy?'<span class="paorig">Original · not redesigned yet</span><span class="paexp" aria-hidden="true">⤢</span>':'')+'</div>';
     if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
     if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
     if(P.src&&ai){
@@ -6856,6 +6897,8 @@ document.addEventListener('click',function(e){
   if(t.dataset.phidea!=null){ paKeep(); var idea=PA_IDEAS[+t.dataset.phidea]; if(PHOTO&&idea){ var cur=String(PHOTO.tweak||'').trim(); PHOTO.tweak=cur?(cur.indexOf(idea[1])>=0?cur:cur+', '+idea[1].toLowerCase()):idea[1]; renderPhoto(); } return; }
   if(t.dataset.act==='photo-other'){ if(PHOTO&&PHOTO.busy) return; PHOTO=null; return renderPhoto(); }
   if(t.dataset.act==='photo-share') return photoShare();
+  if(t.dataset.act==='photo-view') return photoView(t.dataset.which||'orig');
+  if(t.dataset.act==='photo-view-close') return photoViewClose();
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
   if(t.dataset.act==='det-close') return closeDetail();
   if(t.dataset.act==='det-app') return send('activity',{id:document.getElementById('det').dataset.id});
