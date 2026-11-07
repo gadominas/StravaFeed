@@ -17,6 +17,7 @@ against a pretend strava.com whose session can end and start again, and checks w
    **Your activities** on top, side by side, and not counted by **👍 All**.
 6. The order of people in each group: early risers first (earliest first), then people with photos, then everyone else
    (newest first), checked against what each line shows, also after the details have loaded.
+7. Comment ideas: exactly the number set in Settings › ✨ Comment ideas per tap (1 to 5, 3 by default). The AI is asked for that many, extra ones are dropped, and when it sends fewer or repeats itself the app asks once for the missing ones (seven cases, from 1 to 5, the default, and a count saved as text).
 
 ```sh
 # app-blueprints checked out next to this repository
