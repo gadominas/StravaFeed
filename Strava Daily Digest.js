@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.38.2';
+const VERSION = '1.39.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -173,6 +173,15 @@ async function main() {
   let viewing = false, savedScroll = 0;
   let storyDay = null;
   let lastStory = null;           // the story on screen, for ✨ Drawn by AI
+  let postPhoto = null;           // ✍️ Posting assistant: the photo picked for Stats on a photo, small, for the AI to look at
+  // everything the activity page knows about one of your activities (telemetry, weather, Strava's insights), read once
+  const ownDetails = async (a) => {
+    if (!details.has(a.id) || !details.get(a.id).tele) {
+      try { const det = (await sx(`__SD.enrich(${JSON.stringify([a.id])}, 1)`, cfg('detailsWait') * 1000)) || {}; if (det[a.id] && !det[a.id].error) { details.set(a.id, det[a.id]); mergeDetails(a, det[a.id]); derive(a); } }
+      catch (e) { console.warn('Your activity, details: ' + e.message); }
+    }
+    try { await fillWeather([a]); } catch (e) {}
+  };
   let nightNote = false;          // opened on yesterday because today was still empty after midnight
   let styleStop = false;          // "Stop" in Learn my style: learn from what was found so far
   let styleRun = null;            // Learn my style in progress: { found, wanted, text } (the page asks for it after a redraw)            // the day on screen: its date and activities
@@ -478,7 +487,7 @@ async function main() {
         data = {
           ok: true, id: a.id, name: a.name || a.type, emoji: emoji(a.type), line: mineLine(a),
           kudos: Math.max(a.kudos || 0, kudoers.length), commentCount: Math.max(a.comments || 0, comments.length),
-          kudoers, comments: comments.map(c => Object.assign({}, c, { ago: agoLabel(c.at) })), likeable: !likeUnsupported,
+          kudoers, comments: comments.map(c => Object.assign({}, c, { ago: agoLabel(c.at) })), likeable: !likeUnsupported, photos: (a.photos || []).slice(0, 8),
         };
       }
       if (data.ok) track('own_activity_opened');
@@ -545,6 +554,76 @@ async function main() {
         for (const u of urls.slice(0, 9)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 900); } catch (e) { console.warn('Story image photo: ' + e.message); } }
         for (const u of avs.slice(0, 12)) { try { out.avatars[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 200); } catch (e) { console.warn('Story image avatar: ' + e.message); } }
         ok = true; msg = JSON.stringify(out);
+      } else if (head === 'post-ideas' || head === 'post-save' || head === 'post-photo' || head === 'post-design' || head === 'post-share') {
+        // ✍️ Posting assistant, on your own activity
+        const a = feed && feed.mineGet(String(p.id));
+        if (!a) throw new Error('Activity not found. Pull to refresh and try again.');
+        if (head === 'post-ideas') {
+          if (!aiKey()) msg = 'NEED_KEY';
+          else {
+            await ownDetails(a);
+            const lang = DIGEST.AI.LANGUAGES.some(l => l[1] === p.lang) ? p.lang : settings.aiLang;
+            const facts = activityFacts(a, String(feed.me() || ''));
+            delete facts.friend_first_name; delete facts.activity_title; delete facts.description;
+            const data = Object.assign(facts, {
+              current_title: a.name || '', current_description: a.description || '',
+              strava_insights: (a.insights || []).slice(0, 6),
+              my_other_recent_activities: feed.mine(0, 1e15).filter(x => x.id !== a.id).slice(0, 6).map(x => ({ title: x.name, sport: x.type, description: String(x.description || '').slice(0, 300) })),
+              my_writing_style: settings.styleProfile || null,
+            });
+            const imgs = [];
+            for (const u of (a.photos || []).slice(0, 3)) { try { imgs.push({ label: `Photo ${imgs.length + 1} of this activity`, b64: await shrinkImage(u, 768) }); } catch (e) {} }
+            const ask = (im) => aiCall(POST_PROMPT(langPhrase(lang, 'my current title and description'), String(settings.postRules || '').trim(), 5, 3, String(p.tweak || '').slice(0, 300)),
+              JSON.stringify(data), 1800, 'post', aiSettings.aiProvider, im);
+            let text;
+            try { text = await ask(imgs); }
+            catch (e) { if (!imgs.length || !/image|vision|multimodal|content|media/i.test(e.message)) throw e; text = await ask([]); }
+            let j; try { j = parseJSON(repairJSON(text)); } catch (e) { throw new Error('The ideas didn\u2019t come back right. Try again.'); }
+            const clean = (l, max) => (Array.isArray(l) ? l : []).map(x => String(x || '').replace(/\\n/g, '\n').trim()).filter(Boolean).slice(0, max);
+            const titles = clean(j.titles, 6), descriptions = clean(j.descriptions, 4);
+            if (!titles.length && !descriptions.length) throw new Error('No ideas came back. Try again.');
+            ok = true;
+            msg = JSON.stringify({ titles, descriptions, name: a.name || '', description: a.description || '', insights: a.insights || [], by: PROVIDERS[aiSettings.aiProvider], photos: imgs.length, lang });
+            track('post_ideas', { provider: aiSettings.aiProvider, language: lang, photos: imgs.length, insights: (a.insights || []).length, tweak: !!p.tweak });
+          }
+        } else if (head === 'post-save') {
+          const name = String(p.name || '').replace(/\s+/g, ' ').trim().slice(0, 255), desc = String(p.desc || '').trim().slice(0, 5000);
+          if (!name) throw new Error('Add a title first.');
+          let r = {};
+          try { r = (await sx(`__SD.updateActivity(${JSON.stringify(String(a.id))}, ${JSON.stringify(name)}, ${JSON.stringify(desc)})`, cfg('pageWait') * 2000)) || {}; }
+          catch (e) { r = { ok: false, tries: [String(e.message || e)] }; }
+          console.log('Activity update: ' + (r.ok ? 'saved via ' + r.via : 'not saved') + ' (' + (r.tries || []).join(', ') + ')');
+          if (r.ok) {
+            a.name = name; a.description = desc; ok = true; msg = r.via || '';
+            track('post_saved', { via: r.via || '' });
+            await js(`window.__patchMine && window.__patchMine(${JSON.stringify(mineHtml(mineList()))})`);
+          } else { Pasteboard.copy(desc ? name + '\n\n' + desc : name); msg = 'COPIED'; track('post_save_failed'); }
+        } else if (head === 'post-photo') {
+          let img = null;
+          try {
+            if (p.src === 'camera') img = await Photos.fromCamera();
+            else if (p.src === 'activity') { const u = (a.photos || [])[+p.i || 0]; if (u) { const r = new Request(u); r.timeoutInterval = 30; img = await r.loadImage(); } }
+            else img = await Photos.fromLibrary();
+          } catch (e) { img = null; }
+          if (!img) msg = 'CANCELLED';
+          else {
+            const big = fitImage(img, 2048), small = fitImage(img, 640);
+            postPhoto = { id: a.id, small: Data.fromJPEG(small).toBase64String() };
+            ok = true; msg = JSON.stringify({ img: 'data:image/jpeg;base64,' + Data.fromJPEG(big).toBase64String(), w: big.size.width, h: big.size.height });
+          }
+        } else if (head === 'post-design') {
+          await ownDetails(a);
+          const stats = overlayStats(a), route = (a.route && a.route.d) || (a.poly ? (routeShape(a.poly) || {}).d : null) || null;
+          const spec = await aiOverlay(stats, route, postPhoto && postPhoto.id === a.id ? postPhoto.small : null, String(p.tweak || '').slice(0, 300));
+          ok = true; msg = JSON.stringify({ spec, route, stats });
+          track('overlay_designed', { provider: spec.by ? aiSettings.aiProvider : 'none', tweak: !!p.tweak, stats: spec.stats.length, layout: spec.layout || '' });
+        } else if (head === 'post-share') {
+          const b64 = await ui.evaluateJavaScript('window.__postImg || ""');
+          if (!b64) msg = 'The picture wasn\u2019t made. Try again.';
+          else { await ShareSheet.present([Image.fromData(Data.fromBase64String(String(b64)))]); ok = true; track('overlay_shared'); }
+        }
+      } else if (head === 'post-copy') {
+        Pasteboard.copy(String(p.text || '')); ok = true;
       } else if (head === 'story-ai-comic') {
         // ✨ Drawn by AI: the pages come from the image model, then the share sheet saves them all to Photos
         if (!lastStory) msg = 'Write the story first.';
@@ -595,7 +674,7 @@ async function main() {
     if (Keychain.contains(KC_ATHLETE)) Keychain.remove(KC_ATHLETE);
     if (settings.cfg && settings.cfg.athleteId) { delete settings.cfg.athleteId; saveSettings(); }
     try { const p = wPath('widget.json'); if (wfm.fileExists(p)) wfm.remove(p); } catch (e) {}
-    feed = null; details.clear(); storyDay = null; lastStory = null; styleRun = null;
+    feed = null; details.clear(); storyDay = null; lastStory = null; postPhoto = null; styleRun = null;
     track('logged_out', { signed_out: !!r.loggedOut });
     if (!r.loggedOut) {
       // Strava kept the login: let the person end it on Strava's own page; the app notices and moves on
@@ -1294,6 +1373,90 @@ async function aiComic(story, look, progress = async () => {}) {
   };
 }
 
+// ── ✍️ Posting assistant: your own activity, ready for Strava ──
+// A title and a description written as you (from everything the activity page knows, Strava's own insights included),
+// saved straight to Strava, and your stats placed on a photo the way your instructions say (Settings › Posting assistant).
+const DEFAULT_POST_RULES = `You help me post my own activities on Strava: a title and a description, written as me.
+
+TITLE
+- Short and catchy, 2 to 7 words, specific to this activity: the place, the conditions, the time of day, the effort, a PR or something in the photos. Never generic like "Morning Run".
+- Mix the styles: funny, understated, proud, a bit poetic. One emoji at most, often none.
+
+DESCRIPTION
+- 1 to 4 short lines, the way I'd write them: how it felt and what stood out, with one or two numbers at most.
+- Retell Strava's own insights about the activity (Athlete Intelligence, PRs, achievements, splits) in my words when there are any.
+- Weather, the route and the photos are good material. No hashtags, no "Great job", no list of every stat.`;
+
+const DEFAULT_OVERLAY_RULES = `Put my activity's stats on my photo like a clean sports poster.
+- Distance, time and pace (speed for rides) are the heroes; add elevation, heart rate or a PR only when they are impressive.
+- Place them over a calm part of the photo (sky, ground, a wall), never over faces or the main subject.
+- White bold condensed text with a soft shadow and Strava orange as the accent. Draw the route line when there is one.
+- 3 to 5 numbers, labels in small capitals.`;
+
+const POST_PROMPT = (language, rules, nTitles, nDesc, tweak) => [
+  `You write the title and the description for the user's own Strava activity, in ${language}, as the user, in the first person.`,
+  rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
+  tweak ? `For this round only, on top of the instructions: ${tweak}` : '',
+  'The data holds everything known about the activity: stats, telemetry, splits, weather, achievements, the current title and description, Strava\'s own insights (strava_insights, such as Athlete Intelligence) and the comments so far. Photos may follow. Read all of it first.',
+  'When my_writing_style is given, sound like it. Use only facts from the data and the photos; never invent results, places or people.',
+  'If the current description already has text the user wrote, keep its facts and improve it rather than dropping them.',
+  `Reply with JSON only, no other text: {"titles": [${nTitles} different titles], "descriptions": [${nDesc} different descriptions, from short to longer]}. Use real line breaks (\\n) between lines of a description.`,
+].filter(Boolean).join('\n');
+
+const OVERLAY_PROMPT = (rules, tweak) => [
+  'You design how a sports activity\'s statistics are drawn on top of the user\'s photo, which is attached. You only choose the design; the app draws it.',
+  rules ? `Follow the user's instructions below. They take priority over every default in this message.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
+  tweak ? `For this version only, on top of the instructions: ${tweak}` : '',
+  'Look at the photo: put the stats where they don\'t cover faces or the main subject, and pick colours that read well there and suit the photo.',
+  'Use only stats from the list, with their values exactly as given; you may shorten a label (Distance → DIST) and pick the order.',
+  'Reply with JSON only, no other text: {"position": "top-left|top|top-right|left|center|right|bottom-left|bottom|bottom-right", "layout": "stack|row|grid|hero", "font": "condensed|sans|rounded|serif|mono|marker|futura", "weight": "bold|black|regular", "uppercase": true, "text": "#ffffff", "label": "#ffffff", "accent": "#fc4c02", "panel": null or "rgba(0,0,0,0.35)", "shadow": true, "scale": 1.0 (0.6 to 1.6), "title": null or "short headline", "route": true, "route_color": "#fc4c02", "stats": [{"label": "DIST", "value": "8.9 km"}]}',
+].filter(Boolean).join('\n');
+
+// The stats a photo can carry, from the activity's own numbers: label and value as Strava shows them.
+function overlayStats(a) {
+  const out = [], seen = new Set(), add = (label, value) => {
+    const v = value == null ? '' : String(value).trim(), key = String(label).toLowerCase();
+    if (!v || v === '0' || seen.has(key) || out.length >= 14) return; seen.add(key); out.push({ label: String(label), value: v });
+  };
+  (a.stats || []).forEach(s => add(s.label, s.value));
+  if (a.hr && !a.hrInStats) add('Heart rate', String(a.hr).split(',')[0]);
+  for (const [k, v] of Object.entries(a.tele || {})) if (typeof v !== 'object') add(k, v);
+  if (a.ach && a.ach.prs) add('PRs', a.ach.prs);
+  if (a.ach && a.ach.total) add('Achievements', a.ach.total);
+  try { const t = weatherHints(a).temp; if (t != null) add('Temperature', `${Math.round(t)}°C`); } catch (e) {}
+  if (a.clock) add('Start', fmtClock(a.clock));
+  if (a.location) add('Where', a.location);
+  if (a.type) add('Sport', a.type);
+  return out;
+}
+// Used without AI, and whenever the AI's design can't be read: three heroes bottom-left, white on a soft shadow.
+function defaultOverlay(stats, route) {
+  const pick = [/dist/i, /moving|elapsed|^time/i, /pace|speed/i, /elev/i].map(rx => stats.find(s => rx.test(s.label))).filter(Boolean);
+  return { position: 'bottom-left', layout: 'stack', font: 'condensed', weight: 'bold', uppercase: true, text: '#ffffff', label: '#ffffff', accent: '#fc4c02', panel: null, shadow: true, scale: 1, title: null, route: !!route, route_color: '#fc4c02', stats: (pick.length ? pick : stats).slice(0, 4) };
+}
+async function aiOverlay(stats, route, photoB64, tweak) {
+  const base = defaultOverlay(stats, route);
+  if (!aiKey()) return Object.assign(base, { by: '' });
+  const rules = String(settings.overlayRules || '').trim();
+  const ask = (imgs) => aiCall(OVERLAY_PROMPT(rules, tweak), JSON.stringify({ stats, has_route: !!route }), 900, 'overlay', aiSettings.aiProvider, imgs);
+  let text;
+  try { text = await ask(photoB64 ? [{ label: 'The photo', b64: photoB64 }] : []); }
+  catch (e) { if (!photoB64 || !/image|vision|multimodal|content|media/i.test(e.message)) throw e; text = await ask([]); }
+  let s; try { s = parseJSON(repairJSON(text)); } catch (e) { return Object.assign(base, { by: '' }); }
+  const known = new Map(stats.map(x => [x.value, x]));
+  const list = (Array.isArray(s.stats) ? s.stats : []).filter(x => x && x.value != null).map(x => ({ label: String(x.label || (known.get(String(x.value)) || {}).label || '').slice(0, 24), value: String(x.value).slice(0, 24) })).slice(0, 8);
+  return Object.assign(base, s, { stats: list.length ? list : base.stats, route: !!route && s.route !== false, by: PROVIDERS[aiSettings.aiProvider] });
+}
+
+// An Image no larger than max on its long side
+function fitImage(img, max) {
+  const w = img.size.width, h = img.size.height, k = Math.min(1, max / Math.max(w, h, 1));
+  if (k >= 1) return img;
+  const dc = new DrawContext(); dc.size = new Size(Math.round(w * k), Math.round(h * k)); dc.respectScreenScale = false; dc.opaque = true;
+  dc.drawImageInRect(img, new Rect(0, 0, dc.size.width, dc.size.height));
+  return dc.getImage();
+}
+
 // The brief every comment request starts from: your instructions first, the app's defaults after.
 function commentBrief(language, n) {
   const rules = String(settings.commentRules || '').trim();
@@ -1688,6 +1851,8 @@ const settings = {
   storyLang: "",   // The day's story: '' follows the comment language; also picked in the story sheet
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
   storyRules: DEFAULT_STORY_RULES,       // instructions for the day's story
+  postRules: DEFAULT_POST_RULES,         // ✍️ Posting assistant: titles and descriptions for your own activities
+  overlayRules: DEFAULT_OVERLAY_RULES,   // ✍️ Posting assistant: how your stats go on a photo
   styleProfile: "", styleMeta: null,     // written by "Learn my style" from your own comments
   shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
   cfg: {},
@@ -1761,7 +1926,7 @@ const SET_KEYS = {
   theme: [v => v === "auto" || !!PALETTES[v], ""], density: [v => ["comfortable", "compact", "tiny"].includes(v), "render"],
   font: [v => ["sans", "serif"].includes(v), ""], textSize: [v => [0.92, 1, 1.12, 1.25].includes(+v), ""],
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
-  commentRules: ["rules", ""], storyRules: ["rules", ""], shareUsage: ["bool", ""],
+  commentRules: ["rules", ""], storyRules: ["rules", ""], postRules: ["rules", ""], overlayRules: ["rules", ""], shareUsage: ["bool", ""],
   storyLang: [v => v === "" || DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"],
   comicStyle: [v => ["pop", "cool", "paper", "ai"].includes(v), ""],
 };
@@ -1884,7 +2049,7 @@ function settingsState() {
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO,
     hasKey: !!aiKey(), aiStatus: aiStatusLine(),
     langs: DIGEST.AI.LANGUAGES, modes: DIGEST.AI.MODES.map(m => ({ key: m.key, label: m.label })),
-    defaultRules: DEFAULT_COMMENT_RULES, defaultStoryRules: DEFAULT_STORY_RULES, storyTweaks: STORY_TWEAKS, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
+    defaultRules: DEFAULT_COMMENT_RULES, defaultStoryRules: DEFAULT_STORY_RULES, defaultPostRules: DEFAULT_POST_RULES, defaultOverlayRules: DEFAULT_OVERLAY_RULES, storyTweaks: STORY_TWEAKS, styleProfile: settings.styleProfile || "", styleMeta: settings.styleMeta || null,
     usageAvailable: usageAvailable(), usageStatus: usageStatus(),
   };
 }
@@ -2073,6 +2238,7 @@ function mergeDetails(a, d) {
   if (d.description && d.description.length > (a.description || '').length
       && (!a.description || d.description.startsWith(a.description.replace(/(…|\.\.\.)$/, '').slice(0, 30)))) a.description = d.description;
   if (!a.route && d.poly) { a.poly = d.poly; a.route = routeShape(d.poly); }
+  if (d.insights && d.insights.length) a.insights = d.insights;
   if (d.photos && d.photos.length) {
     const byKey = new Map();
     [...a.photos, ...d.photos].forEach(u => { const k = photoKey(u); if (!byKey.has(k)) byKey.set(k, u); });
@@ -3007,6 +3173,14 @@ function stravaLib() {
         res.photos = SD.photos(j);
         res.clock = SD.clockLocal(j);
         res.poly = SD.polylineOf(j);
+        // Strava's own words about the activity (Athlete Intelligence and similar), for the posting assistant
+        const ins = [];
+        SD.walk(j, (k, v) => {
+          if (!/intelligence|insight|ai_?summary|aiSummary|highlights?_?text/i.test(k)) return;
+          const keep = s => { s = SD.text(s); if (s.length > 25 && s.length < 3000 && /\s/.test(s) && !/^https?:/i.test(s) && !ins.includes(s)) ins.push(s); };
+          if (typeof v === 'string') keep(v); else if (v && typeof v === 'object') SD.walk(v, (k2, v2) => { if (typeof v2 === 'string' && !/id$|url|key|type|icon|image/i.test(k2)) keep(v2); });
+        });
+        if (ins.length) res.insights = ins.slice(0, 8);
         let desc = '';
         SD.walk(j, (k, v) => { if (/^description$/i.test(k) && typeof v === 'string' && v.length > desc.length && v.length < 5000) desc = v; });
         if (desc) res.description = SD.text(desc);
@@ -3045,6 +3219,60 @@ function stravaLib() {
       res.photos = SD.photos({ photos: urls });
     }
     return res;
+  };
+
+  // ✍️ Posting assistant › Save to Strava: a new title and description for your own activity. First the edit page's own form
+  // (every other field sent back as it is), then Strava's inline edit; each counts only when the activity page shows the change.
+  SD.updateActivity = async (id, name, desc) => {
+    const tries = [];
+    const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+    const saved = async () => {
+      try {
+        const html = await (await fetch(`/activities/${id}`, { credentials: 'include', cache: 'no-store' })).text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const title = norm((doc.querySelector('meta[property="og:title"]') || {}).content || doc.title || '');
+        const text = norm(doc.body ? doc.body.textContent : '') + ' ' + norm(html.replace(/\\u003c|\\n/g, ' '));
+        const okName = title.includes(norm(name)) || text.includes(norm(name));
+        const okDesc = !desc || text.includes(norm(desc).slice(0, 40)) || html.includes(JSON.stringify(desc.slice(0, 40)).slice(1, -1));
+        return okName && okDesc;
+      } catch (e) { tries.push('check: ' + e.message); return false; }
+    };
+    let token = ''; try { token = await SD.csrf(); } catch (e) {}
+    // 1. the edit page's form
+    try {
+      const r0 = await fetch(`/activities/${id}/edit`, { credentials: 'include' });
+      const html = await r0.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const f = [...doc.querySelectorAll('form')].find(x => x.querySelector('[name="activity[name]"]'));
+      if (f) {
+        const fd = new URLSearchParams();
+        for (const el of f.querySelectorAll('input,select,textarea')) {
+          if (!el.name || el.disabled || /^(submit|button|file|image|reset)$/i.test(el.type || '')) continue;
+          if (/^(checkbox|radio)$/i.test(el.type || '') && !el.checked) continue;
+          if (el.tagName === 'SELECT') { [...el.options].filter(o => o.selected).forEach(o => fd.append(el.name, o.value)); continue; }
+          fd.append(el.name, el.tagName === 'TEXTAREA' ? el.textContent : el.value);
+        }
+        fd.set('activity[name]', name); fd.set('activity[description]', desc || '');
+        const t = fd.get('authenticity_token') || token; if (t) fd.set('authenticity_token', t);
+        const action = new URL(f.getAttribute('action') || `/activities/${id}`, location.origin).pathname;
+        const r = await fetch(action, { method: 'POST', credentials: 'include', redirect: 'follow',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': t || '' }, body: fd.toString() });
+        tries.push('form ' + r.status);
+        if (r.status < 400 && await saved()) return { ok: true, via: 'edit form', tries };
+      } else tries.push('edit page ' + r0.status + ': no form');
+    } catch (e) { tries.push('form: ' + e.message); }
+    // 2. the activity page's inline edit
+    const body = `activity%5Bname%5D=${encodeURIComponent(name)}&activity%5Bdescription%5D=${encodeURIComponent(desc || '')}`;
+    for (const [method, extra, accept] of [['PUT', '', 'application/json'], ['POST', '_method=put&', 'text/javascript, application/json'], ['PATCH', '', 'application/json']]) {
+      try {
+        const r = await fetch(`/activities/${id}`, { method, credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-CSRF-Token': token, 'X-Requested-With': 'XMLHttpRequest', 'Accept': accept },
+          body: `${extra}authenticity_token=${encodeURIComponent(token)}&${body}` });
+        tries.push(method + (extra ? '+_method' : '') + ' ' + r.status);
+        if (r.status < 400 && await saved()) return { ok: true, via: 'inline edit', tries };
+      } catch (e) { tries.push(method + ': ' + e.message); }
+    }
+    return { ok: false, tries };
   };
 
   SD.enrich = async (ids, conc) => {
@@ -4117,6 +4345,41 @@ body.loading .loadst{display:block}
 .msf{padding:10px 16px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);flex:none}
 .msf button{width:100%;padding:12px}
 .mnote{color:var(--mut);font-size:13px;margin:0}
+.pabtns{display:flex;flex-direction:column;gap:10px}
+.pabtn{position:relative;display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto auto;column-gap:12px;align-items:center;width:100%;padding:12px 14px;border-radius:16px;background:var(--card);color:var(--fg);text-align:left;border:1.5px solid color-mix(in srgb,var(--accent) 35%,transparent);box-shadow:0 3px 0 color-mix(in srgb,var(--accent) 45%,transparent);transition:transform .08s,box-shadow .08s}
+.pabtn:active{transform:translateY(3px);box-shadow:0 0 0 transparent}
+.pabtn .paic{grid-row:1/3;display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:color-mix(in srgb,var(--accent) 16%,var(--bg));font-size:21px}
+.pabtn b{font-size:15px}
+.pabtn small{grid-column:2;color:var(--mut);font-size:12.5px;font-weight:500}
+.pabtn i{grid-column:3;grid-row:1/3;font-style:normal;font-size:24px;color:var(--accent);font-weight:700}
+.pasrc{display:flex;gap:10px}
+.pasrc .pabtn{grid-template-columns:auto 1fr;grid-template-rows:auto}
+.pasrc .pabtn .paic{grid-row:1}
+.paths{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.paths button{flex:none;width:84px;height:84px;padding:0;border-radius:12px;overflow:hidden;background:var(--soft)}
+.paths img{width:100%;height:100%;object-fit:cover;display:block}
+.paload{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:var(--card)}
+.paload b{display:block;font-size:14px}.paload small{color:var(--mut);font-size:12.5px}
+.paspin{flex:none;width:26px;height:26px;border-radius:50%;border:3px solid color-mix(in srgb,var(--accent) 25%,transparent);border-top-color:var(--accent);animation:paspin .8s linear infinite}
+@keyframes paspin{to{transform:rotate(360deg)}}
+.painsight{padding:12px 14px;border-radius:14px;background:color-mix(in srgb,var(--accent) 10%,var(--card));border-left:4px solid var(--accent)}
+.painsight small{display:block;color:var(--accent);font-weight:700;font-size:12px;margin-bottom:4px}
+.painsight p{margin:0;font-size:13.5px;line-height:1.4}
+.pain{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:15px}
+textarea.pain{resize:vertical;line-height:1.4}
+.pachips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.padopt{display:block;width:100%;margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--soft);color:var(--fg);text-align:left;font-weight:500;font-size:13.5px;line-height:1.4;white-space:pre-line;border:1.5px solid transparent}
+.padopt.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--bg))}
+.patw{display:flex;gap:8px;align-items:center}
+.patw .pain{flex:1;font-size:14px}
+.patw .sm{flex:none;white-space:nowrap}
+.pawarn{justify-content:space-between}
+.pafoot{display:flex;gap:10px}
+.pafoot button{flex:1}
+.paprev{position:relative;border-radius:14px;overflow:hidden;background:var(--soft);min-height:180px}
+.paprev img{display:block;width:100%;height:auto}
+.pabusy{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.45);color:#fff;font-size:14px}
+@media (prefers-reduced-motion:reduce){.paspin{animation-duration:2.4s}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
 .detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
@@ -5240,6 +5503,16 @@ function writingHTML(){
       (prof?'<div class="styleprof"><div class="cfg-h"><small class="muted">Learned from '+(meta.count||0)+' of your comments'+(when?', '+escH(when):'')+(meta.opened!=null?'<br>'+(meta.read||0)+' comments read, '+meta.opened+' activities opened'+(meta.oldest?', back to '+escH(new Date(meta.oldest).toLocaleDateString(undefined,{day:'numeric',month:'short'})):'')+(meta.wanted&&meta.count<meta.wanted?(meta.stopped?'; stopped early':'; no more of yours found'):''):'')+'</small><button class="link small" data-act="style-clear">Clear</button></div><p>'+escH(prof)+'</p></div>':'')+
     '</div>';
 }
+// Settings › Posting assistant: how titles and descriptions are written for your own activities, and how stats go on a photo.
+function postRulesHTML(){
+  function box(k,def,title,help,act){ var rules=SET.settings[k]||'', changed=rules!==def;
+    return '<div class="cfg'+(changed?' ch':'')+'"><div class="cfg-h"><b>'+title+'</b>'+(changed?'<button class="link small" data-act="'+act+'">Reset to default</button>':'')+'</div>'+
+      '<small class="muted">'+help+'</small><textarea class="cfgsel rules" data-k="'+k+'" rows="8" maxlength="4000" aria-label="'+title+'">'+escH(rules)+'</textarea>'+
+      '<small class="muted rcount">'+rulesCount(rules.length)+'</small></div>'; }
+  return '<h3 class="sec">Posting assistant</h3>'+
+    box('postRules',SET.defaultPostRules,'Titles and descriptions','For ✨ Title &amp; description on your own activities: tone, length, emojis, what to mention.','post-rules-reset')+
+    box('overlayRules',SET.defaultOverlayRules,'Stats on a photo','For 📸 Stats on a photo: which numbers, where, which font and colours, route or not.','overlay-rules-reset');
+}
 // Settings › The day's story: your instructions, and one-tap lines that add or take away a tweak.
 function storyRulesHTML(){
   var rules=SET.settings.storyRules||'', changed=rules!==SET.defaultStoryRules;
@@ -5284,6 +5557,7 @@ function renderCfg(){
       pickRow('storyLang','Language of the day’s story',[['','Same as comments']].concat(SET.langs.map(function(l){ return [l[1],l[1]==='Auto'?'Same as most activity titles':l[1]]; })))+
     writingHTML()+
     storyRulesHTML()+
+    postRulesHTML()+
     (SET.usageAvailable?'<h3 class="sec">Privacy</h3>'+
       swRow('shareUsage','Share anonymous usage','Counts like app opens, kudos given and AI features used, with a random install ID. Never names, comments, photos or your Strava account. Off removes the ID.')+
       '<div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">'+escH(SET.usageStatus||'Sends one test event now and shows PostHog’s answer.')+'</small></div><button class="sm" data-act="usage-test">Send test</button></div>':'')+
@@ -5331,6 +5605,8 @@ function cfgAction(t,act){
     send('logout',{}); return;
   }
   if(act==='story-rules-reset'){ send('set',{k:'storyRules',v:SET.defaultStoryRules},setState); return; }
+  if(act==='post-rules-reset'){ send('set',{k:'postRules',v:SET.defaultPostRules},setState); return; }
+  if(act==='overlay-rules-reset'){ send('set',{k:'overlayRules',v:SET.defaultOverlayRules},setState); return; }
   if(act==='story-tweak'){
     var tw=(SET.storyTweaks||[]).filter(function(x){ return x.key===t.dataset.tw; })[0], ta=document.querySelector('#cfgsheet textarea[data-k="storyRules"]'); if(!tw||!ta) return;
     var lines=ta.value.split(String.fromCharCode(10)), has=lines.indexOf(tw.line)>=0;
@@ -5370,7 +5646,7 @@ applyLook();
 // Opened with window.__aiOpen(); the Scriptable side pushes state with window.__aiState(state).
 var AIS=null, aiIsOpen=false, aiArmed=null, aiLoading={};
 var AI_PN={ anthropic:'Claude', openai:'OpenAI' };
-var AI_FEAT={"comments": "Comment ideas", "story": "Day’s story", "style": "Style learning", "test": "Connection tests", "other": "Other"};
+var AI_FEAT={"comments": "Comment ideas", "story": "Day’s story", "comic": "Comics", "post": "Titles & descriptions", "overlay": "Photo stats", "style": "Style learning", "test": "Connection tests", "other": "Other"};
 var AI_JOBS=[];
 function aiSend(act,data){ send(act,data); }
 function aiEsc(t){ var d=document.createElement('div'); d.textContent=String(t==null?'':t); return d.innerHTML; }
@@ -5542,12 +5818,16 @@ function openMine(btn){
     if(!MINE||MINE.id!==id) return;
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
     if(ok&&d.ok){ d.loading=false; MINE=d; } else { MINE.loading=false; MINE.failed=true; }
+    if(MINEVIEW!=='main') return;
     renderMine();
   });
 }
-function closeMine(){ var ov=document.getElementById('msheet'); if(ov) ov.hidden=true; MINE=null; document.body.style.overflow=''; }
+function closeMine(){ paKeep(); var ov=document.getElementById('msheet'); if(ov) ov.hidden=true; MINE=null; PHOTO=null; document.body.style.overflow=''; }
 function renderMine(){
   var ov=document.getElementById('msheet'); if(!ov||!MINE) return;
+  if(MINEVIEW==='post') return renderPost();
+  if(MINEVIEW==='photo') return renderPhoto();
+  paFoot();
   var m=MINE, h=ov.querySelector('.msh'), b=ov.querySelector('.msb');
   if(MINEVIEW==='kudos'){
     h.innerHTML='<button class="mbtn" data-act="mine-back" aria-label="Back">‹</button><div class="mtt"><b>'+m.kudoers.length+' kudos</b><small>'+escH(m.name)+'</small></div>';
@@ -5558,7 +5838,7 @@ function renderMine(){
     return;
   }
   h.innerHTML='<span class="mic" aria-hidden="true">'+escH(m.emoji||'')+'</span><div class="mtt"><b>'+escH(m.name)+'</b><small>'+escH(m.line||'')+'</small></div><button class="mbtn" data-act="mine-close" aria-label="Close">✕</button>';
-  var html='<div class="msec"><div class="msect">👍 <b>'+m.kudos+' kudos</b></div>';
+  var html=paBlock()+'<div class="msec"><div class="msect">👍 <b>'+m.kudos+' kudos</b></div>';
   if(m.loading) html+='<div class="mbox muted">Loading who gave kudos…</div>';
   else if(m.kudoers.length){
     var names=m.kudoers.slice(0,2).map(function(p){ return '<b>'+escH(p.name)+'</b>'; }).join(', '), rest=m.kudos-Math.min(2,m.kudoers.length);
@@ -5588,6 +5868,167 @@ function likeMine(btn){
     renderMine();
   });
 }
+// ── ✍️ Posting assistant on your own activity: title and description ideas saved to Strava, and your stats on a photo ──
+var POST=null, PHOTO=null;
+function paBlock(){
+  return '<div class="msec"><div class="msect">✍️ <b>Posting assistant</b></div><div class="pabtns">'+
+    '<button class="pabtn" data-act="post-open"><span class="paic" aria-hidden="true">✨</span><b>Title &amp; description</b><small>From your stats, photos and Strava’s own insights</small><i aria-hidden="true">›</i></button>'+
+    '<button class="pabtn" data-act="photo-open"><span class="paic" aria-hidden="true">📸</span><b>Stats on a photo</b><small>Your numbers on a picture, the way you like</small><i aria-hidden="true">›</i></button></div></div>';
+}
+function paFoot(){
+  var f=document.querySelector('#msheet .msf'); if(!f) return;
+  if(MINEVIEW==='post') f.innerHTML='<div class="pafoot"><button class="ghost" data-act="post-copy"'+(POST&&!POST.loading?'':' disabled')+'>Copy</button><button data-act="post-save"'+(POST&&!POST.loading&&!POST.saving?'':' disabled')+'>'+(POST&&POST.saving?'Saving…':'Save to Strava')+'</button></div>';
+  else if(MINEVIEW==='photo') f.innerHTML='<div class="pafoot"><button class="ghost" data-act="photo-other">Other photo</button><button data-act="photo-share"'+(PHOTO&&PHOTO.out&&!PHOTO.busy?'':' disabled')+'>Save or share</button></div>';
+  else f.innerHTML='<button class="ghost" data-act="mine-strava">Open in Strava</button>';
+}
+function paHead(title){
+  var h=document.querySelector('#msheet .msh');
+  h.innerHTML='<button class="mbtn" data-act="mine-back" aria-label="Back">‹</button><div class="mtt"><b>'+title+'</b><small>'+escH(MINE.name||'')+'</small></div><button class="mbtn" data-act="mine-close" aria-label="Close">✕</button>';
+}
+function paKeep(){
+  var t=document.getElementById('patitle'), d=document.getElementById('padesc'), w=document.getElementById('patweak');
+  if(POST){ if(t) POST.title=t.value; if(d) POST.desc=d.value; if(w) POST.tweak=w.value; }
+  var pw=document.getElementById('phtweak'); if(PHOTO&&pw) PHOTO.tweak=pw.value;
+}
+function renderPost(){
+  var b=document.querySelector('#msheet .msb'); paHead('Title &amp; description'); paFoot();
+  var P=POST, html='';
+  if(P.loading) html+='<div class="paload"><span class="paspin" aria-hidden="true"></span><div><b>Reading your activity…</b><small>Stats, splits, weather, photos and Strava’s own insights, then writing as you</small></div></div>';
+  if(P.needKey) html+='<p class="mnote">Title and description ideas need an AI key: Settings › AI.</p>';
+  if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
+  if(P.copied) html+='<div class="mbox pawarn"><span>Strava didn’t take the change from here, so it’s <b>copied</b>. Open the activity in Strava, tap Edit and paste.</span><button class="sm" data-act="mine-strava">Open</button></div>';
+  if(P.insights&&P.insights.length) html+='<div class="painsight"><small>✦ Strava’s insight</small><p>'+escH(P.insights.slice(0,2).join(' '))+'</p></div>';
+  if(!P.loading&&(P.titles||P.name!=null)){
+    html+='<div><div class="msect">🏷 <b>Title</b></div><input id="patitle" class="pain" maxlength="255" value="'+escH(P.title||'')+'" aria-label="Title">'+
+      '<div class="pachips">'+(P.titles||[]).map(function(t,i){ return '<button class="stchip'+(t===P.title?' on':'')+'" data-ptitle="'+i+'">'+escH(t)+'</button>'; }).join('')+'</div></div>';
+    html+='<div><div class="msect">📝 <b>Description</b></div><textarea id="padesc" class="pain" rows="5" maxlength="5000" aria-label="Description">'+escH(P.desc||'')+'</textarea>'+
+      (P.descriptions||[]).map(function(d,i){ return '<button class="padopt'+(d===P.desc?' on':'')+'" data-pdesc="'+i+'">'+escH(d)+'</button>'; }).join('')+'</div>';
+    html+='<div class="patw"><input id="patweak" class="pain" maxlength="300" placeholder="Something different? e.g. funnier, mention the sunset" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="post-again"'+(P.loading?' disabled':'')+'>🔁 New ideas</button></div>';
+    if(P.name!=null) html+='<p class="mnote">Now on Strava: <b>'+escH(P.name||'(no title)')+'</b>'+(P.description?'<br>'+escH(P.description.slice(0,240))+(P.description.length>240?'…':''):'')+'</p>';
+    if(P.by) html+='<p class="mnote">Ideas by '+escH(P.by)+(P.photos?', '+P.photos+' photo'+(P.photos>1?'s':'')+' looked at':'')+'.</p>';
+  }
+  b.innerHTML=html;
+}
+function postIdeas(){
+  paKeep(); var id=MINE.id, prev=POST&&POST.id===id?POST:null;
+  POST={id:id,loading:true,title:prev?prev.title:'',desc:prev?prev.desc:'',tweak:prev?prev.tweak:'',insights:prev?prev.insights:null};
+  renderPost();
+  send('post-ideas',{id:id,lang:aiLang||'',tweak:POST.tweak||''},function(ok,msg){
+    if(!POST||POST.id!==id) return;
+    POST.loading=false;
+    if(msg==='NEED_KEY') POST.needKey=true;
+    else if(!ok) POST.err=msg||'No ideas came back. Try again.';
+    else { var d={}; try{ d=JSON.parse(msg); }catch(e){}
+      POST.titles=d.titles||[]; POST.descriptions=d.descriptions||[]; POST.name=d.name||''; POST.description=d.description||''; POST.insights=d.insights||[]; POST.by=d.by; POST.photos=d.photos||0;
+      POST.title=POST.titles[0]||POST.title||POST.name; POST.desc=POST.descriptions[0]||POST.desc||POST.description; }
+    if(MINEVIEW==='post') renderPost();
+  });
+}
+function postSave(){
+  paKeep(); if(!POST||POST.saving) return;
+  if(!String(POST.title||'').trim()) return toast('Add a title first');
+  POST.saving=true; POST.copied=false; paFoot();
+  var id=POST.id;
+  send('post-save',{id:id,name:POST.title,desc:POST.desc||''},function(ok,msg){
+    if(!POST||POST.id!==id) return; POST.saving=false;
+    if(ok){ POST.name=POST.title; POST.description=POST.desc; if(MINE&&MINE.id===id) MINE.name=POST.title; toast('Saved to Strava ✓'); }
+    else if(msg==='COPIED') POST.copied=true;
+    else toast('Not saved: '+(msg||'unknown error'));
+    if(MINEVIEW==='post') renderPost();
+  });
+}
+function renderPhoto(){
+  var b=document.querySelector('#msheet .msb'); paHead('Stats on a photo'); paFoot();
+  var P=PHOTO||{}, html='';
+  if(!P.src&&!P.busy){
+    html+='<p class="mnote">Pick a photo and your stats go on it the way your instructions say (Settings › Posting assistant). Ask for changes below the preview.</p>'+
+      '<div class="pasrc"><button class="pabtn" data-act="photo-pick" data-src="library"><span class="paic">🖼</span><b>Photos</b></button><button class="pabtn" data-act="photo-pick" data-src="camera"><span class="paic">📷</span><b>Camera</b></button></div>';
+    if((MINE.photos||[]).length) html+='<div class="msect">From this activity</div><div class="paths">'+MINE.photos.map(function(u,i){ return '<button data-act="photo-pick" data-src="activity" data-i="'+i+'" aria-label="Activity photo '+(i+1)+'"><img src="'+escH(u)+'" alt=""></button>'; }).join('')+'</div>';
+  } else {
+    html+='<div class="paprev">'+(P.out||P.src?'<img src="'+(P.out||P.src)+'" alt="Your photo with your stats">':'')+(P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+'</div>';
+    if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
+    if(P.spec) html+='<p class="mnote">'+(P.spec.by?'Designed by '+escH(P.spec.by):'The standard design (add an AI key for designs that follow your instructions)')+' · '+(P.spec.stats||[]).map(function(s){ return escH(s.label); }).join(', ')+'</p>';
+    if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="Change it? e.g. top right, bigger, only distance and pace" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
+  }
+  b.innerHTML=html;
+}
+function photoPick(src,i){
+  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…'}; renderPhoto();
+  send('post-photo',{id:id,src:src,i:i||0},function(ok,msg){
+    if(!PHOTO||PHOTO.id!==id) return;
+    if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; photoDesign(); };
+    im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
+    im.src=d.img;
+  });
+}
+function photoDesign(){
+  paKeep(); var P=PHOTO; if(!P||!P.im) return;
+  P.busy='Designing your stats…'; P.err=''; renderPhoto();
+  send('post-design',{id:P.id,tweak:P.tweak||''},function(ok,msg){
+    if(PHOTO!==P) return; P.busy='';
+    if(!ok){ P.err=msg||'The design didn’t come back. Try again.'; return renderPhoto(); }
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    P.spec=d.spec||{}; P.route=d.route||null;
+    try{ P.out=postCompose(P.im,P.spec,P.route); }catch(e){ P.err='Couldn’t draw the stats: '+(e&&e.message||e); }
+    renderPhoto();
+  });
+}
+function photoShare(){
+  if(!PHOTO||!PHOTO.out||PHOTO.busy) return;
+  window.__postImg=PHOTO.out.split(',')[1];
+  send('post-share',{id:PHOTO.id},function(ok,msg){ window.__postImg=null; if(!ok&&msg) toast(msg); });
+}
+var PA_FONTS={condensed:'"DIN Condensed","Avenir Next Condensed","Arial Narrow",Impact,sans-serif',sans:'"Avenir Next","Helvetica Neue",Arial,sans-serif',rounded:'"SF Pro Rounded","Arial Rounded MT Bold","Avenir Next",sans-serif',serif:'Georgia,"Times New Roman",serif',mono:'Menlo,"Courier New",monospace',marker:'"Marker Felt","Chalkboard SE",cursive',futura:'Futura,"Avenir Next",sans-serif'};
+function paRound(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+// Draws the design on the photo at full size: stats block (stack, row, grid or hero), an optional headline and the route line.
+function postCompose(im,spec,route){
+  var W=im.naturalWidth, H=im.naturalHeight, cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  var c=cv.getContext('2d'); c.drawImage(im,0,0,W,H);
+  var u=Math.min(W,H)/1080*Math.max(0.6,Math.min(1.6,+spec.scale||1)), m=Math.round(Math.min(W,H)*0.05);
+  var fam=PA_FONTS[spec.font]||PA_FONTS.condensed, wt=spec.weight==='black'?'900':spec.weight==='regular'?'500':'700', up=spec.uppercase!==false;
+  var lay=spec.layout||'stack', gap=Math.round(18*u), TS=Math.round(42*u), txt=spec.text||'#ffffff', acc=spec.accent||'#fc4c02';
+  function lab(s){ var l=String(s.label||''); return up?l.toUpperCase():l; }
+  var items=(spec.stats||[]).slice(0,8).map(function(s,k){
+    var vs=lay==='hero'?(k===0?Math.round(130*u):Math.round(46*u)):Math.round(70*u), ls=lay==='hero'&&k>0?Math.round(20*u):Math.round(25*u);
+    c.font=wt+' '+vs+'px '+fam; var vw=c.measureText(String(s.value)).width; c.font='600 '+ls+'px '+fam; var lw=c.measureText(lab(s)).width;
+    return {s:s,vs:vs,ls:ls,w:Math.max(vw,lw),h:ls+Math.round(6*u)+vs};
+  });
+  var pos=[], bw=0, bh=0, x=0, y=0;
+  if(lay==='row'){ items.forEach(function(it){ pos.push([x,0]); x+=it.w+gap*2; bh=Math.max(bh,it.h); }); bw=Math.max(0,x-gap*2); }
+  else if(lay==='grid'){ var cw=[0,0], rh=[]; items.forEach(function(it,k){ cw[k%2]=Math.max(cw[k%2],it.w); var r=Math.floor(k/2); rh[r]=Math.max(rh[r]||0,it.h); });
+    items.forEach(function(it,k){ var r=Math.floor(k/2), yy=0; for(var i=0;i<r;i++) yy+=rh[i]+gap; pos.push([k%2?cw[0]+gap*2:0,yy]); });
+    bw=cw[0]+(items.length>1?gap*2+cw[1]:0); bh=rh.reduce(function(a,b){ return a+b+gap; },0)-gap; }
+  else if(lay==='hero'){ var y0=items.length?items[0].h+gap:0; items.forEach(function(it,k){ if(k===0){ pos.push([0,0]); bw=it.w; bh=it.h; } else { pos.push([x,y0]); x+=it.w+gap*1.6; bh=Math.max(bh,y0+it.h); } }); bw=Math.max(bw,x-gap*1.6); }
+  else { items.forEach(function(it){ pos.push([0,y]); y+=it.h+gap; bw=Math.max(bw,it.w); }); bh=Math.max(0,y-gap); }
+  var title=spec.title?String(spec.title):'', tt=up?title.toUpperCase():title, th=0;
+  if(title){ c.font=wt+' '+TS+'px '+fam; bw=Math.max(bw,Math.min(W-2*m,c.measureText(tt).width)); th=Math.round(TS*1.15)+gap; }
+  var rh2=route&&spec.route?Math.round(Math.min(230*u,H*0.2)):0, rw=rh2*2; if(rh2) bw=Math.max(bw,rw);
+  var tot=th+(rh2?rh2+gap:0)+bh, pad=spec.panel?Math.round(26*u):0, p=String(spec.position||'bottom-left');
+  var al=p.indexOf('right')>=0?'right':(p.indexOf('left')>=0?'left':'center');
+  var bx=al==='left'?m+pad:al==='right'?W-m-pad-bw:(W-bw)/2;
+  var by=p.indexOf('top')===0?m+pad:p.indexOf('bottom')===0?H-m-pad-tot:(H-tot)/2;
+  if(spec.panel){ c.fillStyle=spec.panel; paRound(c,bx-pad,by-pad,bw+2*pad,tot+2*pad,Math.round(24*u)); c.fill(); }
+  if(spec.shadow!==false){ c.shadowColor='rgba(0,0,0,.55)'; c.shadowBlur=Math.round(16*u); c.shadowOffsetY=Math.round(2*u); }
+  function ax(w){ return al==='left'?bx:al==='right'?bx+bw-w:bx+(bw-w)/2; }
+  var yy=by; c.textBaseline='top';
+  if(title){ c.font=wt+' '+TS+'px '+fam; c.fillStyle=acc; var tw=Math.min(bw,c.measureText(tt).width); c.fillText(tt,ax(tw),yy,bw); yy+=th; }
+  if(rh2){ c.save(); c.translate(ax(rw),yy); var k2=rw/600; c.scale(k2,k2); c.lineWidth=Math.max(5,9*u)/k2; c.lineJoin='round'; c.lineCap='round'; c.strokeStyle=spec.route_color||acc; c.stroke(new Path2D(route)); c.restore(); yy+=rh2+gap; }
+  var blockX=ax(bw);
+  items.forEach(function(it,k){
+    var x0=lay==='stack'?ax(it.w):blockX+pos[k][0], y0=yy+pos[k][1], right=lay==='stack'&&al==='right';
+    c.font='600 '+it.ls+'px '+fam; c.fillStyle=spec.label||txt; c.globalAlpha=0.85; var lw=c.measureText(lab(it.s)).width;
+    c.fillText(lab(it.s),right?x0+it.w-lw:x0,y0); c.globalAlpha=1;
+    c.font=wt+' '+it.vs+'px '+fam; c.fillStyle=lay==='hero'&&k===0?acc:txt; var v=String(it.s.value), vw=c.measureText(v).width;
+    c.fillText(v,right?x0+it.w-vw:x0,y0+it.ls+Math.round(6*u));
+  });
+  return cv.toDataURL('image/jpeg',0.92);
+}
+function paInput(e){ if(e.target&&(e.target.id==='patitle'||e.target.id==='padesc')){ paKeep(); if(!POST) return;
+  [].forEach.call(document.querySelectorAll('#msheet [data-ptitle]'),function(b){ b.classList.toggle('on',(POST.titles||[])[+b.dataset.ptitle]===POST.title); });
+  [].forEach.call(document.querySelectorAll('#msheet [data-pdesc]'),function(b){ b.classList.toggle('on',(POST.descriptions||[])[+b.dataset.pdesc]===POST.desc); }); } }
+document.addEventListener('input',paInput);
 // ── The day's story ──
 var STORYTWEAKS=${JSON.stringify(STORY_TWEAKS.map(t => ({ key: t.key, label: t.label })))}, STORYTWEAK='';
 var STORY=null, STORYBUSY=false, STORYLANG='${esc(settings.storyLang || '')}', STORYLANGS=${JSON.stringify(DIGEST.AI.LANGUAGES)};
@@ -6163,7 +6604,18 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='story-image') return comicPicker(t);
   if(t.dataset.cstyle) return storyImage(t,t.dataset.cstyle);
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
-  if(t.dataset.act==='mine-back'){ MINEVIEW='main'; renderMine(); return; }
+  if(t.dataset.act==='mine-back'){ paKeep(); MINEVIEW='main'; renderMine(); return; }
+  if(t.dataset.act==='post-open'){ MINEVIEW='post'; if(POST&&MINE&&POST.id===MINE.id&&!POST.err&&!POST.needKey) renderPost(); else postIdeas(); var pb=document.querySelector('#msheet .msb'); if(pb) pb.scrollTop=0; return; }
+  if(t.dataset.act==='post-again') return postIdeas();
+  if(t.dataset.act==='post-save') return postSave();
+  if(t.dataset.act==='post-copy'){ paKeep(); if(POST) send('post-copy',{text:(POST.title||'')+(POST.desc?'\\n\\n'+POST.desc:'')},function(ok){ if(ok) toast('Copied'); }); return; }
+  if(t.dataset.ptitle!=null){ paKeep(); if(POST){ POST.title=(POST.titles||[])[+t.dataset.ptitle]||POST.title; renderPost(); } return; }
+  if(t.dataset.pdesc!=null){ paKeep(); if(POST){ POST.desc=(POST.descriptions||[])[+t.dataset.pdesc]||POST.desc; renderPost(); } return; }
+  if(t.dataset.act==='photo-open'){ MINEVIEW='photo'; if(PHOTO&&MINE&&PHOTO.id!==MINE.id) PHOTO=null; renderPhoto(); var qb=document.querySelector('#msheet .msb'); if(qb) qb.scrollTop=0; return; }
+  if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0);
+  if(t.dataset.act==='photo-again') return photoDesign();
+  if(t.dataset.act==='photo-other'){ PHOTO=null; return renderPhoto(); }
+  if(t.dataset.act==='photo-share') return photoShare();
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
   if(t.dataset.act==='det-close') return closeDetail();
   if(t.dataset.act==='det-app') return send('activity',{id:document.getElementById('det').dataset.id});
@@ -6226,7 +6678,7 @@ document.addEventListener('click',function(e){
   if(act==='settings') openSettings();
   if(act==='cfgclose') closeSettings();
   if(act==='ai-open') window.__aiOpen();
-  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','logout','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
+  if(['look','toggle','cfgreset','cfgstep','cfgall','updcheck','openurl','startlog','rules-reset','story-rules-reset','post-rules-reset','overlay-rules-reset','logout','story-tweak','style-clear','style-learn','style-stop','usage-test'].indexOf(act)>=0) cfgAction(t,act);
   if(act==='send-close') closeSending();
   if(act==='lb-close') closePhotos();
   if(act==='refresh'){ document.body.classList.add('loading'); toast('Refreshing'); send('refresh',{}); }
