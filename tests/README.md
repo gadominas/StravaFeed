@@ -54,6 +54,9 @@ against a pretend strava.com whose session can end and start again, and checks w
 16. **Days, refresh and retry** (`16-days.js`): Yesterday shows yesterday's activities and date; Refresh reads the feed again;
     a failing feed shows Try again, which brings the digest back.
 
+17. **Clean stats stay inside the photo** (`17-clean-stats-layout.js`): the app's own drawing code, 576 combinations of photo
+    shape, layout, position, 3 to 12 stats and a panel, checked pixel by pixel: nothing in the outer margin.
+
 Sections 0 to 7 are in `app.test.js`; 8 and up are one file each in `tests/app/` (`{ n, title, run(browser, H) }`).
 They share `tests/lib/`:
 
@@ -73,6 +76,6 @@ photos: { library: [photo()] }, settings: { … } })`, then checks what the page
 ```sh
 # app-blueprints checked out next to this repository
 (cd ../app-blueprints/repo-site && npm install && npm install --no-save playwright && npx playwright install chromium)
-node tests/app.test.js        # everything, about 3.5 minutes; VERBOSE=1 shows the emulator's log
+node tests/app.test.js        # everything, about 4 minutes; VERBOSE=1 shows the emulator's log
 node tests/app.test.js 9 10   # only those sections
 ```
