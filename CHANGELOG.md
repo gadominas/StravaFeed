@@ -2,6 +2,20 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.40.0 (2026-11-07): Your photo, redesigned
+
+- 🎨 **AI photo redesign**: OpenAI's image model repaints your whole photo into a poster of the activity, your way.
+- 📊 **Every number**: Heart rate, cadence, power, weather, place, PRs and more: whatever makes the activity special.
+- 📝 **Instructions drive it**: Settings › Posting assistant sets the look; ask for changes like “retro 80s, add a funny quote”.
+
+**Changes**
+
+- Your activities › Photo with your stats: choose 🎨 AI redesign or 📊 Clean stats; both results are kept so you can switch between them
+- AI redesign: the AI in use art-directs from your instructions, the photo and every number of the activity, then GPT Image repaints the photo at high quality, keeping you and the place recognisable
+- Progress while it paints, with the step and a timer; Redesign takes your request for changes
+- Clean stats now shows every stat worth showing (often 6 to 10), in a grid when there are many, and reads weather, achievements and the date too
+- New default instructions for photos; if you never changed the old ones, they move to the new default
+
 ## 1.39.0 (2026-11-07): Your posting assistant
 
 - ✨ **Titles and descriptions**: Tap your activity for title and description ideas written as you, then save them to Strava.
