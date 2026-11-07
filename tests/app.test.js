@@ -13,6 +13,8 @@
 //   5. Your own activities: never in the feed (not even with the old "Show my own activities" setting), only in the strip on top.
 //   6. The order of people, strictly, in each group: early risers (earliest first), then people with photos, then everyone
 //      else (both newest first); also after the details load, which can turn someone into an early riser.
+//   7. Comment ideas: exactly the number set in Settings › ✨ Comment ideas per tap (1 to 5, 3 by default). The AI is asked
+//      for that many; extra ones are dropped; when it sends fewer or repeats itself, the app asks once for the missing ones.
 'use strict';
 const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
@@ -34,6 +36,14 @@ function fixtures(auth) {
   if (auth.settings) for (const k of Object.keys(base.files || {})) if (/settings\.json$/.test(k) && !/ai-settings/.test(k)) Object.assign(base.files[k], auth.settings);
   const out = { status: 401, body: 'You need to log in', contentType: 'text/html' };
   const routes = [
+    // ✨ comment ideas: Claude answers with as many ideas as the test says (auth.ideas), and every request is kept
+    ...(auth.ideas ? [{ match: 'api.anthropic.com/v1/messages', respond: (req) => {
+      const b = (req.json && req.json()) || {}, sys = typeof b.system === 'string' ? b.system : JSON.stringify(b.system || '');
+      if (!/You write comments on a friend/.test(sys)) return null;   // photo scans and the rest: the scenario's own answers
+      auth.ideaCalls.push(sys);
+      const list = auth.ideas(auth.ideaCalls.length, sys);
+      return { json: { id: 'msg_test', type: 'message', role: 'assistant', model: b.model, content: [{ type: 'text', text: JSON.stringify(list) }], stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 40 } } };
+    } }] : []),
     // posting a comment (the app's learned request, see the keychain below)
     { match: (url, req) => /strava\.com\/feed\/activity\/\d+\/comment$/.test(url) && (req.method || 'GET') !== 'GET', respond: (req) => { auth.posted.push(req.json ? req.json() : req.body); return { json: { ok: true } }; } },
     { match: /strava\.com\/login/, respond: { body: STRAVA_LOGIN_PAGE, contentType: 'text/html' } },
@@ -117,6 +127,17 @@ async function postComment(emu, auth, open) {
   check(await until(() => pg(emu).locator('#sendov').isHidden(), 6000), 'the Delivered screen goes away by itself');
   check(await until(() => pg(emu).evaluate(() => { const c = document.getElementById('csheet'); return !c || c.hidden || !c.classList.contains('open'); }), 3000), 'the comment sheet is closed');
   check(await pg(emu).evaluate(() => getComputedStyle(document.body).overflow !== 'hidden' && getComputedStyle(document.documentElement).overflow !== 'hidden'), 'the digest scrolls again');
+}
+
+// Open the comment sheet on one activity and tap ✨ Suggest comments: the ideas shown
+async function ideasShown(emu, open) {
+  await tap(emu, open);
+  check(await until(() => has(emu, '#csheet textarea'), 5000), 'the comment sheet opens');
+  await until(() => has(emu, '#csheet .sgo'), 3000);
+  await tap(emu, '#csheet .sgo');
+  await until(() => pg(emu).locator('#csheet .sugs .sug').count().then((n) => n > 0), 20000);
+  await sleep(300);
+  return pg(emu).locator('#csheet .sugs .sug').allTextContents();
 }
 
 async function main() {
@@ -219,6 +240,30 @@ async function main() {
       check(ok, 'early risers first (earliest first), then photos, then the rest (newest first)' + (why ? ': ' + why : ''));
       const top = groups[0] && groups[0].people[0];
       check(!!top && top.early, 'the first line of the day is an early riser' + (top ? ` (${top.name})` : ''));
+      check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
+      await emu.close();
+    }
+    console.log('▸ 7. Comment ideas: exactly the number set in Settings');
+    const idea = (k) => ['Strong finish on that last climb!', 'Early start, big reward 🌅', 'Those splits look smooth', 'Lovely route today', 'Legs of steel', 'Fast and steady', 'What a view up there'][k % 7];
+    const cases = [
+      { label: '4 set, 4 sent', set: 4, ideas: (call) => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
+      { label: '4 set, only 3 sent: the 4th is asked for', set: 4, ideas: (call) => call === 1 ? [0, 1, 2].map(idea) : [idea(3)], want: 4, calls: 2 },
+      { label: '5 set, 2 sent with a repeat: the missing 3 are asked for', set: 5, ideas: (call) => call === 1 ? [idea(0), idea(0).toUpperCase(), idea(1)] : [4, 5, 6].map(idea), want: 5, calls: 2 },
+      { label: '2 set, 5 sent: only 2 shown', set: 2, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 2, calls: 1 },
+      { label: '1 set', set: 1, ideas: () => [0, 1, 2].map(idea), want: 1, calls: 1 },
+      { label: 'nothing set: the default of 3', set: null, ideas: () => [0, 1, 2, 3, 4].map(idea), want: 3, calls: 1 },
+      { label: '"4" saved as text still means 4', set: '4', ideas: () => [0, 1, 2, 3].map(idea), want: 4, calls: 1 },
+    ];
+    for (const c of cases) {
+      const auth = { loggedIn: true, logins: 0, logoutCalls: 0, ideaCalls: [], ideas: c.ideas, settings: c.set == null ? {} : { cfg: { suggestions: c.set } } };
+      const emu = await start(browser, auth);
+      check(await until(() => has(emu, 'section.person'), 30000), `the digest opens (${c.label})`);
+      const shown = await ideasShown(emu, '.act[data-id="9100101"] [data-act="toggle-comment"]');
+      check(shown.length === c.want, `${c.want} idea${c.want === 1 ? '' : 's'} shown (got ${shown.length})`);
+      const want = typeof c.set === 'string' ? +c.set : c.set == null ? 3 : c.set;
+      check(new RegExp(`exactly ${want} (different )?(option|comment)`).test(auth.ideaCalls[0] || ''), `the AI is asked for exactly ${want}`);
+      check(auth.ideaCalls.length === c.calls, c.calls === 1 ? 'one request is enough' : `the missing ones are asked for once (${auth.ideaCalls.length} requests)`);
+      check(new Set(shown.map((x) => x.toLowerCase())).size === shown.length, 'no idea is shown twice');
       check(!emu.errors.length, 'no page errors' + (emu.errors.length ? ': ' + emu.errors.slice(0, 2).join(' | ') : ''));
       await emu.close();
     }
