@@ -3,6 +3,31 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.42.0",
+      "date": "2026-11-07",
+      "title": "Before and after",
+      "highlights": [
+        {
+          "icon": "↔️",
+          "title": "Before and after",
+          "text": "The original and the result sit side by side, each shown whole, never cropped."
+        },
+        {
+          "icon": "⤢",
+          "title": "Full screen",
+          "text": "Tap a picture to see it full screen; tap again to flip between original and result."
+        }
+      ],
+      "changes": [
+        "📸 Photo with your stats: after a redesign or clean stats, the original (left) and the result (right) show side by side in the photo's own shape",
+        "Full-screen view fits the whole picture to the screen, with Original and Redesigned buttons, tap-to-compare, and Save or share",
+        "The original alone, before a redesign, is shown whole too and opens full screen"
+      ],
+      "fixes": [
+        "The redesigned photo showed as a cropped strip, so you couldn't see the whole result"
+      ]
+    },
+    {
       "version": "1.41.0",
       "date": "2026-11-07",
       "title": "The redesign studio",
