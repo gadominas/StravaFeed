@@ -108,7 +108,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.40.1';
+const VERSION = '1.41.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -622,7 +622,7 @@ async function main() {
           if (!postPhoto || postPhoto.id !== a.id) throw new Error('Pick a photo first.');
           if (!keyFor('openai')) msg = 'NEED_OPENAI';
           else {
-            const say = (step) => js(`window.__photoProgress && window.__photoProgress(${JSON.stringify(step)})`);
+            const say = (step, data) => js(`window.__photoProgress && window.__photoProgress(${JSON.stringify(step)}, ${JSON.stringify(data || {})})`);
             await say('reading'); await ownDetails(a);
             const r = await aiRedesign(a, overlayStats(a), postPhoto, String(p.tweak || '').slice(0, 300), say);
             if (r.needKey) msg = 'NEED_OPENAI';
@@ -1491,6 +1491,7 @@ async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
   }
   const shown = (plan && Array.isArray(plan.stats) && plan.stats.length ? plan.stats : stats.slice(0, 8))
     .filter(s => s && s.value != null).map(s => ({ label: String(s.label || '').slice(0, 24), value: String(s.value).slice(0, 30) }));
+  if (plan) await progress('planned', { headline: String(plan.headline || '').slice(0, 80), stats: shown.slice(0, 10), style: String(plan.prompt).replace(/\s+/g, ' ').slice(0, 220) });
   const exact = 'Numbers to letter, exactly as written: ' + shown.map(s => `${s.label} ${s.value}`).join(' · ');
   const prompt = plan ? `${String(plan.prompt).slice(0, 8000)}\n\n${exact}` : [
     'Restyle this photo into a bold, finished sports poster of the activity, keeping the people, their faces and the place recognisable and real.',
@@ -1498,8 +1499,8 @@ async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
     `Letter a short headline: "${a.name || a.type || 'Today'}", and these stats, grouped, with the first one as the hero number.`, exact,
     'Keep text off faces. Crisp, correctly spelled lettering, no other text, no logos or brand names, no watermark.',
   ].filter(Boolean).join('\n\n');
-  await progress('painting');
   const size = photo.h / photo.w > 1.15 ? '1024x1536' : photo.w / photo.h > 1.15 ? '1536x1024' : '1024x1024';
+  await progress('painting', { model: imageModel(), size, headline: (plan && plan.headline) || '', dist: (shown.find(s => /dist/i.test(s.label)) || {}).value || '' });
   const out = await drawComicPage(prompt, [{ b64: photo.big }], { size, quality: 'high', fidelity: 'high', feature: 'overlay', keepRefs: true });
   const img = Image.fromData(Data.fromBase64String(out.b64));
   return { img: 'data:image/jpeg;base64,' + Data.fromJPEG(img).toBase64String(), model: out.model, by: plan ? PROVIDERS[aiSettings.aiProvider] : '', headline: (plan && plan.headline) || '', stats: shown };
@@ -4458,6 +4459,60 @@ textarea.pain{resize:vertical;line-height:1.4}
 .pamode button.on{background:var(--accent);color:#fff}
 .pamode button[disabled]{opacity:.45}
 @media (prefers-reduced-motion:reduce){.paspin{animation-duration:2.4s}}
+.paorig{position:absolute;left:10px;top:10px;padding:4px 9px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700}
+.paask{display:flex;flex-direction:column;gap:8px}
+.paask textarea.pain{font-size:15px}
+.pago{margin:6px 0 4px}
+.pastudio{display:flex;flex-direction:column;gap:12px}
+.pafxwrap{position:relative;border-radius:14px;overflow:hidden;background:#000;box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.pafxwrap{height:min(38vh,380px)}
+.paprev.small img{max-height:30vh;object-fit:cover}
+.pafxwrap img{display:block;width:100%;height:100%;object-fit:cover;transition:filter 1.2s ease;transform-origin:50% 45%}
+.pafxwrap i{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1s ease}
+.pafxtag{position:absolute;left:10px;top:10px;padding:5px 10px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:800;letter-spacing:.3px}
+.pafxwrap::after{content:"";position:absolute;top:0;bottom:0;width:38%;left:-45%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.28),transparent);transform:skewX(-18deg);animation:pasweep 2.6s ease-in-out infinite}
+@keyframes pasweep{to{left:120%}}
+.pastudio[data-fx="sketch"] img{filter:grayscale(1) contrast(1.9) brightness(1.15)}
+.pastudio[data-fx="sketch"] .pafx1{opacity:.35;background:repeating-linear-gradient(115deg,transparent 0 6px,rgba(0,0,0,.35) 6px 7px)}
+.pastudio[data-fx="sepia"] img{filter:sepia(1) contrast(1.15) brightness(.95)}
+.pastudio[data-fx="sepia"] .pafx1{opacity:1;background:radial-gradient(ellipse at center,transparent 45%,rgba(40,20,0,.65) 100%)}
+.pastudio[data-fx="pop"] img{filter:saturate(3) contrast(1.4) hue-rotate(20deg)}
+.pastudio[data-fx="pop"] .pafx1{opacity:.45;background:radial-gradient(circle,rgba(255,40,90,.9) 1.5px,transparent 2px) 0 0/10px 10px;mix-blend-mode:multiply}
+.pastudio[data-fx="scan"] img{filter:brightness(1.1) saturate(.6)}
+.pastudio[data-fx="scan"] .pafx1{opacity:.5;background:repeating-linear-gradient(0deg,rgba(0,0,0,.45) 0 2px,transparent 2px 5px)}
+.pastudio[data-fx="scan"] .pafx2{opacity:1;background:linear-gradient(180deg,transparent,rgba(0,255,200,.35),transparent) 0 0/100% 22% no-repeat;animation:pascan 2s linear infinite}
+@keyframes pascan{from{background-position:0 -30%}to{background-position:0 130%}}
+.pastudio[data-fx="glitch"] img{animation:paglitch .9s steps(2) infinite;filter:saturate(1.4) contrast(1.2)}
+.pastudio[data-fx="glitch"] .pafx1{opacity:.55;background:linear-gradient(90deg,rgba(255,0,80,.45),transparent 30%,transparent 70%,rgba(0,220,255,.45));mix-blend-mode:screen}
+@keyframes paglitch{0%{transform:translate(0)}20%{transform:translate(-6px,2px)}40%{transform:translate(5px,-2px) skewX(2deg)}60%{transform:translate(-3px,0)}80%{transform:translate(4px,3px)}100%{transform:translate(0)}}
+.pastudio[data-fx="halftone"] img{filter:grayscale(1) contrast(2.2)}
+.pastudio[data-fx="halftone"] .pafx1{opacity:.7;background:radial-gradient(circle,#000 1.6px,transparent 2.2px) 0 0/7px 7px;mix-blend-mode:screen}
+.pastudio[data-fx="halftone"] .pafx2{opacity:.35;background:#ffe45c;mix-blend-mode:multiply}
+.pastudio[data-fx="neon"] img{filter:invert(1) hue-rotate(180deg) saturate(3) contrast(1.3)}
+.pastudio[data-fx="neon"] .pafx1{opacity:.5;background:linear-gradient(160deg,rgba(255,0,200,.5),rgba(0,200,255,.4));mix-blend-mode:overlay}
+.pastudio[data-fx="zoom"] img{animation:pazoom 4.2s ease-in-out both;filter:saturate(1.2)}
+@keyframes pazoom{from{transform:scale(1)}to{transform:scale(1.35) translate(-3%,2%)}}
+.pacard{padding:14px;border-radius:16px;background:var(--card);display:flex;flex-direction:column;gap:9px}
+.pasteps{display:flex;gap:6px;flex-wrap:wrap}
+.pasteps span{padding:5px 9px;border-radius:999px;background:var(--soft);color:var(--mut);font-size:12px;font-weight:700}
+.pasteps span.done{color:#2fbf71}
+.pasteps span.on{background:var(--accent);color:#fff;animation:papulse 1.2s ease-in-out infinite}
+@keyframes papulse{50%{opacity:.75}}
+.paline{font-size:15px;line-height:1.35;min-height:2.7em}
+.paline.in{animation:paline .45s ease-out}
+@keyframes paline{from{opacity:0;transform:translateY(6px)}}
+.pabar{height:8px;border-radius:99px;background:var(--soft);overflow:hidden}
+.pabar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#ff6b3d,#ffd36b,#a53dff) 0 0/200% 100%;transition:width .25s linear;animation:pabarflow 2s linear infinite}
+@keyframes pabarflow{to{background-position:-200% 0}}
+.pameta{color:var(--mut);font-size:12px}
+.paplan{padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--accent) 9%,var(--bg));border-left:3px solid var(--accent);animation:paline .5s ease-out}
+.paplan small{display:block;color:var(--accent);font-weight:800;font-size:11px;letter-spacing:.5px;text-transform:uppercase}
+.paplan>b{display:block;margin:3px 0 6px;font-size:15px}
+.paplst{display:flex;flex-wrap:wrap;gap:5px}
+.paplst span{padding:3px 8px;border-radius:8px;background:var(--soft);font-size:11.5px;color:var(--mut)}
+.paplst span b{color:var(--fg)}
+.paplan p{margin:7px 0 0;font-size:12.5px;color:var(--mut);line-height:1.4}
+@media (prefers-reduced-motion:reduce){.pafxwrap::after,.pastudio img,.pafx2,.pasteps span.on,.pabar i{animation:none!important}}
 #det{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.5);display:flex;align-items:flex-end}
 #det[hidden]{display:none}
 .detp{width:100%;max-height:92vh;background:var(--bg);border-radius:20px 20px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:up .22s ease-out}
@@ -6017,6 +6072,7 @@ function postSave(){
 }
 // 🎨 AI redesign (the image model repaints the whole photo from your instructions and every number) or 📊 Clean stats (drawn here)
 var PHOTOMODE='';
+// a picked photo waits in 🎨 AI redesign until you tap Redesign my photo, so you can write your wishes first
 function photoMode(){ return PHOTOMODE||(COMICDRAW?'ai':'clean'); }
 function paModes(){
   var m=photoMode();
@@ -6024,33 +6080,6 @@ function paModes(){
     '<button data-act="photo-mode" data-mode="ai" class="'+(m==='ai'?'on':'')+'"'+(COMICDRAW?'':' disabled')+' aria-pressed="'+(m==='ai')+'">🎨 AI redesign</button>'+
     '<button data-act="photo-mode" data-mode="clean" class="'+(m==='clean'?'on':'')+'" aria-pressed="'+(m==='clean')+'">📊 Clean stats</button></div>'+
     '<p class="mnote">'+(m==='ai'?'The whole photo is repainted into a poster of the activity, with every number worth showing, the way your instructions say. About a minute.':(COMICDRAW?'Your numbers drawn on the photo as it is, placed and styled by your instructions.':'Your numbers drawn on the photo as it is. 🎨 AI redesign needs an OpenAI key: Settings › AI.'))+'</p>';
-}
-function renderPhoto(){
-  var b=document.querySelector('#msheet .msb'); paHead(photoMode()==='ai'?'Photo redesign':'Stats on a photo'); paFoot();
-  var P=PHOTO||{}, html=paModes(), r=P.res&&P.res[photoMode()];
-  if(!P.src&&!P.busy){
-    html+='<div class="pasrc"><button class="pabtn" data-act="photo-pick" data-src="library"><span class="paic">🖼</span><b>Photos</b></button><button class="pabtn" data-act="photo-pick" data-src="camera"><span class="paic">📷</span><b>Camera</b></button></div>';
-    if((MINE.photos||[]).length) html+='<div class="msect">From this activity</div><div class="paths">'+MINE.photos.map(function(u,i){ return '<button data-act="photo-pick" data-src="activity" data-i="'+i+'" aria-label="Activity photo '+(i+1)+'"><img src="'+escH(u)+'" alt=""></button>'; }).join('')+'</div>';
-  } else {
-    var shown=P.busy?P.src:(r&&r.out)||P.src;
-    html+='<div class="paprev'+(P.busy?' working':'')+'">'+(shown?'<img src="'+shown+'" alt="Your photo'+(r&&r.out?', decorated':'')+'">':'')+
-      (P.busy?'<div class="pabusy"><span class="paspin"></span><b id="pabusy">'+escH(P.busy)+'</b><small id="patime"></small></div>':'')+'</div>';
-    if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
-    if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
-    if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="'+(photoMode()==='ai'?'Change it? e.g. retro 80s poster, add a funny quote':'Change it? e.g. top right, bigger, only distance and pace')+'" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
-  }
-  b.innerHTML=html;
-}
-function photoPick(src,i){
-  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…',res:{}}; renderPhoto();
-  send('post-photo',{id:id,src:src,i:i||0},function(ok,msg){
-    if(!PHOTO||PHOTO.id!==id) return;
-    if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
-    var d={}; try{ d=JSON.parse(msg); }catch(e){}
-    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; photoRun(); };
-    im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
-    im.src=d.img;
-  });
 }
 function photoRun(){ return photoMode()==='ai'?photoRedraw():photoDesign(); }
 function photoStatsNote(by,stats){ return escH(by)+' · '+(stats||[]).map(function(s){ return escH(s.label); }).join(', '); }
@@ -6067,20 +6096,102 @@ function photoDesign(){
     renderPhoto();
   });
 }
-var PA_STEPS={reading:'Reading every number of your activity…',directing:'Art-directing from your instructions and the photo…',painting:'Repainting your photo…'};
+var PA_IDEAS=[['📼','Retro 80s poster'],['🎞','Old film photo from the 1970s'],['🦸','Comic book hero'],['🖌','Watercolour painting'],['🌃','Neon night, synthwave'],['🏆','Epic movie poster'],['😂','Add a funny quote']];
+function renderPhoto(){
+  var b=document.querySelector('#msheet .msb'); paHead(photoMode()==='ai'?'Photo redesign':'Stats on a photo'); paFoot();
+  var P=PHOTO||{}, r=P.res&&P.res[photoMode()], ai=photoMode()==='ai', html=P.busy&&P.studio?'':paModes();   // the studio gets the whole screen
+  if(!P.src&&!P.busy){
+    html+='<div class="pasrc"><button class="pabtn" data-act="photo-pick" data-src="library"><span class="paic">🖼</span><b>Photos</b></button><button class="pabtn" data-act="photo-pick" data-src="camera"><span class="paic">📷</span><b>Camera</b></button></div>';
+    if((MINE.photos||[]).length) html+='<div class="msect">From this activity</div><div class="paths">'+MINE.photos.map(function(u,i){ return '<button data-act="photo-pick" data-src="activity" data-i="'+i+'" aria-label="Activity photo '+(i+1)+'"><img src="'+escH(u)+'" alt=""></button>'; }).join('')+'</div>';
+  } else if(P.busy&&P.studio){
+    html+=paStudioHTML(P);
+  } else {
+    var shown=(r&&r.out)||P.src;
+    html+='<div class="paprev'+(P.busy?' working':'')+(ai&&!r&&!P.busy?' small':'')+'">'+(shown?'<img src="'+shown+'" alt="Your photo'+(r&&r.out?', decorated':'')+'">':'')+
+      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(ai&&!r&&!P.busy?'<span class="paorig">Original · not redesigned yet</span>':'')+'</div>';
+    if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
+    if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
+    if(P.src&&ai){
+      html+='<div class="paask"><div class="msect">🎨 <b>How should it look?</b></div>'+
+        '<textarea id="phtweak" class="pain" rows="3" maxlength="300" placeholder="Your wishes for this photo, e.g. a retro 1970s film photo with every stat and a funny quote. Leave empty to use your instructions in Settings." aria-label="Your wishes for this photo">'+escH(P.tweak||'')+'</textarea>'+
+'<button class="cpai pago" data-act="photo-again"'+(P.busy?' disabled':'')+'><span class="cpaiic" aria-hidden="true">🎨</span><span class="cpait"><b>'+(r?'Redesign again':'Redesign my photo')+'</b><small>Repainted by AI with your wishes · about a minute</small></span><span class="cpaigo" aria-hidden="true">Go ›</span></button>'+
+        '<small class="muted">Need ideas? Tap to add:</small><div class="pachips">'+PA_IDEAS.map(function(x,i){ return '<button class="stchip" data-phidea="'+i+'">'+x[0]+' '+escH(x[1])+'</button>'; }).join('')+'</div>'+'</div>';
+    } else if(P.src) html+='<div class="patw"><input id="phtweak" class="pain" maxlength="300" placeholder="Change it? e.g. top right, bigger, only distance and pace" value="'+escH(P.tweak||'')+'" aria-label="What to change"><button class="sm" data-act="photo-again"'+(P.busy?' disabled':'')+'>🔁 Redesign</button></div>';
+  }
+  b.innerHTML=html;
+}
+function photoPick(src,i){
+  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…',res:{}}; renderPhoto();
+  send('post-photo',{id:id,src:src,i:i||0},function(ok,msg){
+    if(!PHOTO||PHOTO.id!==id) return;
+    if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
+    var d={}; try{ d=JSON.parse(msg); }catch(e){}
+    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; PHOTO.busy='';
+      if(photoMode()==='ai'){ renderPhoto(); var ta=document.getElementById('phtweak'); if(ta) ta.scrollIntoView({block:'center',behavior:'smooth'}); }   // AI redesign waits for your wishes
+      else photoDesign(); };
+    im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
+    im.src=d.img;
+  });
+}
+// ── The redesign studio: the photo goes through comic effects while the AI works, with a running commentary ──
+var PA_FX=['sketch','sepia','pop','scan','glitch','halftone','neon','zoom'];
+var PA_STAGES=[
+  {k:'reading',t:'Reading the numbers',e:'🔎',lines:['Reading every number off your watch','Converting heartbeats into drama','Double-checking the kilometres, twice','Interviewing your splits']},
+  {k:'directing',t:'Art direction',e:'🎬',lines:['The art director sips an espresso','Choosing between epic and very epic','Arguing about how much orange is too much','Finding your best side','Writing “dramatic clouds” on a napkin']},
+  {k:'painting',t:'Painting',e:'🖌',lines:['Mixing pigments with a dash of lactic acid','Teaching the pixels to run negative splits','Sketching your outline, flattering angle only','Adding motion blur you definitely earned','Lettering {h} in heroic capitals','Polishing every one of your {d}','Rendering the sweat as glitter','Quietly removing the bit where you walked','Asking the clouds for a dramatic pose','Making the trees look like they were cheering']},
+  {k:'done',t:'Varnish',e:'✨',lines:['Blowing on the paint to dry it']}
+];
+function paStageIdx(k){ for(var i=0;i<PA_STAGES.length;i++) if(PA_STAGES[i].k===k) return i; return 0; }
+function paStudioHTML(P){
+  var S=P.studio, si=paStageIdx(S.step);
+  return '<div class="pastudio" data-fx="'+S.fx+'"><div class="pafxwrap"><img src="'+P.src+'" alt="Your photo, being repainted"><i class="pafx1"></i><i class="pafx2"></i><span class="pafxtag" id="pafxtag">'+escH(paFxName(S.fx))+'</span></div>'+
+    '<div class="pacard"><div class="pasteps">'+PA_STAGES.slice(0,3).map(function(x,i){ return '<span class="'+(i<si?'done':i===si?'on':'')+'">'+(i<si?'✓':x.e)+' '+x.t+'</span>'; }).join('')+'</div>'+
+    '<b class="paline" id="paline">'+escH(S.line||'')+'</b>'+
+    '<div class="pabar"><i id="pabar" style="width:'+S.pct+'%"></i></div>'+
+    '<small class="pameta" id="pameta">'+escH(paMeta(P))+'</small>'+
+    (S.plan?'<div class="paplan"><small>The plan</small>'+(S.plan.headline?'<b>“'+escH(S.plan.headline)+'”</b>':'')+
+      '<div class="paplst">'+(S.plan.stats||[]).map(function(s){ return '<span>'+escH(s.label)+' <b>'+escH(s.value)+'</b></span>'; }).join('')+'</div>'+
+      (S.plan.style?'<p>'+escH(S.plan.style)+'…</p>':'')+'</div>':'')+
+    '</div></div>';
+}
+function paFxName(fx){ return {sketch:'✏️ Pencil sketch',sepia:'🎞 Darkroom',pop:'💥 Pop art',scan:'📺 Scanning',glitch:'⚡ Glitch',halftone:'🗞 Halftone print',neon:'🌈 Neon',zoom:'🔍 Close-up'}[fx]||''; }
+function paMeta(P){ var S=P.studio, s=Math.round((Date.now()-P.t0)/1000); return s+' s'+(S.model?' · '+S.model+(S.size?' at '+S.size:''):'')+(S.step==='painting'?' · usually about a minute':''); }
+function paLine(P){
+  var S=P.studio, st=PA_STAGES[paStageIdx(S.step)], l=st.lines[S.n++%st.lines.length];
+  return l.replace('{h}',S.headline?'“'+S.headline+'”':'your headline').replace('{d}',S.dist||'kilometres');
+}
+function paTick(P){
+  if(PHOTO!==P||!P.busy||!P.studio) return;
+  var S=P.studio, t=(Date.now()-P.t0)/1000;
+  if(S.step==='painting'){ var tp=(Date.now()-S.tPaint)/1000; S.pct=Math.min(96,30+66*(1-Math.exp(-tp/38))); }
+  else if(S.step==='directing') S.pct=Math.min(28,S.pct+0.6); else S.pct=Math.min(12,S.pct+0.8);
+  var bar=document.getElementById('pabar'); if(bar) bar.style.width=S.pct.toFixed(1)+'%';
+  var mt=document.getElementById('pameta'); if(mt) mt.textContent=paMeta(P);
+  if(t-S.lt>3.6){ S.lt=t; S.line=paLine(P); var el=document.getElementById('paline'); if(el){ el.classList.remove('in'); void el.offsetWidth; el.textContent=S.line; el.classList.add('in'); } }
+  if(t-S.ft>4.2){ S.ft=t; S.fx=PA_FX[(PA_FX.indexOf(S.fx)+1)%PA_FX.length]; var st=document.querySelector('#msheet .pastudio'); if(st) st.dataset.fx=S.fx; var tg=document.getElementById('pafxtag'); if(tg) tg.textContent=paFxName(S.fx); }
+}
 function photoRedraw(){
-  paKeep(); var P=PHOTO; if(!P||!P.im) return;
-  P.busy=PA_STEPS.reading; P.err=''; P.t0=Date.now(); renderPhoto();
-  clearInterval(P.tick); P.tick=setInterval(function(){ var el=document.getElementById('patime'); if(!el||PHOTO!==P||!P.busy){ return; } el.textContent=Math.round((Date.now()-P.t0)/1000)+' s · usually about a minute'; },1000);
-  window.__photoProgress=function(step){ if(PHOTO!==P||!P.busy) return; P.busy=PA_STEPS[step]||P.busy; var el=document.getElementById('pabusy'); if(el) el.textContent=P.busy; };
+  paKeep(); var P=PHOTO; if(!P||!P.im||P.busy) return;
+  P.busy='studio'; P.err=''; P.t0=Date.now();
+  P.studio={step:'reading',pct:2,n:0,lt:0,ft:0,fx:PA_FX[0],line:'',plan:null}; P.studio.line=paLine(P);
+  renderPhoto(); var pb=document.querySelector('#msheet .msb'); if(pb) pb.scrollTop=0;
+  clearInterval(P.tick); P.tick=setInterval(function(){ paTick(P); },250);
+  window.__photoProgress=function(step,data){
+    if(PHOTO!==P||!P.busy) return; var S=P.studio; data=data||{};
+    if(step==='planned'){ S.plan=data; if(data.headline) S.headline=data.headline; S.pct=Math.max(S.pct,28); return renderPhoto(); }
+    if(step==='painting'){ S.model=data.model||''; S.size=data.size||''; if(data.headline) S.headline=data.headline; S.dist=data.dist||''; S.tPaint=Date.now(); S.pct=Math.max(S.pct,30); }
+    if(paStageIdx(step)>paStageIdx(S.step)){ S.step=step; S.n=0; S.line=paLine(P); S.lt=(Date.now()-P.t0)/1000; renderPhoto(); }
+  };
   send('post-redraw',{id:P.id,tweak:P.tweak||''},function(ok,msg){
-    clearInterval(P.tick); window.__photoProgress=null;
-    if(PHOTO!==P) return; P.busy='';
-    if(msg==='NEED_OPENAI'){ P.err='🎨 AI redesign needs an OpenAI key: Settings › AI.'; return renderPhoto(); }
-    if(!ok){ P.err=msg||'The redesign didn’t come back. Try again.'; return renderPhoto(); }
+    window.__photoProgress=null;
+    if(PHOTO!==P){ clearInterval(P.tick); return; }
+    function finish(){ clearInterval(P.tick); P.busy=''; P.studio=null; renderPhoto(); }
+    if(msg==='NEED_OPENAI'){ P.err='🎨 AI redesign needs an OpenAI key: Settings › AI.'; return finish(); }
+    if(!ok){ P.err=msg||'The redesign didn’t come back. Try again.'; return finish(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
     P.res.ai={out:d.img,note:photoStatsNote('Repainted by '+(d.model||'GPT Image')+(d.by?', art direction by '+d.by:''),d.stats)};
-    renderPhoto();
+    var S=P.studio; S.step='done'; S.pct=100; S.line=paLine(P); renderPhoto();
+    setTimeout(finish,900);
   });
 }
 function photoShare(){
@@ -6741,7 +6852,8 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='photo-open'){ MINEVIEW='photo'; if(PHOTO&&MINE&&PHOTO.id!==MINE.id) PHOTO=null; renderPhoto(); var qb=document.querySelector('#msheet .msb'); if(qb) qb.scrollTop=0; return; }
   if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0);
   if(t.dataset.act==='photo-again') return photoRun();
-  if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; if(PHOTO&&PHOTO.im&&!(PHOTO.res&&PHOTO.res[PHOTOMODE])) return photoRun(); return renderPhoto(); }
+  if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; if(PHOTOMODE==='clean'&&PHOTO&&PHOTO.im&&!(PHOTO.res&&PHOTO.res.clean)) return photoDesign(); return renderPhoto(); }   // AI redesign waits for Redesign my photo
+  if(t.dataset.phidea!=null){ paKeep(); var idea=PA_IDEAS[+t.dataset.phidea]; if(PHOTO&&idea){ var cur=String(PHOTO.tweak||'').trim(); PHOTO.tweak=cur?(cur.indexOf(idea[1])>=0?cur:cur+', '+idea[1].toLowerCase()):idea[1]; renderPhoto(); } return; }
   if(t.dataset.act==='photo-other'){ if(PHOTO&&PHOTO.busy) return; PHOTO=null; return renderPhoto(); }
   if(t.dataset.act==='photo-share') return photoShare();
   if(t.dataset.act==='mine-strava'){ if(MINE) send('activity',{id:MINE.id}); return; }
