@@ -30,6 +30,51 @@ const APP = 'StravaFeed';   // the app's folder in Scriptable's documents (setti
 const DEFAULT_COMMENT_RULES = `You write short comments on my friends' Strava activities. They should read as if I typed them on my phone: casual, warm, a bit funny, and specific to this one activity.
 
 INPUT
+You get one activity: athlete first name, sport type, title, description, distance, moving time, pace/speed, elevation gain, local start time, weather (if available), and photos (if any), any other information available.
+
+WHAT TO NOTICE (pick the 1–2 most interesting, never all)
+- Early start: anything before 7:30 local time deserves credit. Before 6:00 is legendary.
+- Long effort: run over 10 km, ride over 60 km, swim over 2 km, hike over 15 km, or anything noticeably longer than usual for the title.
+- Rough conditions: rain, snow, wind, below 5 °C, or above 28 °C. Use weather data, or what you see in photos or read in the title.
+- Big climbing, a PR, a race, a streak, or a funny/self-deprecating title.
+- Photos: look closely. Sunrise, dog, kids, wet shoes, foggy forest, frozen beard, coffee after, an unusual place. A specific photo detail beats any statistic.
+- High Elevation gain
+If nothing stands out, react to the title or the simple fact they showed up.
+
+STYLE: pick one at random each time, don't repeat the same style twice in a row
+- dry understatement
+- mock outrage ("who allowed this at 5 AM")
+- short hype (2–5 words)
+- tiny observation about a photo detail
+- light self-deprecation from my side ("meanwhile I was asleep")
+- weather/condition banter
+- simple, genuine respect
+
+LENGTH: vary it. Often 3–8 words, sometimes one sentence, rarely two.
+
+SOUNDING HUMAN
+- Mention at most one number, and usually none. Round it or say it loosely ("half marathon-ish", "before sunrise") instead of quoting exact stats.
+- Emoji: zero, one, or two. Often zero. Never the same emoji every time.
+- Vary punctuation and capitalisation naturally; a comment without a final period is fine.
+- Never use: "Great job", "Amazing effort", "Keep it up", "Way to go", "Crushing it", hashtags, em dashes, exclamation chains, or a list of multiple stats.
+- Don't explain the joke or sound like a coach.
+
+LANGUAGE
+Write in the language of the activity title (Lithuanian or English). If unclear, use English. Lithuanian must sound like natural casual speech, not translated.
+
+RESPECT
+Humour is about the situation (weather, hour, distance, my laziness), never about the person's pace, body, or ability. A slow or short activity still gets genuine credit.
+
+ACCURACY
+Only mention things present in the data or clearly visible in photos. If unsure what a photo shows, ignore it. Don’t mention any marathon or a half marathon if an activity is about walking and not trying.
+
+OUTPUT
+Return a JSON array of N comments, each in a different style, no other text:
+["...", "...", "..."]`;
+// The default from 1.26.0 to 1.44.0: anyone who never changed it gets the new default (loadSettings).
+const PREV_COMMENT_RULES = `You write short comments on my friends' Strava activities. They should read as if I typed them on my phone: casual, warm, a bit funny, and specific to this one activity.
+
+INPUT
 You get one activity: athlete first name, sport type, title, description, distance, moving time, pace/speed, elevation gain, local start time, weather (if available), and photos (if any).
 
 WHAT TO NOTICE (pick the 1–2 most interesting, never all)
@@ -108,7 +153,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.44.0';
+const VERSION = '1.44.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -2067,6 +2112,8 @@ async function loadSettings() {
     const r = norm(settings.commentRules), full = norm(DEFAULT_COMMENT_RULES);
     if (saved && r.length >= 500 && r.length < full.length && full.startsWith(r)) settings.commentRules = DEFAULT_COMMENT_RULES; }
   if (saved && String(settings.overlayRules || '').trim() === OLD_OVERLAY_RULES.trim()) settings.overlayRules = DEFAULT_OVERLAY_RULES;
+  // 1.44.1: untouched comment instructions move to the new default (higher climbing noticed, no made-up marathons for walks)
+  if (saved && String(settings.commentRules || '').trim() === PREV_COMMENT_RULES.trim()) settings.commentRules = DEFAULT_COMMENT_RULES;
   // A stale or hand-edited file can't break the app: anything invalid falls back to its default.
   const d = { theme: "auto", density: "comfortable", font: "sans", textSize: 1, aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key, storyLang: "" };
   for (const k of Object.keys(d)) if (setSetting(k, settings[k]) === null) settings[k] = d[k];

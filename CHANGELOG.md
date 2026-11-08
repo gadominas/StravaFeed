@@ -2,6 +2,15 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.44.1 (2026-11-08): Sharper comment instructions
+
+- ✍️ **New default comment style**: Comment ideas notice big climbs, use every detail they get, and never call a walk a marathon.
+
+**Changes**
+
+- New default instructions for comment ideas: any information about the activity is used, high elevation gain is worth a mention, no playful-question style, the first name isn't rationed, and no marathon or half-marathon talk for walks
+- If you never changed the comment instructions, they move to the new default; instructions you edited stay as they are (Reset to default in Settings brings the new text)
+
 ## 1.44.0 (2026-11-07): Built with, explained
 
 - 🧩 **Know what's inside**: Tap any blueprint in Settings › Built with to see what it is, what it does, what it drives and why it matters.

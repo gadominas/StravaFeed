@@ -86,6 +86,17 @@ module.exports = { n: 12, title: 'Settings and configuration', run: async (brows
     noErrors(emu); await emu.close();
   }
   {
+    console.log('  · old comment instructions, never changed, move to the new default; your own stay');
+    for (const [label, rules, want] of [['untouched', appConst('PREV_COMMENT_RULES'), 'new'], ['your own', 'MY-OWN-RULES: be brief.', 'own']]) {
+      const ai = fakeAI();
+      const emu = await opened(browser, { ai, settings: { commentRules: rules } }, label);
+      const sys = await ideasAsked(emu, ai);
+      if (want === 'new') check(sys.includes('- High Elevation gain') && !sys.includes('playful question'), 'comment ideas get the new default, not the old text');
+      else check(sys.includes('MY-OWN-RULES: be brief.') && !sys.includes('- High Elevation gain'), 'instructions you changed are kept as they are');
+      noErrors(emu); await emu.close();
+    }
+  }
+  {
     console.log('  · a broken settings file');
     const ai = fakeAI();
     const emu = await opened(browser, { ai, settingsRaw: '{"cfg": {"suggestions": 4, ' }, 'broken file');

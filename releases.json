@@ -3,6 +3,23 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.44.1",
+      "date": "2026-11-08",
+      "title": "Sharper comment instructions",
+      "highlights": [
+        {
+          "icon": "✍️",
+          "title": "New default comment style",
+          "text": "Comment ideas notice big climbs, use every detail they get, and never call a walk a marathon."
+        }
+      ],
+      "changes": [
+        "New default instructions for comment ideas: any information about the activity is used, high elevation gain is worth a mention, no playful-question style, the first name isn't rationed, and no marathon or half-marathon talk for walks",
+        "If you never changed the comment instructions, they move to the new default; instructions you edited stay as they are (Reset to default in Settings brings the new text)"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.44.0",
       "date": "2026-11-07",
       "title": "Built with, explained",
