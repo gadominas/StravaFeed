@@ -1,5 +1,5 @@
 // 14. 📖 The day's story: written from the day's people; a language pick and a "Rewrite it" tweak write it again with that
-//     language or tweak; the template comic (💥 Pop) draws its pages and shares them on 📤 Share comic; without a key a note.
+//     language or tweak; the template comic (💥 Pop) draws its pages and opens the share sheet by itself, 📤 Share comic pulsing until shared; without a key a note.
 'use strict';
 const { fakeAI } = require('../lib/fake-ai');
 
@@ -23,11 +23,11 @@ module.exports = { n: 14, title: 'The day\'s story and the template comic', run:
     await tap(emu, '#storysheet [data-act="story-image"]');
     await until(() => has(emu, '#cpick [data-cstyle="pop"]'), 5000);
     await tap(emu, '#cpick [data-cstyle="pop"]');
-    check(await until(() => has(emu, '#storysheet [data-act="story-comic-share"]'), 20000), '💥 Pop draws the pages and offers 📤 Share comic');
+    check(await until(() => emu.shared.length > 0, 20000), '💥 Pop draws the pages and opens the share sheet by itself');
     check(ai.of('image').length === 0, 'the template needs no picture requests');
-    check(emu.shared.length === 0, 'nothing is shared before you tap');
+    check(await has(emu, '#storysheet [data-act="story-comic-share"].pulse'), 'not shared yet: 📤 Share comic pulses');
     await tap(emu, '#storysheet [data-act="story-comic-share"]');
-    check(await until(() => emu.shared.length > 0, 20000), 'Share comic opens the share sheet');
+    check(await until(() => emu.shared.length === 2, 20000), 'Share comic opens the share sheet again');
     const pics = (emu.shared[0] || []).filter((x) => x.type === 'image');
     check(pics.length >= 1 && pics.every((x) => x.size.width === 1080 && x.size.height === 1350), `with the pages at 1080 × 1350 (${pics.length})`);
     noErrors(emu); await emu.close();

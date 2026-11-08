@@ -3,6 +3,34 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.45.0",
+      "date": "2026-11-08",
+      "title": "Your comic, your plot",
+      "highlights": [
+        {
+          "icon": "✍️",
+          "title": "Your wishes first",
+          "text": "Before AI draws a comic, say how it should go: a detective story, a space mission, you as the villain."
+        },
+        {
+          "icon": "📤",
+          "title": "Straight to sharing",
+          "text": "When the comic is ready, the share sheet opens by itself."
+        },
+        {
+          "icon": "✨",
+          "title": "A Share button that asks",
+          "text": "Until you share, 📤 Share comic glows and its icon bobs, so it's easy to find."
+        }
+      ],
+      "changes": [
+        "💥 Comic › ✨ Drawn by AI first asks “How should the comic go?”, with one-tap ideas (detective noir, superhero team-up, space mission, everyone as animals, action trailer, sitcom, make me the villain) and a Draw the comic button; your wishes drive the plot and every page, on top of the story instructions, and are kept for next time",
+        "AI and template comics open the share sheet as soon as the pages are ready; 📤 Share comic then sits in its own full-width row above the story's buttons to share again",
+        "A page that couldn't be drawn is mentioned under 📤 Share comic, where nothing covers it"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.44.1",
       "date": "2026-11-08",
       "title": "Sharper comment instructions",

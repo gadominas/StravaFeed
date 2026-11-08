@@ -32,7 +32,7 @@ against a pretend strava.com whose session can end and start again, and checks w
     size; 🎨 AI redesign sends your wishes to the art director and uploads your photo as JPEG to GPT Image (edits,
     1024×1536, high quality, high input fidelity, gpt-image-2, the numbers to letter listed); the paid retries are capped
     (an unknown parameter or model once, a refused photo never resent without it) and every error shows in the sheet.
-11. **Comics drawn by AI** (`11-comic.js`): the comic factory comes and goes; a page that can't be drawn is tried once more
+11. **Comics drawn by AI** (`11-comic.js`): your wishes come first (sent to the plan and every page, kept for next time); the share sheet opens by itself and 📤 Share comic pulses until shared; the comic factory comes and goes; a page that can't be drawn is tried once more
     without the profile pictures, then left out and counted; never more than 2 pages at once; at most 6 pages; nothing is
     shared until **📤 Share comic**; without an OpenAI key nothing is asked for.
 12. **Settings** (`12-settings.js`): steppers stop at their limits, save what they show and Reset restores the default;

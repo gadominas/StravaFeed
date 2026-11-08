@@ -153,7 +153,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.44.1';
+const VERSION = '1.45.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -448,6 +448,7 @@ async function main() {
     }
     if (head === 'setlang') { if (setSetting('aiLang', p.lang) !== null) saveSettings(); return; }
     if (head === 'setcomicstyle') { if (setSetting('comicStyle', p.style) !== null) saveSettings(); return; }
+    if (head === 'setcomicwishes') { if (setSetting('comicWishes', p.v) !== null) saveSettings(); return; }
     if (head === 'setstorylang') { if (setSetting('storyLang', p.lang) !== null) saveSettings(); return; }
     if (head === 'setmode') { if (setSetting('aiMode', p.mode) !== null) saveSettings(); return; }
     // Settings (app-blueprints · settings): every change is applied and saved at once; the reply is the fresh state.
@@ -693,13 +694,13 @@ async function main() {
         else if (!keyFor('openai')) msg = 'NEED_OPENAI';
         else {
           const r = await aiComic(lastStory, ['pop', 'cool', 'paper'].includes(p.look) ? p.look : 'pop',
-            (step, data) => js(`window.__comicProgress && window.__comicProgress(${JSON.stringify(Object.assign({ step }, data || {}))})`));
+            (step, data) => js(`window.__comicProgress && window.__comicProgress(${JSON.stringify(Object.assign({ step }, data || {}))})`), String(p.wishes || '').trim().slice(0, 1000));
           if (r.needKey) msg = 'NEED_OPENAI';
           else { comicReady = r.images; ok = true; msg = JSON.stringify({ pages: r.images.length, note: r.note || '' }); track('story_comic', { pages: r.pages, style: 'ai', model: r.model, provider: aiSettings.aiProvider }); }   // shared only when the user taps Share comic
         }
       } else if (head === 'story-comic-share') {   // the AI comic's pages, on the user's tap
         if (!comicReady || !comicReady.length) msg = 'Draw the comic again: its pages are gone.';
-        else { await ShareSheet.present(comicReady); ok = true; }
+        else { const r = await ShareSheet.present(comicReady); ok = true; msg = r && r.completed ? 'SHARED' : ''; track('comic_shared', { done: !!(r && r.completed), auto: p.auto === '1' }); }
       } else if (head === 'story-image') {
         // the comic's pages, read one at a time (each is a large picture), then shared together: "Save N Images" keeps them in Photos
         const n = Math.min(12, +(await ui.evaluateJavaScript('(window.__storyImgs || []).length')) || 0), imgs = [];
@@ -708,7 +709,7 @@ async function main() {
           if (b64) imgs.push(Image.fromData(Data.fromBase64String(String(b64))));
         }
         if (!imgs.length) msg = 'The pages weren\u2019t made. Try again.';
-        else { await ShareSheet.present(imgs); ok = true; track('story_comic', { pages: imgs.length, style: p.style || settings.comicStyle }); }
+        else { const r = await ShareSheet.present(imgs); ok = true; msg = r && r.completed ? 'SHARED' : ''; track('story_comic', { pages: imgs.length, style: p.style || settings.comicStyle, shared: !!(r && r.completed) }); }
       } else if (head === 'share') {
         await ShareSheet.present([String(p.text || '')]); ok = true;
       } else if (head === 'activity') {
@@ -1273,10 +1274,11 @@ const COMIC_LOOKS = {
 // the newest GPT Image model the key can use (found by Settings › AI › models), else the default
 const imageModel = () => (aiSettings.imageModels && aiSettings.imageModels[0]) || IMAGE_MODEL;
 
-const COMIC_PLAN_PROMPT = (language, maxPages, rules, look) => [
+const COMIC_PLAN_PROMPT = (language, maxPages, rules, look, wishes) => [
   `You are the writer and art director of a comic book. You turn a short story about a day in the lives of friends on Strava into 2 to ${maxPages} complete comic-book pages. An image model draws each page from your page description alone, so every description must be complete and self-contained.`,
   rules ? `The user's own instructions for the story are below. Follow everything they say about format, tone, style, characters and look. If they describe a comic (panels, visuals, dialogue), draw exactly that comic.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
-  `ART STYLE, unless the user's instructions ask for another look: ${look}. Keep the same style, palette and character designs on every page.`,
+  wishes ? `THE USER'S WISHES FOR THIS COMIC, on top of the story instructions: ${wishes}\nBuild the comic's plot, setting, genre and twists around these wishes; where they differ from the story instructions or the story itself, the wishes win, but keep to the real people and the real facts of the day.` : '',
+  `ART STYLE, unless the user's instructions or wishes ask for another look: ${look}. Keep the same style, palette and character designs on every page.`,
   'Every page is a portrait comic page with 3 to 6 panels in a clear layout. For every panel say what is drawn (who, where, doing what, built on the real details in the story and photos) and give its exact lettering: caption boxes and speech bubbles, each bubble tied to the person who speaks.',
   `All lettering in ${language}, written out word for word, short: at most 12 words per bubble or caption and at most 3 per panel. Spell names exactly as given, with every accent. No panel numbers, no stage directions and no labels such as [Visual] in the lettering.`,
   'Page 1 opens with the story title as a big comic logo. The last panel of the last page says THE END. Everyone in the story appears at least once.',
@@ -1367,7 +1369,7 @@ function comicThumb(b64) {
 }
 
 // progress(step, data): 'reading', 'planning', 'plan' { title, pages: [{ lines }] }, 'page' { i, done, total, thumb }, 'printing'
-async function aiComic(story, look, progress = async () => {}) {
+async function aiComic(story, look, progress = async () => {}, wishes = '') {
   if (!keyFor('openai')) return { needKey: true };
   if (!aiKey()) return { needKey: true };
   const language = story.lang && story.lang !== 'Auto' ? story.lang : 'the language the story is written in';
@@ -1392,7 +1394,7 @@ async function aiComic(story, look, progress = async () => {}) {
     cast: (story.cast || []).map(c => ({ name: c.name, first_name: String(c.name || '').split(/\s+/)[0], has_my_kudos: !!c.kudoed })),
     story: story.paragraphs.map(p => ({ text: p.text, photos: (p.photos || []).map(u => photoIds.get(u)).filter(Boolean) })),
   };
-  const ask = (imgs) => aiCall(COMIC_PLAN_PROMPT(language, 6, rules + (tw ? '\n' + tw : ''), COMIC_LOOKS[look] || COMIC_LOOKS.pop),
+  const ask = (imgs) => aiCall(COMIC_PLAN_PROMPT(language, 6, rules + (tw ? '\n' + tw : ''), COMIC_LOOKS[look] || COMIC_LOOKS.pop, wishes),
     JSON.stringify(data), 5000, 'comic', aiSettings.aiProvider, imgs);
   let text;
   try { text = await ask(photos); }
@@ -1412,6 +1414,7 @@ async function aiComic(story, look, progress = async () => {}) {
       `Draw page ${k + 1} of ${pages.length} of a comic book as one finished, full-bleed comic page in portrait format: panels with black borders, drawn art, caption boxes and speech bubbles with clean comic lettering.`,
       `ART STYLE: ${style}.`,
       rules ? `STORY INSTRUCTIONS (the look and format they ask for wins):\n${rules.slice(0, 3000)}` : '',
+      wishes ? `THE USER'S WISHES FOR THIS COMIC (they win over the story instructions):\n${wishes}` : '',
       plan.characters ? `CHARACTERS (same design on every page):\n${String(plan.characters).slice(0, 2000)}` : '',
       `PAGE ${k + 1}:\n${String(pg.description).slice(0, 6000)}`,
       notes.length ? 'REFERENCE IMAGES:\n' + notes.join('\n') : '',
@@ -1992,6 +1995,7 @@ const settings = {
   theme: "auto", density: "comfortable", font: "sans", textSize: 1,
   aiLang: DIGEST.AI.LANGUAGES[0][1], aiMode: DIGEST.AI.MODES[0].key,   // remembered picks, also set in the composer
   comicStyle: "pop",   // 💥 Comic: ai (✨ Drawn by AI), pop, cool or paper (old paper); the last look picked
+  comicWishes: "",     // ✨ Drawn by AI: your wishes for the comic's story, on top of the story instructions (the last ones written)
   storyLang: "",   // The day's story: '' follows the comment language; also picked in the story sheet
   commentRules: DEFAULT_COMMENT_RULES,   // instructions for every AI comment
   storyRules: DEFAULT_STORY_RULES,       // instructions for the day's story
@@ -2072,7 +2076,7 @@ const SET_KEYS = {
   aiLang: [v => DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"], aiMode: [v => DIGEST.AI.MODES.some(m => m.key === v), "render"],
   commentRules: ["rules", ""], storyRules: ["rules", ""], postRules: ["rules", ""], overlayRules: ["rules", ""], shareUsage: ["bool", ""],
   storyLang: [v => v === "" || DIGEST.AI.LANGUAGES.some(l => l[1] === v), "render"],
-  comicStyle: [v => ["pop", "cool", "paper", "ai"].includes(v), ""],
+  comicStyle: [v => ["pop", "cool", "paper", "ai"].includes(v), ""], comicWishes: ["rules", ""],
 };
 // The language The day's story is written in: its own pick, else the comment language.
 const storyLanguage = () => settings.storyLang || settings.aiLang;
@@ -4655,6 +4659,9 @@ section.person .route{display:none}
 .stph.n1 img{aspect-ratio:16/10}
 .stp{margin:0;font-size:calc(16px * var(--ts));line-height:1.5}
 .stf{display:flex;gap:10px}
+#storysheet .shrow{padding:10px 16px 0;border-top:1px solid var(--line)}
+#storysheet .shrow button{width:100%;padding:13px 16px;font-size:calc(16px * var(--ts))}
+#storysheet .shnote{margin:6px 0 0;text-align:center;color:var(--mut);font-size:calc(12.5px * var(--ts))}
 .sttw{margin:18px 0 12px}
 .sttw small{display:block;margin-bottom:7px;color:var(--mut);font-size:calc(12px * var(--ts));font-weight:700}
 .sttwr,.stchips{display:flex;flex-wrap:wrap;gap:6px}
@@ -4667,6 +4674,20 @@ section.person .route{display:none}
 .sthint{display:block;margin-top:12px}
 #cpick{padding:12px 16px 4px;border-top:1px solid var(--line)}
 #cpick p{margin:0 0 8px;font-size:calc(13px * var(--ts));color:var(--mut);font-weight:600}
+#cpick .cwh{display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
+#cpick .cwh b{font-size:calc(16px * var(--ts))}
+#cpick .cwh small{color:var(--mut);font-size:calc(12.5px * var(--ts))}
+#cpick textarea{margin-bottom:8px}
+#cpick .pachips{margin:0 0 10px}
+#cpick .cwback{display:block;margin:2px auto 8px;font-size:calc(13px * var(--ts))}
+#storysheet [data-act="story-comic-share"]{position:relative;overflow:hidden;background:var(--accent);color:#fff}
+#storysheet [data-act="story-comic-share"].pulse{animation:shpulse 1.6s ease-in-out infinite}
+#storysheet [data-act="story-comic-share"].pulse::after{content:"";position:absolute;top:0;bottom:0;left:-40%;width:30%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);transform:skewX(-20deg);animation:cpshine 2.4s ease-in-out infinite}
+#storysheet [data-act="story-comic-share"].pulse .shic{display:inline-block;animation:shbob 1.6s ease-in-out infinite}
+@keyframes shpulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 60%,transparent)}70%,100%{box-shadow:0 0 0 12px transparent}}
+@keyframes shbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px) rotate(-8deg)}}
+#storysheet [data-act="story-comic-share"].shared{background:var(--soft);color:var(--fg)}
+@media (prefers-reduced-motion:reduce){#storysheet [data-act="story-comic-share"].pulse,#storysheet [data-act="story-comic-share"].pulse::after,#storysheet [data-act="story-comic-share"].pulse .shic{animation:none}}
 .cprow{display:flex;gap:8px}
 .cpb{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 6px;background:var(--soft);color:var(--fg);border:2px solid transparent;border-radius:16px;font-size:calc(13px * var(--ts));font-weight:700}
 .cpb.on{border-color:var(--accent)}
@@ -6458,7 +6479,7 @@ function storySheet(){
 }
 function openStory(again){
   var ov=storySheet(); ov.querySelector('.stday').textContent=storyKey();
-  if(again||!STORY||STORY.key!==storyKey()){ COMICREADY=null; window.__storyImgs=null; var cs=ov.querySelector('[data-act="story-comic-share"]'); if(cs) cs.remove(); }   // a new story: the old comic goes
+  if(again||!STORY||STORY.key!==storyKey()){ COMICREADY=null; window.__storyImgs=null; var cs=ov.querySelector('.shrow'); if(cs) cs.remove(); }   // a new story: the old comic goes
   ov.hidden=false; document.body.style.overflow='hidden';
   if(!again&&STORY&&STORY.key===storyKey()&&STORY.paragraphs&&STORY.lang===storyLang()) return renderStory();
   writeStory();
@@ -6854,13 +6875,27 @@ function cfProgress(p){
   } else if(p.step==='printing') cfGo('print');
 }
 // ✨ Drawn by AI: the app plans the pages with the story's AI and has OpenAI's image model draw each one in full
-function comicDraw(){
+// ✨ Drawn by AI asks first: your wishes for this comic (a genre, a plot, who's the hero), on top of the story instructions
+var COMICWISH=${JSON.stringify(String(settings.comicWishes || '')).replace(/</g, '\\u003c')};
+var CW_IDEAS=[['🕵️','Detective noir: who stole the kudos?'],['🦸','Superhero team-up against the Couch'],['🚀','Space mission to the finish line'],['🐾','Everyone as animals'],['🎬','Action movie trailer'],['📺','Sitcom episode with a laugh track'],['😈','Make me the villain']];
+function comicWishes(){
+  var pk=document.getElementById('cpick'); if(!pk) return;
+  pk.innerHTML='<div class="cwh"><b>✨ How should the comic go?</b><small>Your wishes for this comic, on top of the story instructions. Leave empty to follow the story.</small></div>'+
+    '<textarea id="cwish" class="pain" rows="3" maxlength="1000" placeholder="e.g. a detective story where the kudos went missing, and I solve it in the last panel" aria-label="Your wishes for the comic">'+escH(COMICWISH)+'</textarea>'+
+    '<div class="pachips">'+CW_IDEAS.map(function(x,i){ return '<button class="stchip" data-cwidea="'+i+'">'+x[0]+' '+escH(x[1])+'</button>'; }).join('')+'</div>'+
+    '<button class="cpai pago" data-act="comic-go"><span class="cpaiic" aria-hidden="true">✨</span><span class="cpait"><b>Draw the comic</b><small>Pages drawn by AI with your wishes · about a minute a page</small></span><span class="cpaigo" aria-hidden="true">Go ›</span></button>'+
+    '<button class="ghost small cwback" data-act="comic-back">‹ Or a quick template</button>';
+  var ta=document.getElementById('cwish'); if(ta) ta.focus();
+}
+function comicDraw(go){
   var b=document.querySelector('#storysheet [data-act="story-image"]'); if(!STORY||!b||b.disabled) return;
+  if(!go) return comicWishes();
+  var ta=document.getElementById('cwish'); if(ta){ COMICWISH=ta.value.trim(); send('setcomicwishes',{v:COMICWISH}); }
   var pk=document.getElementById('cpick'); if(pk) pk.remove();
   if(COMICSTYLE!=='ai'){ COMICLOOK=COMIC_THEMES[COMICSTYLE]?COMICSTYLE:COMICLOOK; COMICSTYLE='ai'; send('setcomicstyle',{style:'ai'}); }
   b.disabled=true; cfOpen();
   window.__comicProgress=cfProgress;
-  send('story-ai-comic',{look:COMICLOOK},function(ok,msg){
+  send('story-ai-comic',{look:COMICLOOK,wishes:COMICWISH},function(ok,msg){
     window.__comicProgress=null; cfClose(); b.disabled=false;
     if(msg==='NEED_OPENAI') return toast('Drawing needs an OpenAI key: Settings › AI');
     if(!ok) return toast(msg||'The pages couldn’t be drawn');
@@ -6868,21 +6903,27 @@ function comicDraw(){
     comicReadyShow('ai',r.pages||0,r.note);
   });
 }
-// A drawn comic waits for the user: "📤 Share comic" in the story's footer shares (or saves) its pages
+// A drawn comic opens the share sheet straight away; "📤 Share comic" in the story's footer keeps pulsing until it's shared
 var COMICREADY=null;
 function comicReadyShow(kind,n,note){
-  COMICREADY={kind:kind,n:n};
+  COMICREADY={kind:kind,n:n,note:note||''};
   var f=document.querySelector('#storysheet .stf'); if(!f) return;
-  var b=f.querySelector('[data-act="story-comic-share"]');
-  if(!b){ b=document.createElement('button'); b.setAttribute('data-act','story-comic-share'); f.insertBefore(b,f.lastElementChild); }
-  b.textContent='📤 Share comic'+(n?' ('+n+' page'+(n===1?'':'s')+')':'');
-  toast((note?note+'. ':'')+'Your comic is ready: tap Share comic to send or save it');   // one toast, so a missing page is never hidden
+  var row=document.querySelector('#storysheet .shrow'), b=row&&row.querySelector('[data-act="story-comic-share"]');
+  if(!b){ row=document.createElement('div'); row.className='shrow'; b=document.createElement('button'); b.setAttribute('data-act','story-comic-share'); row.appendChild(b); f.parentNode.insertBefore(row,f); }   // its own full-width row above the footer
+  b.innerHTML='<span class="shic" aria-hidden="true">📤</span> Share comic'+(n?' ('+n+' page'+(n===1?'':'s')+')':'');
+  b.classList.add('pulse'); b.classList.remove('shared');
+  var nt=row.querySelector('.shnote'); if(nt) nt.remove();
+  if(note){ nt=document.createElement('p'); nt.className='shnote'; nt.textContent=note; row.appendChild(nt); }   // a missing page is said under the button, where nothing covers it
+  toast('Your comic is ready');
+  setTimeout(function(){ comicShare(b,true); },450);   // straight to sharing
 }
-function comicShare(b){
+function comicShare(b,auto){
   if(!COMICREADY||b.disabled) return;
   b.disabled=true;
-  var fin=function(ok,m){ b.disabled=false; if(!ok&&m) toast(m); };
-  if(COMICREADY.kind==='ai') send('story-comic-share',{},fin);
+  var fin=function(ok,m){ b.disabled=false; if(!ok&&m) return toast(m);
+    if(m==='SHARED'){ b.classList.remove('pulse'); b.classList.add('shared'); }   // shared: it stops asking
+    };   // not shared yet: the button keeps pulsing
+  if(COMICREADY.kind==='ai') send('story-comic-share',{auto:auto?'1':''},fin);
   else send('story-image',{n:(window.__storyImgs||[]).length,style:COMICSTYLE},fin);
 }
 function closeStory(){ var ov=document.getElementById('storysheet'); if(ov) ov.hidden=true; document.body.style.overflow=''; }
@@ -7006,6 +7047,9 @@ document.addEventListener('click',function(e){
   if(t.dataset.act==='story-comic-share') return comicShare(t);
   if(t.dataset.act==='story-image') return comicPicker(t);
   if(t.dataset.cstyle) return storyImage(t,t.dataset.cstyle);
+  if(t.dataset.act==='comic-go') return comicDraw(true);
+  if(t.dataset.act==='comic-back'){ var cpb=document.querySelector('#storysheet [data-act="story-image"]'), cpo=document.getElementById('cpick'); if(cpo) cpo.remove(); if(cpb) comicPicker(cpb); return; }
+  if(t.dataset.cwidea!=null){ var cw=document.getElementById('cwish'), idea=CW_IDEAS[+t.dataset.cwidea]; if(cw&&idea){ var cur=cw.value.trim(); cw.value=cur?(cur.indexOf(idea[1])>=0?cur:cur+'. '+idea[1]):idea[1]; } return; }
   if(t.dataset.act==='mine-all'){ MINEVIEW='kudos'; renderMine(); var sb=document.querySelector('#msheet .msb'); if(sb) sb.scrollTop=0; return; }
   if(t.dataset.act==='mine-back'){ paKeep(); MINEVIEW='main'; renderMine(); return; }
   if(t.dataset.act==='post-open'){ MINEVIEW='post'; if(POST&&MINE&&POST.id===MINE.id&&!POST.err&&!POST.needKey) renderPost(); else postIdeas(); var pb=document.querySelector('#msheet .msb'); if(pb) pb.scrollTop=0; return; }

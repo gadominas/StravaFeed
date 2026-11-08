@@ -1,4 +1,6 @@
-// 11. 💥 Comic › ✨ Drawn by AI: the story's AI plans the pages, GPT Image draws them, two at a time.
+// 11. 💥 Comic › ✨ Drawn by AI: first your wishes for the comic (kept for next time, sent to the plan and to every page),
+//     then the story's AI plans the pages and GPT Image draws them, two at a time. The share sheet opens by itself when
+//     they're done, and 📤 Share comic keeps pulsing until they're shared.
 //     The comic factory covers the screen while it works and goes when it's done; at most 6 pages are drawn whatever the
 //     plan says; a page that can't be drawn is left out and counted ("1 page couldn't be drawn"), the rest are shared;
 //     without an OpenAI key the button is off and nothing is asked for.
@@ -22,14 +24,22 @@ module.exports = { n: 11, title: 'Comics drawn by AI', run: async (browser, H) =
     const emu = await opened(browser, { ai, openaiKey: true }, 'comic');
     check(await toComic(emu), '💥 Comic offers ✨ Drawn by AI');
     await tap(emu, '#cpick .cpai');
+    check(await until(() => has(emu, '#cpick #cwish'), 4000) && ai.calls.filter((c) => c.kind === 'comicPlan').length === 0, 'Drawn by AI first asks for your wishes, and draws nothing yet');
+    await tap(emu, '#cpick [data-cwidea="0"]');
+    await pg(emu).locator('#cpick #cwish').fill('Detective noir: who stole the kudos? Jonas solves it.');
+    await tap(emu, '#cpick [data-act="comic-go"]');
     check(await until(() => has(emu, '#cfab'), 4000), 'the comic factory covers the screen');
-    check(await until(() => has(emu, '#storysheet [data-act="story-comic-share"]'), 30000), '📤 Share comic appears when the pages are drawn');
-    check(/1 page couldn.t be drawn/.test(await text(emu, '#toast')), '“1 page couldn’t be drawn” shows with “Your comic is ready”');
+    check(await until(() => emu.shared.length > 0, 30000), 'the share sheet opens by itself when the pages are drawn');
+    check(await until(() => text(emu, '#storysheet .shnote').then((t) => /1 page couldn.t be drawn/.test(t)), 5000), '“1 page couldn’t be drawn” is said under 📤 Share comic');
     check(/\(3 pages\)/.test(await text(emu, '#storysheet [data-act="story-comic-share"]')), 'Share comic says 3 pages');
     check(await until(() => count0(emu), 5000), 'the factory goes away');
-    check(emu.shared.length === 0, 'nothing is shared before you tap');
+    check(await has(emu, '#storysheet [data-act="story-comic-share"].pulse'), 'not shared yet: 📤 Share comic pulses');
     await tap(emu, '#storysheet [data-act="story-comic-share"]');
-    check(await until(() => emu.shared.length > 0, 8000), 'Share comic opens the share sheet');
+    check(await until(() => emu.shared.length === 2, 8000), 'Share comic opens the share sheet again');
+    const planned = ai.of('comicPlan')[0] || {};
+    check(/WISHES FOR THIS COMIC[^]*Detective noir: who stole the kudos\? Jonas solves it\./.test(planned.system || ''), 'the plan follows your wishes');
+    check(ai.of('image').every((c) => /Detective noir: who stole the kudos/.test(c.prompt)), 'every page is drawn with your wishes');
+    check(await until(() => /Detective noir/.test((H.savedSettings(emu) || {}).comicWishes || ''), 4000), 'your wishes are kept for next time');
     const pics = (emu.shared[0] || []).filter((x) => x.type === 'image');
     check(pics.length === 3, `the 3 drawn pages are shared (${pics.length})`);
     check(ai.of('comicPlan').length === 1 && /A test day/.test(ai.of('comicPlan')[0].user), 'one plan request, with the story');
@@ -44,9 +54,9 @@ module.exports = { n: 11, title: 'Comics drawn by AI', run: async (browser, H) =
     const ai = fakeAI({ comicPlan: plan(9) });
     const emu = await opened(browser, { ai, openaiKey: true }, 'cap');
     await toComic(emu); await tap(emu, '#cpick .cpai');
-    await until(() => has(emu, '#storysheet [data-act="story-comic-share"]'), 40000);
-    await tap(emu, '#storysheet [data-act="story-comic-share"]');
-    await until(() => emu.shared.length > 0, 8000);
+    await until(() => has(emu, '#cpick [data-act="comic-go"]'), 4000); await tap(emu, '#cpick [data-act="comic-go"]');
+    await until(() => emu.shared.length > 0, 40000);
+    check(!/WISHES FOR THIS COMIC/.test((ai.of('comicPlan')[0] || {}).system || ''), 'with no wishes, the plan follows the story alone');
     const pages = new Set(ai.of('image').map((c) => (/Draw page (\d+) of (\d+)/.exec(c.prompt) || []).slice(1).join('/')));
     check(pages.size === 6 && [...pages].every((x) => /\/6$/.test(x)), `6 pages, each “of 6” (${[...pages].join(', ')})`);
     check(((emu.shared[0] || []).filter((x) => x.type === 'image')).length === 6, '6 pages shared');

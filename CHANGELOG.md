@@ -2,6 +2,18 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.45.0 (2026-11-08): Your comic, your plot
+
+- ✍️ **Your wishes first**: Before AI draws a comic, say how it should go: a detective story, a space mission, you as the villain.
+- 📤 **Straight to sharing**: When the comic is ready, the share sheet opens by itself.
+- ✨ **A Share button that asks**: Until you share, 📤 Share comic glows and its icon bobs, so it's easy to find.
+
+**Changes**
+
+- 💥 Comic › ✨ Drawn by AI first asks “How should the comic go?”, with one-tap ideas (detective noir, superhero team-up, space mission, everyone as animals, action trailer, sitcom, make me the villain) and a Draw the comic button; your wishes drive the plot and every page, on top of the story instructions, and are kept for next time
+- AI and template comics open the share sheet as soon as the pages are ready; 📤 Share comic then sits in its own full-width row above the story's buttons to share again
+- A page that couldn't be drawn is mentioned under 📤 Share comic, where nothing covers it
+
 ## 1.44.1 (2026-11-08): Sharper comment instructions
 
 - ✍️ **New default comment style**: Comment ideas notice big climbs, use every detail they get, and never call a walk a marathon.
