@@ -1,12 +1,15 @@
+<!-- header:start: repo-site/tools/header.js writes this block from docs/site/header.json -->
 <div align="center">
 
-<img src="docs/logo.svg" width="96" alt="Strava Daily Digest logo: a route from a teal start dot to a rose finish dot, with two faint digest lines">
+<a href="#install"><img src="docs/banner.png" width="100%" alt="Strava Daily Digest: Catch up. Cheer. Move on. Your Strava following feed goes in, one tidy page per day with one-tap kudos and comment ideas comes out. Two iPhone screens show the daily digest and the day as a comic, with a route from a teal start dot to a rose finish dot."></a>
 
-# Strava Daily Digest
+<h2>Your whole Strava feed, caught up in one page a day</h2>
 
-**Catch up. Cheer. Move on.**
+Log in to Strava. Open today's page. Cheer your friends.
 
-Your Strava following feed as one tidy page per day: grouped by athlete, with one-tap kudos, AI-assisted comments and the day told as a comic.<br>An iPhone and iPad app for [Scriptable](https://scriptable.app). One file, no server, no sign-up.
+<a href="#install"><img src="docs/button-install.png" height="48" alt="Install Strava Daily Digest free"></a>&nbsp;&nbsp;<a href="CHANGELOG.md"><img src="docs/button-whats-new.png" height="48" alt="See what's new in Strava Daily Digest"></a>
+
+<sub>Free · iPhone and iPad · Runs in the free Scriptable app · Needs a Strava account · AI is optional, with your own Claude or OpenAI key</sub>
 
 [![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgadominas%2FStravaFeed%2Fmain%2Freleases.json&query=%24.releases%5B0%5D.version&label=version&color=FB7185&labelColor=0E1116&style=flat-square)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-171B22?style=flat-square&labelColor=0E1116)](https://apps.apple.com/app/scriptable/id1405459188)
@@ -16,6 +19,7 @@ Your Strava following feed as one tidy page per day: grouped by athlete, with on
 [![License](https://img.shields.io/badge/license-MIT-171B22?style=flat-square&labelColor=0E1116)](LICENSE)
 
 </div>
+<!-- header:end -->
 
 <p align="center">
   <img src="docs/screenshots/01-daily-digest.png" width="31%" alt="The digest for today: a header with the day switcher and a kudos-to-all button, your own activities on top, then the first athlete waiting for kudos with stats, heart rate, weather, PRs and photos">

@@ -1,0 +1,32 @@
+{
+  "name": "Strava Daily Digest",
+  "accent": "#FB7185",
+  "headline": [
+    "Catch up.",
+    "Cheer.",
+    "Move on."
+  ],
+  "sentence": "Your Strava following feed goes in. One tidy page per day comes out, with one-tap kudos and comment ideas.",
+  "shots": [
+    {
+      "card": "03-story-comic.png",
+      "y": 24
+    },
+    {
+      "card": "01-daily-digest.png",
+      "y": 64
+    }
+  ],
+  "motif": {
+    "x": -30,
+    "y": 0,
+    "w": 630,
+    "rotate": 0,
+    "front": false,
+    "svg": "<svg viewBox='0 0 630 640' xmlns='http://www.w3.org/2000/svg'><path d='M44 606 C200 640 420 620 560 560 C600 540 604 470 596 380 C588 250 600 140 584 62' fill='none' stroke='#F6F7F9' stroke-opacity='.4' stroke-width='9' stroke-linecap='round' stroke-dasharray='1 20'/><circle cx='44' cy='606' r='16' fill='#2DD4BF'/><circle cx='584' cy='56' r='20' fill='{accent}'/></svg>"
+  },
+  "benefit": "Your whole Strava feed, caught up in one page a day",
+  "steps": "Log in to Strava. Open today's page. Cheer your friends.",
+  "facts": "Free · iPhone and iPad · Runs in the free Scriptable app · Needs a Strava account · AI is optional, with your own Claude or OpenAI key",
+  "bannerAlt": "Strava Daily Digest: Catch up. Cheer. Move on. Your Strava following feed goes in, one tidy page per day with one-tap kudos and comment ideas comes out. Two iPhone screens show the daily digest and the day as a comic, with a route from a teal start dot to a rose finish dot."
+}
