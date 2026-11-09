@@ -330,12 +330,20 @@ const STORY = {
     { text: 'Rui ran ten in the drizzle and also has your kudos. Jonas, Tomas, Ada, Priya, Marta and Ines are still waiting for theirs. The relay ends here, on your thumb.', photos: [] },
   ],
 };
+// ✍️ Posting assistant: ideas for your own Morning Run (9100901), and the clean-stats design for its photo
+const POST_IDEAS = {
+  titles: ['River path, sub 5', 'Old Town at first light', 'Eight before breakfast', 'Bridge, river, repeat', 'Morning miles, happy legs'],
+  descriptions: ['8.1 km along the river before the town woke up. Kept it just under 5:00 /km.', 'Out over the bridge and back along the water. Clear and 4 °C, the best kind of cold.', 'Easy start, steady finish. The coffee tasted earned.'],
+};
+const STATS_DESIGN = { position: 'bottom-left', layout: 'stack', font: 'condensed', stats: [{ label: 'DIST', value: '8.1 km' }, { label: 'PACE', value: '4:57 /km' }, { label: 'TIME', value: '40:05' }] };
 function aiReply(req) {
   const body = req.json() || {};
   const sys = String(body.system || '');
   let text = 'OK';
   if (/list what is in them/.test(sys)) text = JSON.stringify(SEEN);
   else if (/You write one story/.test(sys)) text = JSON.stringify(STORY);
+  else if (/You write the title and the description for the user's own Strava activity/.test(sys)) text = JSON.stringify(POST_IDEAS);
+  else if (/You design how a sports activity's statistics are drawn/.test(sys)) text = JSON.stringify(STATS_DESIGN);
   else if (/Strava activity/.test(sys)) {
     let facts = {}; try { facts = JSON.parse(body.messages[0].content); } catch (e) {}
     const name = facts.friend_first_name || 'Marta';
@@ -461,7 +469,10 @@ module.exports = {
       keychain: {
         'strava-digest-athlete-id': ME,                               // remembered athlete: straight to the feed, no login page
         STRAVA_DIGEST_ANTHROPIC_KEY: 'sk-ant-demo-0000000000001234',  // fake
+        ...(shot.openaiKey ? { STRAVA_DIGEST_OPENAI_KEY: 'sk-demo-openai-0000000000005678' } : {}),   // fake: Drawn by AI needs one
       },
+      // a photo from Photos for the posting assistant (the tests' lake, invented for them)
+      photos: shot.photos ? { library: [{ file: path.join(ROOT, 'tests', 'fixtures', 'lake.jpg') }], camera: [] } : undefined,
       routes: [
         // the update check and the widget's logo tile
         { match: /raw\.githubusercontent\.com\/gadominas\/StravaFeed\/main\/releases\.json/, respond: { json: shot.script ? RELEASES_SHOWN : RELEASES } },
@@ -544,5 +555,28 @@ module.exports = {
     { id: '13-update-offer', label: 'Update offer', caption: 'A new version shows its three best features; Later waits two days.', script: previousScript(), settle: 3600 },
     { id: '14-dark-mode', label: 'Dark mode', caption: 'The one-line Tiny layout: country, weather and 💬 on every line.', dark: true, density: 'tiny' },
     { id: '15-kudos-widget', label: 'Kudos widget', caption: 'Who is still waiting for your kudos today, on the Home Screen.', widget: 'medium' },
+    { id: '16-posting-assistant', label: 'Posting assistant', caption: 'Title and description ideas for your own run, saved to Strava.',
+      run: async (h) => {
+        await h.tap('#mine [data-mine="9100901"]', { after: 1500 });
+        await h.tap('#msheet [data-act="post-open"]', { after: 3500 });
+        await h.tap('#msheet [data-ptitle="0"]', { after: 400 });
+        await h.eval(() => { if (document.activeElement) document.activeElement.blur(); });
+      } },
+    { id: '17-clean-stats', label: 'Stats on your photo', caption: 'Your photo and the same photo with your run’s stats, side by side.', photos: true,
+      run: async (h) => {
+        await h.tap('#mine [data-mine="9100901"]', { after: 1500 });
+        await h.tap('#msheet [data-act="photo-open"]', { after: 900 });
+        await h.tap('#msheet [data-act="photo-pick"][data-src="library"]', { after: 1800 });
+        await h.tap('#msheet .pago', { after: 4500 });
+        await h.eval(() => { const c = document.querySelector('#msheet .pacmp'); if (c) c.scrollIntoView({ block: 'center' }); });
+      } },
+    { id: '18-comic-wishes', label: 'Your comic, your plot', caption: 'Say what the AI-drawn comic should be about before a page is drawn.', openaiKey: true,
+      run: async (h) => {
+        await h.tap('[data-act="story"]', { after: 1800 });
+        await h.tap('#storysheet [data-act="story-image"]', { after: 700 });
+        await h.tap('#cpick .cpai', { after: 700 });
+        await h.tap('#cpick [data-cwidea="0"]', { after: 400 });
+        await h.eval(() => { if (document.activeElement) document.activeElement.blur(); });
+      } },
   ],
 };
