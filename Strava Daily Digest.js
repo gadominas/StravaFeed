@@ -153,7 +153,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.45.0';
+const VERSION = '1.46.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -229,7 +229,7 @@ async function main() {
   let viewing = false, savedScroll = 0;
   let storyDay = null;
   let lastStory = null;           // the story on screen, for ✨ Drawn by AI
-  let postPhoto = null;           // ✍️ Posting assistant: the photo picked for Stats on a photo, small, for the AI to look at
+  let postPhotos = null;          // ✍️ Posting assistant: { id, list: [{ small, big, w, h }] }, up to 4 photos for one poster
   // everything the activity page knows about one of your activities (telemetry, weather, Strava's insights), read once
   const ownDetails = async (a) => {
     if (!details.has(a.id) || !details.get(a.id).tele) {
@@ -607,7 +607,7 @@ async function main() {
         for (const u of urls.slice(0, 9)) { try { out.photos[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 900); } catch (e) { console.warn('Story image photo: ' + e.message); } }
         for (const u of avs.slice(0, 12)) { try { out.avatars[u] = 'data:image/jpeg;base64,' + await shrinkImage(u, 200); } catch (e) { console.warn('Story image avatar: ' + e.message); } }
         ok = true; msg = JSON.stringify(out);
-      } else if (head === 'post-ideas' || head === 'post-save' || head === 'post-photo' || head === 'post-design' || head === 'post-redraw' || head === 'post-share') {
+      } else if (head === 'post-ideas' || head === 'post-save' || head === 'post-photo' || head === 'post-photo-remove' || head === 'post-design' || head === 'post-redraw' || head === 'post-share') {
         // ✍️ Posting assistant, on your own activity
         const a = feed && feed.mineGet(String(p.id));
         if (!a) throw new Error('Activity not found. Pull to refresh and try again.');
@@ -662,22 +662,31 @@ async function main() {
           else {
             const big = fitImage(img, 2048), small = fitImage(img, 640);
             const mid = fitImage(img, 1536);
-            postPhoto = { id: a.id, small: Data.fromJPEG(small).toBase64String(), big: Data.fromJPEG(mid).toBase64String(), w: mid.size.width, h: mid.size.height };
-            ok = true; msg = JSON.stringify({ img: 'data:image/jpeg;base64,' + Data.fromJPEG(big).toBase64String(), w: big.size.width, h: big.size.height });
+            const one = { small: Data.fromJPEG(small).toBase64String(), big: Data.fromJPEG(mid).toBase64String(), w: mid.size.width, h: mid.size.height };
+            // one poster, up to 4 photos: "＋ Add" keeps the ones picked before (keep=1), a new first photo starts over
+            if (p.keep === '1' && postPhotos && postPhotos.id === a.id) postPhotos.list = postPhotos.list.concat(one).slice(0, 4);
+            else postPhotos = { id: a.id, list: [one] };
+            ok = true; msg = JSON.stringify({ img: 'data:image/jpeg;base64,' + Data.fromJPEG(big).toBase64String(), w: big.size.width, h: big.size.height, count: postPhotos.list.length });
           }
+        } else if (head === 'post-photo-remove') {
+          if (postPhotos && postPhotos.id === a.id) postPhotos.list.splice(Math.max(0, +p.i || 0), 1);
+          ok = true; msg = String(postPhotos ? postPhotos.list.length : 0);
         } else if (head === 'post-design') {
           await ownDetails(a);
+          // several photos: the AI designs on the collage the page made of them (window.__collageSmall)
+          let look = postPhotos && postPhotos.id === a.id && postPhotos.list.length ? postPhotos.list[0].small : null;
+          if (postPhotos && postPhotos.list.length > 1) { try { const c = await ui.evaluateJavaScript('window.__collageSmall || ""'); if (c) look = String(c); } catch (e) {} }
           const stats = overlayStats(a), route = (a.route && a.route.d) || (a.poly ? (routeShape(a.poly) || {}).d : null) || null;
-          const spec = await aiOverlay(stats, route, postPhoto && postPhoto.id === a.id ? postPhoto.small : null, String(p.tweak || '').slice(0, 300));
+          const spec = await aiOverlay(stats, route, look, String(p.tweak || '').slice(0, 300));
           ok = true; msg = JSON.stringify({ spec, route, stats });
           track('overlay_designed', { provider: spec.by ? aiSettings.aiProvider : 'none', tweak: !!p.tweak, stats: spec.stats.length, layout: spec.layout || '' });
         } else if (head === 'post-redraw') {
-          if (!postPhoto || postPhoto.id !== a.id) throw new Error('Pick a photo first.');
+          if (!postPhotos || postPhotos.id !== a.id || !postPhotos.list.length) throw new Error('Pick a photo first.');
           if (!keyFor('openai')) msg = 'NEED_OPENAI';
           else {
             const say = (step, data) => js(`window.__photoProgress && window.__photoProgress(${JSON.stringify(step)}, ${JSON.stringify(data || {})})`);
             await say('reading'); await ownDetails(a);
-            const r = await aiRedesign(a, overlayStats(a), postPhoto, String(p.tweak || '').slice(0, 300), say);
+            const r = await aiRedesign(a, overlayStats(a), postPhotos.list, String(p.tweak || '').slice(0, 300), say);
             if (r.needKey) msg = 'NEED_OPENAI';
             else { ok = true; msg = JSON.stringify(r); track('overlay_redrawn', { model: r.model, planned: !!r.by, tweak: !!p.tweak, stats: r.stats.length }); }
           }
@@ -738,7 +747,7 @@ async function main() {
     if (Keychain.contains(KC_ATHLETE)) Keychain.remove(KC_ATHLETE);
     if (settings.cfg && settings.cfg.athleteId) { delete settings.cfg.athleteId; saveSettings(); }
     try { const p = wPath('widget.json'); if (wfm.fileExists(p)) wfm.remove(p); } catch (e) {}
-    feed = null; details.clear(); storyDay = null; lastStory = null; postPhoto = null; styleRun = null;
+    feed = null; details.clear(); storyDay = null; lastStory = null; postPhotos = null; styleRun = null;
     track('logged_out', { signed_out: !!r.loggedOut });
     if (!r.loggedOut) {
       // Strava kept the login: let the person end it on Strava's own page; the app notices and moves on
@@ -1516,8 +1525,9 @@ function defaultOverlay(stats, route) {
   const pick = [/dist/i, /moving|elapsed|^time/i, /pace|speed/i, /elev/i].map(rx => stats.find(s => rx.test(s.label))).filter(Boolean);
   return { position: 'bottom-left', layout: pick.length > 3 ? 'grid' : 'stack', font: 'condensed', weight: 'bold', uppercase: true, text: '#ffffff', label: '#ffffff', accent: '#fc4c02', panel: null, shadow: true, scale: 1, title: null, route: !!route, route_color: '#fc4c02', stats: (pick.length ? pick : stats).slice(0, 4) };
 }
-const REDESIGN_PROMPT = (rules, tweak) => [
+const REDESIGN_PROMPT = (rules, tweak, n = 1) => [
   'You are the art director of a Strava post. An image model restyles the user\'s attached photo into a finished poster of the activity, working from your prompt alone. You write that prompt.',
+  n > 1 ? `The user attached ${n} photos for ONE poster. Decide how they come together (panels, a collage, or one scene built from them) and describe it, so every photo is clearly part of the poster.` : '',
   rules ? `Follow the user's instructions below. They decide the look, the mood and what goes on the picture, and take priority over every default here.\nUSER INSTRUCTIONS:\n${rules}\nEND OF USER INSTRUCTIONS.` : '',
   tweak ? `For this version only, on top of the instructions: ${tweak}` : '',
   'Look at the photo and read all of the activity data: sport, title, description, every stat, the telemetry, weather, place, date and start time, PRs, achievements and Strava\'s insights. Find what makes this activity special and build the whole design around it.',
@@ -1529,7 +1539,9 @@ const REDESIGN_PROMPT = (rules, tweak) => [
 
 // 🎨 AI redesign: the text model art-directs from your instructions, the photo and every number of the activity;
 // OpenAI's GPT Image model then repaints the photo as a finished poster. progress(step): 'directing', 'painting'
-async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
+async function aiRedesign(a, stats, photos, tweak, progress = async () => {}) {
+  photos = [].concat(photos || []).filter(Boolean).slice(0, 4);
+  const many = photos.length > 1, photo = photos[0];
   if (!keyFor('openai')) return { needKey: true };
   const rules = String(settings.overlayRules || '').trim();
   const facts = activityFacts(a);
@@ -1539,7 +1551,8 @@ async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
   if (aiKey()) {
     await progress('directing');
     try {
-      const text = await aiCall(REDESIGN_PROMPT(rules, tweak), JSON.stringify(data), 1800, 'overlay', aiSettings.aiProvider, [{ label: 'The photo', b64: photo.small }]);
+      const text = await aiCall(REDESIGN_PROMPT(rules, tweak, photos.length), JSON.stringify(data), 1800, 'overlay', aiSettings.aiProvider,
+        photos.map((x, i) => ({ label: many ? `Photo ${i + 1} of ${photos.length}` : 'The photo', b64: x.small })));
       plan = parseJSON(repairJSON(text));
       if (!plan || !String(plan.prompt || '').trim()) plan = null;
     } catch (e) { console.warn('Photo art direction: ' + e.message); plan = null; }
@@ -1554,9 +1567,10 @@ async function aiRedesign(a, stats, photo, tweak, progress = async () => {}) {
     `Letter a short headline: "${a.name || a.type || 'Today'}", and these stats, grouped, with the first one as the hero number.`, exact,
     'Keep text off faces. Crisp, correctly spelled lettering, no other text, no logos or brand names, no watermark.',
   ].filter(Boolean).join('\n\n');
-  const size = photo.h / photo.w > 1.15 ? '1024x1536' : photo.w / photo.h > 1.15 ? '1536x1024' : '1024x1024';
+  const size = many ? '1024x1536' : photo.h / photo.w > 1.15 ? '1024x1536' : photo.w / photo.h > 1.15 ? '1536x1024' : '1024x1024';   // several photos: a portrait poster
   await progress('painting', { model: imageModel(), size, headline: (plan && plan.headline) || '', dist: (shown.find(s => /dist/i.test(s.label)) || {}).value || '' });
-  const out = await drawComicPage(prompt, [{ b64: photo.big }], { size, quality: 'high', fidelity: 'high', feature: 'overlay', keepRefs: true });
+  const together = many ? `\n\n${photos.length} photos are attached (Image 1 to Image ${photos.length}). Make ONE poster from all of them: arrange them as panels or a collage, or merge them into one scene, so every photo is clearly in it and every person and place stays real.` : '';
+  const out = await drawComicPage(prompt + together, photos.map((x) => ({ b64: x.big })), { size, quality: 'high', fidelity: 'high', feature: 'overlay', keepRefs: true });
   const img = Image.fromData(Data.fromBase64String(out.b64));
   return { img: 'data:image/jpeg;base64,' + Data.fromJPEG(img).toBase64String(), model: out.model, by: plan ? PROVIDERS[aiSettings.aiProvider] : '', headline: (plan && plan.headline) || '', stats: shown };
 }
@@ -4559,6 +4573,17 @@ textarea.pain{resize:vertical;line-height:1.4}
 .pvimg img{max-width:100%;max-height:100%;object-fit:contain;animation:pvin .25s ease-out}
 @keyframes pvin{from{opacity:.4;transform:scale(.98)}}
 .pvbot{display:flex;align-items:center;justify-content:space-between;gap:12px;color:rgba(255,255,255,.6);font-size:13px}
+.palist{display:flex;flex-direction:column;gap:6px}
+.pathumbs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px}
+.path{position:relative;flex:none;width:72px;height:72px;border-radius:12px;overflow:hidden;border:2px solid var(--accent)}
+.path img{width:100%;height:100%;object-fit:cover;display:block}
+.parm{position:absolute;top:3px;right:3px;width:22px;height:22px;padding:0;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:22px}
+.paadd{position:relative;flex:none;width:72px;height:72px;padding:0;border-radius:12px;border:2px dashed var(--line);background:var(--soft);color:var(--fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.paadd b{font-size:22px;line-height:1}
+.paadd small{font-size:11px;color:var(--mut)}
+.paadd.pact{overflow:hidden;border-style:solid}
+.paadd.pact img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.75}
+.paadd.pact i{position:relative;font-style:normal;font-size:22px;font-weight:800;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.6)}
 .paorig{position:absolute;left:10px;top:10px;padding:4px 9px;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700}
 .paask{display:flex;flex-direction:column;gap:8px}
 .paask textarea.pain{font-size:15px}
@@ -6295,7 +6320,8 @@ function renderPhoto(){
   } else {
     if(r&&r.out&&!P.busy) html+=paCompare(P,r,ai);   // before and after, side by side, whole pictures; tap for full screen
     else html+='<div class="paprev'+(P.busy?' working':'')+(!P.busy?' small':'')+'">'+(P.src?'<button class="paview" data-act="photo-view" data-which="orig" aria-label="See the original full screen"><img src="'+P.src+'" alt="Your photo"></button>':'')+
-      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(!P.busy?'<span class="paorig">Original · '+(ai?'not redesigned yet':'no stats yet')+'</span><span class="paexp" aria-hidden="true">⤢</span>':'')+'</div>';
+      (P.busy?'<div class="pabusy"><span class="paspin"></span><b>'+escH(P.busy)+'</b></div>':'')+(!P.busy?'<span class="paorig">'+(P.list&&P.list.length>1?'Your '+P.list.length+' photos':'Original')+' · '+(ai?'not redesigned yet':'no stats yet')+'</span><span class="paexp" aria-hidden="true">⤢</span>':'')+'</div>';
+    if(P.list&&P.list.length) html+=paStrip(P);   // up to 4 photos, one poster
     if(P.err) html+='<p class="mnote">'+escH(P.err)+'</p>';
     if(r&&r.note) html+='<p class="mnote">'+r.note+'</p>';
     if(P.src){   // both modes wait for your wishes and a tap; nothing is made until then
@@ -6308,17 +6334,61 @@ function renderPhoto(){
   }
   b.innerHTML=html;
 }
-function photoPick(src,i){
-  var id=MINE.id; PHOTO={id:id,busy:'Opening the photo…',res:{}}; renderPhoto();
-  send('post-photo',{id:id,src:src,i:i||0},function(ok,msg){
-    if(!PHOTO||PHOTO.id!==id) return;
-    if(!ok){ PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
+// One poster from up to 4 photos: the photos picked, and a collage of them (what Clean stats draws on, and the "original")
+var PA_MAX=4;
+function paCollage(list){
+  var W=1080,H=1350,g=10,c=document.createElement('canvas'); c.width=W; c.height=H;
+  var x=c.getContext('2d'); x.fillStyle='#111'; x.fillRect(0,0,W,H);
+  var n=list.length, cells, tall=function(p){ return p.im.naturalHeight>p.im.naturalWidth; };
+  if(n===2) cells=list.every(tall)?[[0,0,(W-g)/2,H],[(W+g)/2,0,(W-g)/2,H]]:[[0,0,W,(H-g)/2],[0,(H+g)/2,W,(H-g)/2]];
+  else if(n===3){ var th=Math.round(H*0.58); cells=[[0,0,W,th],[0,th+g,(W-g)/2,H-th-g],[(W+g)/2,th+g,(W-g)/2,H-th-g]]; }
+  else cells=[[0,0,(W-g)/2,(H-g)/2],[(W+g)/2,0,(W-g)/2,(H-g)/2],[0,(H+g)/2,(W-g)/2,(H-g)/2],[(W+g)/2,(H+g)/2,(W-g)/2,(H-g)/2]];
+  list.slice(0,4).forEach(function(p,k){ var r=cells[k], iw=p.im.naturalWidth, ih=p.im.naturalHeight, s=Math.max(r[2]/iw,r[3]/ih), sw=r[2]/s, sh=r[3]/s;
+    x.drawImage(p.im,(iw-sw)/2,(ih-sh)/2,sw,sh,r[0],r[1],r[2],r[3]); });   // each photo fills its panel, centred
+  return c.toDataURL('image/jpeg',0.92);
+}
+function paBuild(P,after){
+  P.res={}; P.err='';
+  if(P.list.length===1){ P.src=P.list[0].src; P.im=P.list[0].im; window.__collageSmall=null; return after(); }
+  var u=paCollage(P.list), im=new Image();
+  im.onload=function(){
+    P.src=u; P.im=im;
+    var c=document.createElement('canvas'), k=640/Math.max(im.naturalWidth,im.naturalHeight); c.width=Math.round(im.naturalWidth*k); c.height=Math.round(im.naturalHeight*k);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height); window.__collageSmall=c.toDataURL('image/jpeg',0.85).split(',')[1];   // what the AI looks at to place the stats
+    after();
+  };
+  im.src=u;
+}
+function paStrip(P){
+  var n=P.list.length;
+  var h='<div class="palist"><div class="msect">🖼 <b>'+(n>1?'Your '+n+' photos, one poster':'More photos for one poster')+'</b> <small class="muted">'+n+' of '+PA_MAX+'</small></div><div class="pathumbs">'+
+    P.list.map(function(p,k){ return '<span class="path"><img src="'+p.src+'" alt="Photo '+(k+1)+'"><button class="parm" data-act="photo-remove" data-i="'+k+'" aria-label="Remove photo '+(k+1)+'"'+(P.busy?' disabled':'')+'>✕</button></span>'; }).join('');
+  if(n<PA_MAX&&!P.busy) h+='<button class="paadd" data-act="photo-pick" data-src="library" data-keep="1" aria-label="Add a photo from Photos"><b>＋</b><small>Photos</small></button>'+
+    '<button class="paadd" data-act="photo-pick" data-src="camera" data-keep="1" aria-label="Add a photo from the camera"><b>＋</b><small>Camera</small></button>'+
+    (MINE.photos||[]).map(function(u,i){ return '<button class="paadd pact" data-act="photo-pick" data-src="activity" data-i="'+i+'" data-keep="1" aria-label="Add activity photo '+(i+1)+'"><img src="'+escH(u)+'" alt=""><i>＋</i></button>'; }).join('');
+  return h+'</div></div>';
+}
+function photoPick(src,i,keep){
+  var id=MINE.id, P=keep&&PHOTO&&PHOTO.id===id&&PHOTO.list&&PHOTO.list.length?PHOTO:null;
+  if(P){ if(P.busy||P.list.length>=PA_MAX) return; P.busy='Adding the photo…'; }
+  else PHOTO=P={id:id,busy:'Opening the photo…',res:{},list:[]};
+  renderPhoto();
+  send('post-photo',{id:id,src:src,i:i||0,keep:P.list.length?'1':''},function(ok,msg){
+    if(PHOTO!==P) return;
+    if(!ok){ P.busy=''; if(!P.list.length) PHOTO=null; if(msg&&msg!=='CANCELLED') toast(msg); return renderPhoto(); }
     var d={}; try{ d=JSON.parse(msg); }catch(e){}
-    var im=new Image(); im.onload=function(){ if(!PHOTO||PHOTO.id!==id) return; PHOTO.im=im; PHOTO.src=d.img; PHOTO.busy='';
-      renderPhoto(); var ta=document.getElementById('phtweak'); if(ta) ta.scrollIntoView({block:'center',behavior:'smooth'}); };   // waits for your wishes and a tap, in both modes
-    im.onerror=function(){ PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
+    var im=new Image();
+    im.onload=function(){ if(PHOTO!==P) return; P.list.push({src:d.img,im:im});
+      paBuild(P,function(){ P.busy=''; renderPhoto(); var ta=document.getElementById('phtweak'); if(ta&&P.list.length===1) ta.scrollIntoView({block:'center',behavior:'smooth'}); }); };   // waits for your wishes and a tap, in both modes
+    im.onerror=function(){ P.busy=''; if(!P.list.length) PHOTO=null; toast('Couldn’t open that photo'); renderPhoto(); };
     im.src=d.img;
   });
+}
+function photoRemove(k){
+  var P=PHOTO; if(!P||P.busy||!P.list||!P.list[k]) return;
+  P.list.splice(k,1); send('post-photo-remove',{id:P.id,i:k});
+  if(!P.list.length){ PHOTO=null; return renderPhoto(); }
+  paBuild(P,renderPhoto);
 }
 // ── The redesign studio: the photo goes through comic effects while the AI works, with a running commentary ──
 var PA_FX=['sketch','sepia','pop','scan','glitch','halftone','neon','zoom'];
@@ -7059,7 +7129,8 @@ document.addEventListener('click',function(e){
   if(t.dataset.ptitle!=null){ paKeep(); if(POST){ POST.title=(POST.titles||[])[+t.dataset.ptitle]||POST.title; renderPost(); } return; }
   if(t.dataset.pdesc!=null){ paKeep(); if(POST){ POST.desc=(POST.descriptions||[])[+t.dataset.pdesc]||POST.desc; renderPost(); } return; }
   if(t.dataset.act==='photo-open'){ MINEVIEW='photo'; if(PHOTO&&MINE&&PHOTO.id!==MINE.id) PHOTO=null; renderPhoto(); var qb=document.querySelector('#msheet .msb'); if(qb) qb.scrollTop=0; return; }
-  if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0);
+  if(t.dataset.act==='photo-pick') return photoPick(t.dataset.src,+t.dataset.i||0,t.dataset.keep==='1');
+  if(t.dataset.act==='photo-remove') return photoRemove(+t.dataset.i||0);
   if(t.dataset.act==='photo-again') return photoRun();
   if(t.dataset.act==='photo-mode'){ if(PHOTO&&PHOTO.busy) return; paKeep(); PHOTOMODE=t.dataset.mode; return renderPhoto(); }   // nothing is made until you tap the button
   if(t.dataset.phidea!=null){ paKeep(); var idea=(photoMode()==='ai'?PA_IDEAS:PA_IDEAS_CLEAN)[+t.dataset.phidea]; if(PHOTO&&idea){ PHOTO.tw=PHOTO.tw||{}; var md=photoMode(), cur=String(PHOTO.tw[md]||'').trim(); PHOTO.tw[md]=cur?(cur.indexOf(idea[1])>=0?cur:cur+', '+idea[1].toLowerCase()):idea[1]; renderPhoto(); } return; }

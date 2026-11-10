@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.46.0 (2026-11-09): Several photos, one poster
+
+- 🖼 **Up to 4 photos**: Add more photos with ＋ and they become one poster of your activity.
+- 🎨 **AI makes one poster**: 🎨 AI redesign gets every photo and arranges them as panels, a collage or one scene.
+- 📊 **Clean stats on a collage**: 📊 Clean stats lays your photos out as a 1080 × 1350 collage and puts the numbers on it.
+
+**Changes**
+
+- 📸 Photo with your stats: after the first photo, a strip shows the poster's photos with ✕ to take one out, and ＋ Photos, ＋ Camera or the activity's own photos to add more, up to 4
+- 🎨 AI redesign: the art director looks at all the photos and decides how they come together; all of them are uploaded to GPT Image for one portrait poster
+- 📊 Clean stats: 2 photos side by side or stacked, 3 as one big and two small, 4 in a grid, each filling its panel; the AI places the stats looking at that collage
+- Adding or removing photos starts nothing: the poster is made when you tap the button
+
 ## 1.45.0 (2026-11-08): Your comic, your plot
 
 - ✍️ **Your wishes first**: Before AI draws a comic, say how it should go: a detective story, a space mission, you as the villain.

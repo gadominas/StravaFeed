@@ -27,7 +27,7 @@ against a pretend strava.com whose session can end and start again, and checks w
    visibility and commute back unchanged with the form's token; without a form, or when the form is refused, the inline
    edit is used; when Strava refuses both nothing is claimed as saved and the text is copied with **Open**. Only your
    activity is touched. Without an AI key: a note and no request.
-10. **Photos** (`10-photos.js`): Photos and a cancelled camera; nothing is made when a photo is picked or the mode changes;
+10. **Photos** (`10-photos.js`): several photos (up to 4, ✕ and ＋) make one poster, a 1080 × 1350 collage for Clean stats and all of them uploaded for the redesign; Photos and a cancelled camera; nothing is made when a photo is picked or the mode changes;
     📊 Clean stats sends your wishes, the stats and the photo, shows before and after, and shares the picture at its own
     size; 🎨 AI redesign sends your wishes to the art director and uploads your photo as JPEG to GPT Image (edits,
     1024×1536, high quality, high input fidelity, gpt-image-2, the numbers to letter listed); the paid retries are capped

@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.46.0",
+      "date": "2026-11-09",
+      "title": "Several photos, one poster",
+      "highlights": [
+        {
+          "icon": "🖼",
+          "title": "Up to 4 photos",
+          "text": "Add more photos with ＋ and they become one poster of your activity."
+        },
+        {
+          "icon": "🎨",
+          "title": "AI makes one poster",
+          "text": "🎨 AI redesign gets every photo and arranges them as panels, a collage or one scene."
+        },
+        {
+          "icon": "📊",
+          "title": "Clean stats on a collage",
+          "text": "📊 Clean stats lays your photos out as a 1080 × 1350 collage and puts the numbers on it."
+        }
+      ],
+      "changes": [
+        "📸 Photo with your stats: after the first photo, a strip shows the poster's photos with ✕ to take one out, and ＋ Photos, ＋ Camera or the activity's own photos to add more, up to 4",
+        "🎨 AI redesign: the art director looks at all the photos and decides how they come together; all of them are uploaded to GPT Image for one portrait poster",
+        "📊 Clean stats: 2 photos side by side or stacked, 3 as one big and two small, 4 in a grid, each filling its panel; the AI places the stats looking at that collage",
+        "Adding or removing photos starts nothing: the poster is made when you tap the button"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.45.0",
       "date": "2026-11-08",
       "title": "Your comic, your plot",

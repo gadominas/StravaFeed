@@ -2,7 +2,7 @@
 //     Nothing is made until you tap: not when a photo is picked, not when the mode changes. 📊 Clean stats sends your wishes
 //     and the stats to the AI and draws the result; 🎨 AI redesign sends your wishes to the art director and your photo
 //     to GPT Image (edits, high quality, input fidelity, portrait size); before and after show side by side; Save or share
-//     hands over the picture. The paid image requests are capped: an unknown parameter or model is retried once, a refused
+//     hands over the picture. Up to 4 photos make one poster: a collage for Clean stats, all of them uploaded for the redesign. The paid image requests are capped: an unknown parameter or model is retried once, a refused
 //     photo isn't retried without the photo, and every error shows in the sheet.
 'use strict';
 const { fakeAI } = require('../lib/fake-ai');
@@ -73,6 +73,46 @@ module.exports = { n: 10, title: 'Photos: picking, uploads and the image model',
     check(img[0] && img[0].size === '1024x1536' && img[0].quality === 'high' && img[0].fidelity === 'high' && img[0].model === 'gpt-image-2', 'portrait size, high quality, high input fidelity, gpt-image-2');
     check(/Numbers to letter, exactly as written/.test(img[0] && img[0].prompt), 'the prompt lists the numbers to letter exactly');
     check(await shareOne(emu), 'Save or share hands over the redesigned picture');
+    noErrors(emu); await emu.close();
+  }
+  {
+    console.log('  · several photos, one poster: 📊 Clean stats');
+    const ai = fakeAI();
+    const emu = await opened(browser, { ai, photos: { library: [photo(), photo(), photo(), photo(), photo()] } }, 'several, clean');
+    await openPhoto(emu); await pick(emu, 'library');
+    await until(() => has(emu, '#msheet .palist'), 8000);
+    check(await has(emu, '#msheet .paadd[data-keep="1"][data-src="library"]'), 'after the first photo, ＋ adds more');
+    await tap(emu, '#msheet .paadd[data-src="library"]');
+    check(await until(() => pg(emu).locator('#msheet .path').count().then((n) => n === 2), 8000), 'the second photo joins the strip');
+    check(/Your 2 photos/.test(await text(emu, '#msheet .paorig')), 'the preview is the collage of both');
+    for (let i = 0; i < 3; i++) { if (await has(emu, '#msheet .paadd[data-src="library"]')) { await tap(emu, '#msheet .paadd[data-src="library"]'); await sleep(900); } }
+    check(await pg(emu).locator('#msheet .path').count() === 4 && !(await has(emu, '#msheet .paadd')), 'at most 4 photos: ＋ goes away');
+    await tap(emu, '#msheet .parm[data-i="3"]'); await tap(emu, '#msheet .parm[data-i="2"]');
+    check(await until(() => pg(emu).locator('#msheet .path').count().then((n) => n === 2), 4000), '✕ takes a photo out');
+    await go(emu);
+    check(await until(() => has(emu, '#msheet .pacmp'), 10000), 'Draw my stats draws on the collage');
+    const o = ai.of('overlay');
+    check(o.length === 1 && o[0].images === 1, 'the design request looks at the collage');
+    check(await shareOne(emu), 'Save or share hands over the poster');
+    const img = emu.shared[emu.shared.length - 1][0];
+    check(img.size.width === 1080 && img.size.height === 1350, `one 1080 × 1350 poster (${img.size.width} × ${img.size.height})`);
+    noErrors(emu); await emu.close();
+  }
+  {
+    console.log('  · several photos, one poster: 🎨 AI redesign');
+    const ai = fakeAI();
+    const emu = await opened(browser, { ai, openaiKey: true, photos: { library: [photo(), photo(), photo()] } }, 'several, AI');
+    await openPhoto(emu); await pick(emu, 'library'); await until(() => has(emu, '#msheet .paadd'), 8000);
+    await tap(emu, '#msheet .paadd[data-src="library"]'); await until(() => pg(emu).locator('#msheet .path').count().then((n) => n === 2), 8000);
+    await tap(emu, '#msheet .paadd[data-src="library"]'); await until(() => pg(emu).locator('#msheet .path').count().then((n) => n === 3), 8000);
+    await sleep(800);
+    check(ai.calls.length === 0, 'adding photos starts nothing');
+    await go(emu);
+    check(await until(() => has(emu, '#msheet .pacmp'), 20000), 'one redesigned poster comes back');
+    const plan = ai.of('redesign')[0] || {}, img = ai.of('image')[0] || {};
+    check(plan.images === 3 && /3 photos for ONE poster/.test(plan.system || ''), 'the art director sees all 3 photos, for one poster');
+    check((img.pictures || []).length === 3 && img.pictures.every((x) => x.name === 'image[]' && x.contentType === 'image/jpeg'), 'all 3 photos are uploaded to the image model');
+    check(img.size === '1024x1536' && /3 photos are attached[^]*ONE poster/.test(img.prompt || ''), 'as one portrait poster made of all of them');
     noErrors(emu); await emu.close();
   }
   const capped = [
