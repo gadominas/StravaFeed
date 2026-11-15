@@ -3,6 +3,25 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.46.1",
+      "date": "2026-11-15",
+      "title": "Comments read right",
+      "highlights": [
+        {
+          "icon": "💬",
+          "title": "Comments read right",
+          "text": "Comments on your activities show their words again instead of “[object Object]”."
+        }
+      ],
+      "changes": [
+        "Comment text is read in any shape Strava sends it: plain text, rich text, or parts with @mentions joined into one sentence",
+        "A new app test (18) covers plain, rich and mention comments"
+      ],
+      "fixes": [
+        "Comments on your own activity showed “[object Object]” after Strava started sending comment text as rich text"
+      ]
+    },
+    {
       "version": "1.46.0",
       "date": "2026-11-09",
       "title": "Several photos, one poster",

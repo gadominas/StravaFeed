@@ -57,6 +57,8 @@ against a pretend strava.com whose session can end and start again, and checks w
 17. **Clean stats stay inside the photo** (`17-clean-stats-layout.js`): the app's own drawing code, 576 combinations of photo
     shape, layout, position, 3 to 12 stats and a panel, checked pixel by pixel: nothing in the outer margin.
 
+18. **Comment text in any shape** (`18-comment-text.js`): plain text, rich text in an object and parts with an @mention all show as words, never “[object Object]”.
+
 Sections 0 to 7 are in `app.test.js`; 8 and up are one file each in `tests/app/` (`{ n, title, run(browser, H) }`).
 They share `tests/lib/`:
 

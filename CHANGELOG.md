@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.46.1 (2026-11-15): Comments read right
+
+- 💬 **Comments read right**: Comments on your activities show their words again instead of “[object Object]”.
+
+**Changes**
+
+- Comment text is read in any shape Strava sends it: plain text, rich text, or parts with @mentions joined into one sentence
+- A new app test (18) covers plain, rich and mention comments
+
+**Fixes**
+
+- Comments on your own activity showed “[object Object]” after Strava started sending comment text as rich text
+
 ## 1.46.0 (2026-11-09): Several photos, one poster
 
 - 🖼 **Up to 4 photos**: Add more photos with ＋ and they become one poster of your activity.

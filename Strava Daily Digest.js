@@ -153,7 +153,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.46.0';
+const VERSION = '1.46.1';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -3589,10 +3589,26 @@ function stravaLib() {
     }
     return out;
   };
+  // Comment text in whatever shape Strava sends it: a string, or rich text as an object or a list of parts
+  // ({ text }, { text: { text, mentions } }, [{ type: 'text', text }, { type: 'mention', name }], …), joined as it reads
+  SD.plain = (v, d = 0) => {
+    if (v == null || d > 8) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number') return String(v);
+    if (Array.isArray(v)) return v.map((x) => SD.plain(x, d + 1)).join('');
+    if (typeof v === 'object') {
+      for (const k of ['text', 'plainText', 'plain_text', 'value', 'body', 'content', 'markdown', 'html', 'children', 'segments', 'parts', 'display', 'displayName', 'name']) {
+        if (v[k] == null) continue;
+        const s = SD.plain(v[k], d + 1); if (s) return s;
+      }
+      if (v.athlete || v.user) return SD.plain(v.athlete || v.user, d + 1);   // a mention with only its person
+    }
+    return '';
+  };
   SD.commentsFrom = (o) => {
     const conv = (c) => {
       if (!c || typeof c !== 'object') return null;
-      const text = SD.text(c.text || c.body || c.content || c.comment || c.message || '');
+      const text = SD.text(SD.plain(c.text ?? c.body ?? c.content ?? c.comment ?? c.message ?? ''));
       const nested = c.athlete || c.user || c.author || c.commenter;
       const who = SD.person(nested || c);
       if (!text || !who) return null;
