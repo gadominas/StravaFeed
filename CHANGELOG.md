@@ -2,6 +2,19 @@
 
 All notable changes to Strava Daily Digest. Generated from `releases.json`; edit that file, not this one.
 
+## 1.47.0 (2026-11-22): A night run to open with
+
+- 🏃 **A real runner**: The opening screens now show a runner with proper proportions and a full stride, kit and all.
+- 🐕 **Company on the road**: A dog that won't give up, a pigeon that does, and a moon in a sweatband.
+- 👍 **Kudos from the windows**: While your feed loads, neighbours hand out kudos and posts fly into the pile.
+
+**Changes**
+
+- Launch screen: under the logo and tagline, a night street rises in; the runner jogs in, the dog catches up and the lamp's pigeon flies off, all within the usual 2.4 seconds (tap still skips it)
+- Loading screen: the stick figure is replaced by the same street; the runner carries a coffee, the skyline scrolls by, windows switch on and off, and kudos float up from them
+- The runner: headband, tank top, shorts, socks and running shoes, with hips, knees, ankles, shoulders and elbows moving through a real running stride
+- Reduce Motion keeps everything still
+
 ## 1.46.1 (2026-11-15): Comments read right
 
 - 💬 **Comments read right**: Comments on your activities show their words again instead of “[object Object]”.

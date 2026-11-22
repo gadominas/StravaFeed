@@ -3,6 +3,35 @@
   "script": "Strava Daily Digest.js",
   "releases": [
     {
+      "version": "1.47.0",
+      "date": "2026-11-22",
+      "title": "A night run to open with",
+      "highlights": [
+        {
+          "icon": "🏃",
+          "title": "A real runner",
+          "text": "The opening screens now show a runner with proper proportions and a full stride, kit and all."
+        },
+        {
+          "icon": "🐕",
+          "title": "Company on the road",
+          "text": "A dog that won't give up, a pigeon that does, and a moon in a sweatband."
+        },
+        {
+          "icon": "👍",
+          "title": "Kudos from the windows",
+          "text": "While your feed loads, neighbours hand out kudos and posts fly into the pile."
+        }
+      ],
+      "changes": [
+        "Launch screen: under the logo and tagline, a night street rises in; the runner jogs in, the dog catches up and the lamp's pigeon flies off, all within the usual 2.4 seconds (tap still skips it)",
+        "Loading screen: the stick figure is replaced by the same street; the runner carries a coffee, the skyline scrolls by, windows switch on and off, and kudos float up from them",
+        "The runner: headband, tank top, shorts, socks and running shoes, with hips, knees, ankles, shoulders and elbows moving through a real running stride",
+        "Reduce Motion keeps everything still"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.46.1",
       "date": "2026-11-15",
       "title": "Comments read right",

@@ -15,7 +15,7 @@
  *
  * First run: you'll be asked to log in to Strava once (email + password or email code).
  * Run with ?days=1 (URL scheme / Shortcuts) to see yesterday.
- * Opens on a 2.4 s launch screen with the route-digest logo (app-blueprints · launch-screen).
+ * Opens on a 2.4 s launch screen with the route-digest logo and a night street with a runner (app-blueprints · launch-screen).
  * Home Screen and Lock Screen widget in the shared frame, from a snapshot the digest saves (app-blueprints · widgets).
  * While no AI key is saved, a short card now and then shows what AI adds (app-blueprints · ai-invitation).
  * Safe start-up: an empty dark window first, data read after it with time limits, one window at a time,
@@ -153,7 +153,7 @@ const AI_INVITE = {
 };
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json (see docs/RELEASING.md).
-const VERSION = '1.46.1';
+const VERSION = '1.47.0';
 const APP_ID = 'stravafeed';   // unique per app, never changes
 
 // ───────── Blueprints ─────────
@@ -4149,14 +4149,102 @@ function actHtml(a, p) {
   </article>`;
 }
 
+// ── 🏃 The night street: a runner (real proportions, a full stride), a dog that won't give up, a pigeon that does, a moon
+// in a sweatband and neighbours handing out kudos from their windows. Drawn on the launch screen and the loading screen.
+// Everything here is decoration: aria-hidden, and still under Reduce Motion.
+function runnerSVG() {
+  const leg = (side) => `<g transform="translate(50 74)"><g class="rsThigh rs${side}">
+      <line x1="0" y1="0" x2="0" y2="30" class="rsSkin" stroke-width="11"/>
+      <path class="rsShorts" d="M-7 -3 L7 -3 L6.5 13 L-6.5 13 Z"/>
+      <g transform="translate(0 30)"><g class="rsKnee rs${side}">
+        <line x1="0" y1="0" x2="0" y2="27" class="rsSkin" stroke-width="8.5"/>
+        <line x1="0" y1="23" x2="0" y2="28" class="rsSock" stroke-width="8"/>
+        <g transform="translate(0 29)"><g class="rsAnkle rs${side}">
+          <path class="rsShoe" d="M-4.5 -3.5 L5 -3.5 Q12.5 -2.5 14 1.5 L14 3.5 L-5.5 3.5 Q-6.5 -0.5 -4.5 -3.5 Z"/>
+          <path class="rsSole" d="M-5.5 3 L14.5 3 L14 5.5 L-5.5 5.5 Z"/>
+        </g></g>
+      </g></g>
+    </g></g>`;
+  const arm = (side, extra) => `<g transform="translate(51 44)"><g class="rsUArm rs${side}">
+      <line x1="0" y1="0" x2="0" y2="17" class="rsSkin" stroke-width="7.5"/>
+      <g transform="translate(0 17)"><g class="rsElbow rs${side}">
+        <line x1="0" y1="0" x2="0" y2="14" class="rsSkin" stroke-width="6.5"/>
+        <circle cx="0" cy="16" r="3.8" class="rsHand"/>${extra || ''}
+      </g></g>
+    </g></g>`;
+  // the near hand carries a coffee: lid and sleeve (recovery starts early)
+  const cup = '<g class="rsCup" transform="translate(0 16) rotate(80)"><path d="M-3.5 -9 L3.5 -9 L2.6 1 L-2.6 1 Z" fill="#F6F1E7"/><rect x="-3.2" y="-6" width="6.4" height="3.2" fill="#B5763C"/><rect x="-4" y="-10.5" width="8" height="2" rx="1" fill="#E8E1D3"/></g>';
+  return `<svg class="rsRunner" viewBox="0 0 100 140" aria-hidden="true"><g class="rsBody">
+    <g class="rsBack">${arm('B')}${leg('B')}</g>
+    <g transform="rotate(9 50 74)">
+      <path class="rsTop" d="M42 45 Q43.5 39 50.5 38 Q57.5 39 59 45 L58 63 L42 63 Z"/>
+      <path d="M44.5 41 Q50.5 44 56.5 41" class="rsTrim" fill="none" stroke-width="1.6"/>
+      <path class="rsShorts" d="M41.5 62 L58.5 62 L58.5 71 Q50 75.5 41.5 71 Z"/>
+      <rect x="47.8" y="31" width="5.4" height="9" rx="2" class="rsSkin2"/>
+      <circle cx="51.5" cy="24" r="9.2" class="rsSkinF"/>
+      <path class="rsHair" d="M42.3 25.5 Q41 13 51.5 12.6 Q60.2 13 60.6 20 Q55.5 17.4 50.2 18.6 Q46.4 19.6 46 27.4 Z"/>
+      <path class="rsBand" d="M42.6 19.6 Q51.2 15.2 60 17.6 L60.4 20.8 Q51.2 18.6 43.2 22.8 Z"/>
+      <circle cx="47.6" cy="25.2" r="2.3" class="rsEar"/>
+      <circle cx="56.8" cy="22.6" r="1.05" class="rsEye"/>
+      <path d="M54.6 20.2 L58.4 19.6" stroke-width="1" class="rsBrow"/>
+      <path d="M60.2 23.6 L62.4 26.6 L59.9 27.1" class="rsNose"/>
+      <path d="M57.2 29.6 Q59 30.6 60.4 29.4" fill="none" stroke-width="1" class="rsMouth"/>
+      <path class="rsSweat" d="M44 14 q-1.6 2.6 0 3.6 q1.6 -1 0 -3.6 Z"/>
+    </g>
+    ${leg('F')}
+    <g transform="rotate(9 50 74)">${arm('F', cup)}</g>
+  </g></svg>`;
+}
+function dogSVG() {
+  return `<svg class="rsDog" viewBox="0 0 64 40" aria-hidden="true"><g class="rsDogBody">
+    <path class="rsDogTail" d="M11 16 Q3 10 5 3" fill="none" stroke="#C98A4B" stroke-width="3.2" stroke-linecap="round"/>
+    <g transform="translate(16 24)"><line class="rsDogLeg rsDogB1" x1="0" y1="0" x2="0" y2="12" stroke="#B07438" stroke-width="3.6" stroke-linecap="round"/></g>
+    <g transform="translate(40 24)"><line class="rsDogLeg rsDogF1" x1="0" y1="0" x2="0" y2="12" stroke="#B07438" stroke-width="3.6" stroke-linecap="round"/></g>
+    <ellipse cx="28" cy="20" rx="18" ry="8.5" fill="#C98A4B"/>
+    <path d="M18 23 Q28 28 38 23" fill="none" stroke="#F1D2A8" stroke-width="3" opacity=".8"/>
+    <g transform="translate(20 25)"><line class="rsDogLeg rsDogB2" x1="0" y1="0" x2="0" y2="12" stroke="#C98A4B" stroke-width="3.6" stroke-linecap="round"/></g>
+    <g transform="translate(37 25)"><line class="rsDogLeg rsDogF2" x1="0" y1="0" x2="0" y2="12" stroke="#C98A4B" stroke-width="3.6" stroke-linecap="round"/></g>
+    <circle cx="47" cy="12" r="8" fill="#C98A4B"/>
+    <path d="M51 12 Q58 11 59 15 Q57 19 51 17 Z" fill="#D9A56E"/>
+    <circle cx="58.6" cy="14" r="1.7" fill="#2B1A10"/>
+    <circle cx="49.5" cy="9.5" r="1.2" fill="#2B1A10"/>
+    <path class="rsDogEar" d="M42 6 Q38 4 39 13 Q42 12 44 8 Z" fill="#8E5A2A"/>
+    <path class="rsDogTongue" d="M54 17.5 Q55 23 52.5 23.5 Q51 21 52 17.8 Z" fill="#F27D9B"/>
+    <path d="M40 17 Q44 20 49 18" fill="none" stroke="#E5383B" stroke-width="2.2"/>
+  </g></svg>`;
+}
+function runScene(kind) {
+  const boot = kind === 'boot';
+  // the skyline: two rows of buildings with windows; a few windows switch on and off, some hand out kudos
+  const town = (seed, n, hmin, hmax, cls) => {
+    let x = 0, out = '', s = seed;
+    const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+    for (let i = 0; i < n; i++) {
+      const w = 26 + Math.round(r() * 26), h = hmin + Math.round(r() * (hmax - hmin));
+      out += `<rect x="${x}" y="${120 - h}" width="${w}" height="${h}" rx="1.5" class="${cls}"/>`;
+      for (let wy = 124 - h; wy < 112; wy += 11) for (let wx = x + 5; wx < x + w - 6; wx += 9)
+        if (r() < 0.32) out += `<rect x="${wx}" y="${wy}" width="4" height="5" class="rsWin${r() < 0.12 ? ' rsBlink' : ''}" style="animation-delay:${(r() * 4).toFixed(2)}s"/>`;
+      x += w + 2;
+    }
+    return { svg: out, w: x };
+  };
+  const far = town(7, 12, 40, 92, 'rsFar'), near = town(21, 10, 22, 64, 'rsNear');
+  const strip = (t, cls) => `<svg class="${cls}" viewBox="0 0 ${t.w * 2} 120" preserveAspectRatio="none" style="width:${t.w * 2}px" aria-hidden="true">${t.svg}<g transform="translate(${t.w} 0)">${t.svg}</g></svg>`;
+  return `<div class="rsScene rs-${kind}${boot ? ' scene' : ''}" aria-hidden="true">
+    <div class="rsMoon"><i></i></div>
+    <div class="rsSky">${strip(far, 'rsFarRow')}${strip(near, 'rsNearRow')}</div>
+    ${boot ? '<span class="rsKudo" style="--x:22%;--d:0s">👍</span><span class="rsKudo" style="--x:58%;--d:1.6s">👍</span><span class="rsKudo" style="--x:83%;--d:3.1s">🔥</span>' : ''}
+    <div class="rsLamp"><i class="rsLight"></i><span class="rsPigeon"><b class="rsWing"></b></span></div>
+    <div class="rsRoad"></div>
+    ${dogSVG()}
+    ${runnerSVG()}
+    ${boot ? '<div class="pile"></div>' : ''}
+  </div>`;
+}
+
 function bootScreen(msg) {
   return page(`<div class="boot" role="status" aria-live="polite">
-    <div class="scene" aria-hidden="true">
-      <div class="sunb"></div>
-      <div class="pile"></div>
-      <svg class="runner" viewBox="0 0 60 80" aria-hidden="true"><g class="body"><g transform="translate(30 41)"><g class="thigh b"><line x1="0" y1="0" x2="0" y2="15"/><g transform="translate(0 15)"><g class="shin b"><line x1="0" y1="0" x2="0" y2="15"/><line x1="0" y1="15" x2="5" y2="15"/></g></g></g></g><g transform="translate(34 24)"><g class="uarm b"><line x1="0" y1="0" x2="0" y2="10"/><g transform="translate(0 10)"><g class="farm b"><line x1="0" y1="0" x2="0" y2="9"/></g></g></g></g><line class="torso" x1="30" y1="41" x2="35" y2="22"/><circle class="head" cx="37" cy="14" r="6"/><g transform="translate(30 41)"><g class="thigh f"><line x1="0" y1="0" x2="0" y2="15"/><g transform="translate(0 15)"><g class="shin f"><line x1="0" y1="0" x2="0" y2="15"/><line x1="0" y1="15" x2="5" y2="15"/></g></g></g></g><g transform="translate(34 24)"><g class="uarm f"><line x1="0" y1="0" x2="0" y2="10"/><g transform="translate(0 10)"><g class="farm f"><line x1="0" y1="0" x2="0" y2="9"/></g></g></g></g></g></svg>
-      <div class="track"></div>
-    </div>
+    ${runScene('boot')}
     <div class="cnt"><b id="cnt">0</b><span>posts loaded</span></div>
     <div class="quip" id="quip">Lacing up your feed</div>
     <div id="st" class="bootst">${esc(msg)}</div>
@@ -4183,6 +4271,7 @@ function launchScreen() {
   </svg></div>
   <div class="spWord">Daily <span>Digest</span></div>
   <div class="spTag">Catch up. Cheer. Move on.</div>
+  ${runScene('splash')}
 </div>
 `;
 }
@@ -4261,27 +4350,7 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 .sec span{background:var(--soft);color:var(--fg);border-radius:999px;padding:1px 9px;font-size:calc(12px * var(--ts));font-variant-numeric:tabular-nums}
 .sec.todo span{background:var(--accent);color:#fff}
 .boot{min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px 0}
-.scene{position:relative;width:300px;height:150px;overflow:hidden}
-.sunb{position:absolute;right:30px;top:10px;width:34px;height:34px;border-radius:50%;background:radial-gradient(circle,#ffd27a 0 55%,rgba(255,210,122,0) 70%);animation:sunb 3s ease-in-out infinite}
-@keyframes sunb{50%{transform:translateY(6px) scale(1.08)}}
-.track{position:absolute;left:0;right:0;bottom:18px;height:3px;background:repeating-linear-gradient(90deg,var(--line) 0 18px,transparent 18px 30px);background-size:30px 3px;animation:trackmove .45s linear infinite}
-@keyframes trackmove{to{background-position:-30px 0}}
-.runner{position:absolute;left:112px;bottom:19px;width:48px;height:64px;overflow:visible}
-.runner line{stroke:var(--fg);stroke-width:5;stroke-linecap:round}
-.runner .torso{stroke:var(--accent);stroke-width:8}
-.runner .head{fill:var(--fg)}
-.runner .b line{stroke:var(--mut)}
-.runner .body{animation:bob .3s ease-in-out infinite}
-.thigh{animation:thigh .6s ease-in-out infinite}
-.shin{animation:shin .6s linear infinite}
-.uarm{animation:uarm .6s ease-in-out infinite}
-.farm{transform:rotate(-80deg)}
-.thigh.b,.shin.b,.uarm.b{animation-delay:-.3s}
-@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
-@keyframes thigh{0%,100%{transform:rotate(-38deg)}50%{transform:rotate(32deg)}}
-@keyframes shin{0%{transform:rotate(12deg)}25%{transform:rotate(8deg)}50%{transform:rotate(55deg)}75%{transform:rotate(100deg)}100%{transform:rotate(12deg)}}
-@keyframes uarm{0%,100%{transform:rotate(40deg)}50%{transform:rotate(-50deg)}}
-.pile{position:absolute;right:14px;bottom:21px;width:46px;display:flex;flex-direction:column-reverse;gap:2px}
+.pile{position:absolute;right:14px;bottom:38px;width:46px;display:flex;flex-direction:column-reverse;gap:2px}
 .pile i{display:block;height:5px;border-radius:2px;background:var(--fg);opacity:.85;box-shadow:inset 6px 0 0 var(--accent)}
 .pile i:nth-child(odd){transform:translateX(-2px) rotate(-2deg)}
 .pile i:nth-child(even){transform:translateX(2px) rotate(2deg)}
@@ -4293,16 +4362,16 @@ button.all{width:100%;margin:0 0 14px;padding:12px}
 @keyframes deliver{
   0%{transform:translate(-34px,var(--y)) rotate(-25deg);opacity:0}
   12%{opacity:1}
-  50%{transform:translate(126px,-6px) rotate(12deg) scale(1.1)}
+  50%{transform:translate(140px,14px) rotate(12deg) scale(1.1)}
   85%{opacity:1}
-  100%{transform:translate(254px,104px) rotate(0) scale(.6);opacity:0}}
+  100%{transform:translate(268px,136px) rotate(0) scale(.6);opacity:0}}
 .cnt b{display:block;font-size:calc(56px * var(--ts));line-height:1;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;margin-top:6px}
 .cnt span{color:var(--mut);font-size:calc(13px * var(--ts))}
 .cnt.tick b{animation:tick .3s ease-out}
 @keyframes tick{40%{transform:scale(1.12);color:var(--accent)}}
 .quip{font-size:calc(16px * var(--ts));font-weight:600;margin-top:16px;min-height:1.4em;transition:opacity .25s}
 .bootst{color:var(--mut);font-size:calc(13px * var(--ts));margin-top:4px}
-@media (prefers-reduced-motion:reduce){.track,.sunb,.post,.cnt.tick b,.runner .body,.thigh,.shin,.uarm{animation:none}.post{display:none}}
+@media (prefers-reduced-motion:reduce){.post,.cnt.tick b{animation:none}.post{display:none}}
 #ptr{position:fixed;left:50%;top:env(safe-area-inset-top,0px);transform:translate(-50%,-60px);opacity:0;z-index:30;display:flex;align-items:center;gap:8px;background:var(--card);color:var(--fg);padding:9px 15px;border-radius:999px;font-size:calc(13px * var(--ts));font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.28);pointer-events:none;transition:opacity .15s}
 #ptr .ptri{display:inline-block;font-size:calc(16px * var(--ts));line-height:1}
 #ptr.ready{color:var(--accent)}
@@ -4929,10 +4998,96 @@ textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);bac
 @media (prefers-reduced-motion:reduce){.loadspin{animation-duration:3s}}
 /* Route-digest logo on the empty day */
 .idleMark{display:block;width:76px;height:76px;margin:0 auto 14px;border-radius:18px;background:#0E1116}
+/* 🏃 The night street (launch screen and loading screen): fixed night colours in light and dark mode */
+.rsScene{position:relative;width:320px;max-width:100%;height:190px;overflow:hidden;border-radius:22px;background:linear-gradient(180deg,#0B1022 0%,#16204A 62%,#1F2A55 100%);isolation:isolate}
+.rsMoon{position:absolute;right:30px;top:16px;width:30px;height:30px;border-radius:50%;background:#F6F1D5;box-shadow:0 0 22px rgba(246,241,213,.45);animation:rsMoon 4s ease-in-out infinite}
+.rsMoon i{position:absolute;left:-2px;right:-2px;top:9px;height:6px;background:#2DD4BF;border-radius:3px;transform:rotate(-12deg)}
+.rsMoon::after{content:"";position:absolute;left:10px;top:17px;width:9px;height:4px;border-bottom:2px solid #8A8466;border-radius:0 0 8px 8px}
+@keyframes rsMoon{50%{transform:translateY(3px) rotate(-4deg)}}
+.rsSky{position:absolute;left:0;right:0;bottom:40px;height:120px}
+.rsSky svg{position:absolute;left:0;bottom:0;height:120px;display:block}
+.rsFar{fill:#1E2A57}.rsNear{fill:#121A38}
+.rsWin{fill:#FFD27A;opacity:.85}
+.rsBlink{animation:rsBlink 4s steps(1) infinite}
+@keyframes rsBlink{0%,45%{opacity:.9}46%,100%{opacity:.08}}
+.rsFarRow{animation:rsScroll 40s linear infinite}
+.rsNearRow{animation:rsScroll 22s linear infinite}
+@keyframes rsScroll{to{transform:translateX(-50%)}}
+.rsRoad{position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(180deg,#2A2F45 0 4px,#1A1E2E 4px)}
+.rsRoad::after{content:"";position:absolute;left:0;right:0;top:20px;height:3px;background:repeating-linear-gradient(90deg,#C9CEDC 0 22px,transparent 22px 44px);opacity:.55;animation:rsRoad .5s linear infinite}
+@keyframes rsRoad{to{background-position:-44px 0}}
+.rsRunner{position:absolute;left:50%;bottom:22px;width:74px;height:104px;margin-left:-30px;overflow:visible;z-index:3}
+.rsSkin,.rsSkinF,.rsSkin2,.rsHand,.rsEar{stroke-linecap:round}
+.rsSkin{stroke:#E0A877}.rsBack .rsSkin{stroke:#B98257}
+.rsSkinF,.rsSkin2,.rsHand{fill:#E0A877}.rsBack .rsHand{fill:#B98257}.rsEar{fill:#C98C5E}
+.rsSock{stroke:#F4F4F6;stroke-linecap:round}.rsBack .rsSock{stroke:#C9CBD3}
+.rsShoe{fill:#2DD4BF}.rsBack .rsShoe{fill:#1E9E8F}.rsSole{fill:#F4F4F6}.rsBack .rsSole{fill:#C9CBD3}
+.rsShorts{fill:#1F2A44}.rsBack .rsShorts{fill:#151D30}
+.rsTop{fill:#FB7185}.rsTrim{stroke:#FFD1D9}
+.rsHair{fill:#3B2A1E}.rsBand{fill:#2DD4BF}.rsEye{fill:#1B1B1B}
+.rsBrow,.rsMouth{stroke:#3B2A1E;stroke-linecap:round}.rsNose{fill:#D3976A}
+.rsSweat{fill:#9FE3FF;opacity:0;animation:rsSweat 2.6s ease-in infinite}
+@keyframes rsSweat{0%,55%{opacity:0;transform:translate(0,0)}60%{opacity:1}100%{opacity:0;transform:translate(-9px,10px)}}
+/* the stride: 0.64 s, near leg and far arm together; joints turn around their own point */
+.rsBody{animation:rsBob .32s ease-in-out infinite}
+.rsThigh{animation:rsThigh .64s linear infinite}
+.rsKnee{animation:rsKnee .64s linear infinite}
+.rsAnkle{animation:rsAnkle .64s linear infinite}
+.rsUArm{animation:rsUArm .64s ease-in-out infinite}
+.rsElbow{animation:rsElbow .64s ease-in-out infinite}
+.rsThigh.rsB,.rsKnee.rsB,.rsAnkle.rsB,.rsUArm.rsB,.rsElbow.rsB{animation-delay:-.32s}
+@keyframes rsBob{0%,100%{transform:translateY(0)}30%{transform:translateY(2px)}65%{transform:translateY(-3px)}}
+@keyframes rsThigh{0%{transform:rotate(-36deg)}40%{transform:rotate(30deg)}55%{transform:rotate(22deg)}80%{transform:rotate(-28deg)}100%{transform:rotate(-36deg)}}
+@keyframes rsKnee{0%{transform:rotate(10deg)}20%{transform:rotate(24deg)}40%{transform:rotate(20deg)}62%{transform:rotate(108deg)}82%{transform:rotate(48deg)}100%{transform:rotate(10deg)}}
+@keyframes rsAnkle{0%{transform:rotate(-10deg)}20%{transform:rotate(0)}42%{transform:rotate(30deg)}65%{transform:rotate(14deg)}100%{transform:rotate(-10deg)}}
+@keyframes rsUArm{0%,100%{transform:rotate(34deg)}50%{transform:rotate(-40deg)}}
+@keyframes rsElbow{0%,100%{transform:rotate(-70deg)}50%{transform:rotate(-105deg)}}
+/* the dog: gallops behind, gains, loses, gains */
+.rsDog{position:absolute;left:50%;bottom:24px;width:58px;height:36px;margin-left:-112px;z-index:2;animation:rsChase 3.4s ease-in-out infinite}
+@keyframes rsChase{0%,100%{transform:translateX(0)}45%{transform:translateX(26px)}60%{transform:translateX(22px)}}
+.rsDogBody{animation:rsGallop .32s ease-in-out infinite}
+@keyframes rsGallop{50%{transform:translateY(-3px) rotate(-3deg)}}
+.rsDogLeg{animation:rsDogLeg .32s ease-in-out infinite}
+.rsDogB1,.rsDogF2{animation-delay:-.16s}
+@keyframes rsDogLeg{0%,100%{transform:rotate(-35deg)}50%{transform:rotate(35deg)}}
+.rsDogTail{transform-box:fill-box;transform-origin:90% 100%;animation:rsWag .2s ease-in-out infinite alternate}
+@keyframes rsWag{to{transform:rotate(22deg)}}
+.rsDogTongue{transform-box:fill-box;transform-origin:50% 0;animation:rsWag .16s ease-in-out infinite alternate}
+.rsDogEar{transform-box:fill-box;transform-origin:80% 20%;animation:rsWag .32s ease-in-out infinite alternate}
+/* the lamp scrolls by; its pigeon has seen enough and leaves as the runner arrives */
+.rsLamp{position:absolute;bottom:36px;left:100%;width:6px;height:92px;background:#3A4366;border-radius:3px;z-index:1;animation:rsLamp 7s linear infinite}
+.rsLamp::before{content:"";position:absolute;top:-2px;left:-14px;width:22px;height:5px;background:#3A4366;border-radius:3px}
+.rsLight{position:absolute;top:2px;left:-16px;width:12px;height:7px;border-radius:0 0 7px 7px;background:#FFE7A8;box-shadow:0 6px 26px 10px rgba(255,214,120,.28)}
+.rsPigeon{position:absolute;top:-13px;left:-6px;width:14px;height:11px;border-radius:60% 55% 45% 50%;background:#9AA3B5;animation:rsFlee 7s ease-in infinite}
+.rsPigeon::before{content:"";position:absolute;right:-3px;top:1px;width:6px;height:6px;border-radius:50%;background:#7E889C;box-shadow:inset -1px 0 0 #6B7DB3}
+.rsPigeon::after{content:"";position:absolute;right:-6px;top:3px;border-left:4px solid #E8A33D;border-top:2px solid transparent;border-bottom:2px solid transparent}
+.rsWing{position:absolute;left:2px;top:-2px;width:9px;height:6px;border-radius:50% 50% 0 0;background:#B6BDCC;transform-origin:50% 100%;animation:rsFlap 7s linear infinite}
+@keyframes rsLamp{to{transform:translateX(-372px)}}
+@keyframes rsFlee{0%,50%{transform:none}64%{transform:translate(18px,-46px) rotate(-12deg)}100%{transform:translate(60px,-160px)}}
+@keyframes rsFlap{0%,50%{transform:none}52%,56%,60%,64%,68%,72%{transform:scaleY(-1.3)}54%,58%,62%,66%,70%{transform:none}100%{transform:none}}
+/* neighbours hand out kudos from their windows */
+.rsKudo{position:absolute;left:var(--x);bottom:70px;font-size:16px;opacity:0;z-index:2;animation:rsKudo 4.8s ease-out var(--d) infinite}
+@keyframes rsKudo{0%{opacity:0;transform:translateY(0) scale(.4)}8%{opacity:1;transform:translateY(-8px) scale(1)}40%{opacity:1}60%{opacity:0;transform:translate(calc(160px - var(--x)*3.2),-60px) scale(.6)}100%{opacity:0}}
+/* loading screen: the pile of posts sits on the pavement; posts fly in light on the night sky */
+.rs-boot .pile{z-index:3}
+.rs-boot .pile i,.rs-boot .post{background:#F6F7F9}
+.rs-boot .post{z-index:4}
+.rs-boot .rsRunner{width:80px;height:113px;margin-left:-32px}
+@media (prefers-reduced-motion:reduce){.rsScene *,.rsScene *::before,.rsScene *::after{animation:none!important}.rsKudo{display:none}.rsPigeon{opacity:1}}
+/* the launch screen's street (this app's addition to the blueprint): rises in under the tagline, the runner jogs in,
+   the dog catches up, and the lamp's pigeon leaves before the screen fades at 2.4 s */
+.splash .rsScene{width:350px;max-width:94vw;height:220px;margin-top:10px;opacity:0;transform:translateY(14px);animation:spUp .5s ease .3s forwards}
+.splash .rsRunner{width:88px;height:124px;margin-left:-36px;animation:rsJogIn .9s cubic-bezier(.2,.8,.3,1) .35s both}
+@keyframes rsJogIn{from{transform:translateX(-190px)}}
+.splash .rsDog{width:68px;height:42px;margin-left:-132px;animation:rsDogIn 1.1s cubic-bezier(.2,.8,.3,1) .75s both,rsChase 3.4s ease-in-out 1.85s infinite}
+@keyframes rsDogIn{from{transform:translateX(-140px)}}
+.splash .rsLamp{animation:rsLamp 3.2s linear infinite}
+.splash .rsPigeon,.splash .rsWing{animation-duration:3.2s}
+.splash .rsKudo{display:none}
 /* Launch screen (app-blueprints · launch-screen 1.0.0) */
 .splash{--sp-bg:#0E1116;--sp-ink:#F6F7F9;--sp-accent:#FB7185;--sp-accent2:#2DD4BF;--sp-muted:#9AA3AE;--sp-font:var(--display);
   position:fixed;inset:0;z-index:90;background:var(--sp-bg);color:var(--sp-ink);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;cursor:pointer;
   animation:spOut .4s ease 2.4s forwards}
 .splash.gone{display:none}
 .spIcon{width:148px;height:148px;opacity:0;transform:scale(.86);animation:spIn .5s cubic-bezier(.2,.9,.3,1.2) .05s forwards}
@@ -4957,6 +5112,7 @@ textarea{flex:1;font:inherit;border-radius:14px;border:1px solid var(--line);bac
 @keyframes spOut{to{opacity:0;visibility:hidden}}
 @media (prefers-reduced-motion:reduce){
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
+  .splash .rsKudo,.splash .rsSweat{opacity:0!important}
   .splash{animation:spOut .3s ease 1.6s forwards!important}
 }
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));z-index:80;transform:translate(-50%,calc(100% + 60px));opacity:0;visibility:hidden;background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:18px;font-size:calc(14px * var(--ts));text-align:center;max-width:90vw;pointer-events:none;transition:transform .25s,opacity .25s,visibility 0s linear .25s}
